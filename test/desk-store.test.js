@@ -45,3 +45,27 @@ test("approval snapshots omit internal JSON-RPC correlation ids", () => {
   store.resolveApproval("public-approval", "decline");
   assert.equal(store.snapshot().approval, null);
 });
+
+test("desk store clears all request state after a transport loss", () => {
+  const store = new DeskStore();
+  store.addApproval({
+    id: "approval-a",
+    rpcId: 1,
+    threadId: "thread-a",
+    title: "Approve",
+    kind: "command",
+  });
+  store.setPendingUserInput({
+    id: "input-a",
+    rpcId: 2,
+    threadId: "thread-a",
+    questions: [],
+  });
+
+  const cleared = store.clearApprovals();
+  assert.equal(cleared[0].decision, "connection-lost");
+  assert.equal(store.clearPendingUserInput(), true);
+  assert.equal(store.snapshot().approval, null);
+  assert.equal(store.snapshot().userInput, null);
+  assert.equal(store.snapshot().presentation.state, "ready");
+});

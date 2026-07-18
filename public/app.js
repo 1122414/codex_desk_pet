@@ -265,12 +265,20 @@ async function render(nextSnapshot) {
   const oldState = snapshot?.presentation.state;
   snapshot = nextSnapshot;
   const connected = snapshot.connection.status === "connected";
+  const connectionLabels = {
+    connected: `${snapshot.connection.mode.toUpperCase()} · 已连接`,
+    connecting: "正在连接",
+    reconnecting: "连接中断 · 正在重连",
+    disconnected: "已断开",
+    error: "连接异常",
+  };
   elements["screen-connection"].classList.toggle("connected", connected);
-  elements["screen-connection"].lastChild.textContent = connected ? "已连接" : "离线";
+  elements["screen-connection"].lastChild.textContent = connected
+    ? "已连接"
+    : snapshot.connection.status === "reconnecting" ? "重连中" : "离线";
   elements["bridge-status"].classList.toggle("connected", connected);
-  elements["bridge-status"].querySelector("span").textContent = connected
-    ? `${snapshot.connection.mode.toUpperCase()} · 已连接`
-    : snapshot.connection.status === "connecting" ? "正在连接" : "连接异常";
+  elements["bridge-status"].querySelector("span").textContent =
+    connectionLabels[snapshot.connection.status] ?? "连接异常";
 
   const pet = currentPet();
   if (pet) {
@@ -319,7 +327,8 @@ function renderApproval(approval) {
     ? approval.command || "命令详情尚未加载"
     : approval.filePaths?.length ? approval.filePaths.join(" · ") : approval.grantRoot || "文件详情尚未加载";
   elements["approval-detail"].textContent = detail;
-  elements["approval-reason"].textContent = approval.reason || approval.cwd || "请确认是否允许本次操作";
+  elements["approval-reason"].textContent =
+    [approval.reason, approval.cwd, approval.networkHost].filter(Boolean).join(" · ") || "请确认是否允许本次操作";
   elements["approval-accept"].disabled = !approval.safeToApprove || !approval.availableDecisions.includes("accept");
   elements["approval-accept"].title = approval.safeToApprove ? "" : "审批详情不完整，只能拒绝";
 }

@@ -85,15 +85,38 @@ export class DeskStore extends EventEmitter {
 
   handleNotification(method, params = {}) {
     switch (method) {
+      case "error":
+        this.patchThread(params.threadId, {
+          lastError: params.error ?? null,
+          errorWillRetry: Boolean(params.willRetry),
+          ...(params.willRetry ? {} : { status: { type: "systemError" } }),
+        });
+        return;
       case "thread/started":
         this.upsertThread(params.thread);
         return;
       case "thread/status/changed":
-        this.patchThread(params.threadId, { status: params.status });
+        this.patchThread(params.threadId, {
+          status: params.status,
+          ...(params.status?.type === "systemError" ? {} : { lastError: null, errorWillRetry: false }),
+        });
+        return;
+      case "thread/name/updated":
+        this.patchThread(params.threadId, { name: params.name });
         return;
       case "turn/started":
       case "turn/completed":
-        this.patchThread(params.threadId, { lastTurn: params.turn, reviewing: false });
+        this.patchThread(params.threadId, {
+          lastTurn: params.turn,
+          reviewing: false,
+          ...(method === "turn/started" ? { lastError: null, errorWillRetry: false } : {}),
+        });
+        return;
+      case "item/autoApprovalReview/started":
+        this.patchThread(params.threadId, { reviewing: true });
+        return;
+      case "item/autoApprovalReview/completed":
+        this.patchThread(params.threadId, { reviewing: false });
         return;
       case "item/started":
       case "item/completed": {
@@ -151,14 +174,25 @@ export class DeskStore extends EventEmitter {
     return { ...approval, decision };
   }
 
+  clearApprovals(decision = "connection-lost") {
+    const approvals = [...this.#approvals.values()];
+    this.#approvals.clear();
+    for (const threadId of new Set(approvals.map((approval) => approval.threadId))) {
+      this.patchThread(threadId, { pendingApproval: false });
+    }
+    if (approvals.length) this.#changed("approval");
+    return approvals.map((approval) => ({ ...approval, decision }));
+  }
+
   setPendingUserInput(request) {
     this.pendingUserInput = request;
     if (request?.threadId) this.patchThread(request.threadId, { pendingUserInput: true });
     else this.#changed("user-input");
   }
 
-  clearPendingUserInput(requestId) {
-    if (!this.pendingUserInput || String(this.pendingUserInput.rpcId) !== String(requestId)) return false;
+  clearPendingUserInput(requestId = null) {
+    if (!this.pendingUserInput) return false;
+    if (requestId !== null && String(this.pendingUserInput.rpcId) !== String(requestId)) return false;
     const threadId = this.pendingUserInput.threadId;
     this.pendingUserInput = null;
     if (threadId) this.patchThread(threadId, { pendingUserInput: false });

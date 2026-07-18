@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { JsonLineDecoder } from "../src/server/json-rpc-client.js";
+import { EventEmitter } from "node:events";
+import { JsonLineDecoder, JsonRpcClient } from "../src/server/json-rpc-client.js";
 
 test("JSON line decoder handles split and batched App Server messages", () => {
   const decoder = new JsonLineDecoder();
@@ -8,5 +9,63 @@ test("JSON line decoder handles split and batched App Server messages", () => {
   assert.deepEqual(decoder.push('}\n{"method":"event"}\npar'), ['{"id":1}', '{"method":"event"}']);
   assert.deepEqual(decoder.push("tial"), []);
   assert.deepEqual(decoder.flush(), ["partial"]);
+  decoder.push("stale");
+  decoder.reset();
+  assert.deepEqual(decoder.flush(), []);
 });
 
+class FakeChild extends EventEmitter {
+  constructor() {
+    super();
+    this.exitCode = null;
+    this.killed = false;
+    this.stdout = new EventEmitter();
+    this.stderr = new EventEmitter();
+    this.stdin = {
+      writable: true,
+      write: (line) => {
+        const message = JSON.parse(line);
+        if (message.method === "initialize") {
+          queueMicrotask(() => {
+            this.stdout.emit("data", Buffer.from(`${JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {} })}\n`));
+          });
+        }
+        return true;
+      },
+    };
+    queueMicrotask(() => this.emit("spawn"));
+  }
+
+  kill() {
+    this.killed = true;
+    this.stdin.writable = false;
+    queueMicrotask(() => {
+      this.exitCode = 0;
+      this.emit("exit", 0, null);
+    });
+    return true;
+  }
+}
+
+test("JSON-RPC client can restart cleanly and marks deliberate exits", async () => {
+  const children = [];
+  const client = new JsonRpcClient({
+    spawnProcess: () => {
+      const child = new FakeChild();
+      children.push(child);
+      return child;
+    },
+  });
+  const exitDetails = [];
+  client.on("exit", (_code, _signal, details) => exitDetails.push(details));
+
+  await client.start();
+  assert.equal(client.running, true);
+  await client.stop();
+  assert.deepEqual(exitDetails, [{ intentional: true }]);
+
+  await client.start();
+  assert.equal(client.running, true);
+  assert.equal(children.length, 2);
+  await client.stop();
+});

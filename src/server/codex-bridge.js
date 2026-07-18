@@ -19,7 +19,13 @@ function normalizeApproval(message, relatedItem = null) {
   const isLegacyCommand = message.method === "execCommandApproval";
   const isCommand = message.method === "item/commandExecution/requestApproval" || isLegacyCommand;
   const threadId = params.threadId ?? params.conversationId ?? "unknown";
-  const command = isLegacyCommand && Array.isArray(params.command) ? params.command.join(" ") : params.command;
+  const actionCommands = Array.isArray(params.commandActions)
+    ? params.commandActions.map((action) => action?.command).filter((value) => typeof value === "string" && value.trim())
+    : [];
+  const declaredCommand = isLegacyCommand && Array.isArray(params.command) ? params.command.join(" ") : params.command;
+  const command = typeof declaredCommand === "string" && declaredCommand.trim()
+    ? declaredCommand
+    : actionCommands.join("\n");
   const filePaths = params.fileChanges ? Object.keys(params.fileChanges) : filePathsFromItem(relatedItem);
   const declaredDecisions = Array.isArray(params.availableDecisions)
     ? params.availableDecisions.filter((decision) => typeof decision === "string" && ["accept", "decline"].includes(decision))
@@ -38,6 +44,7 @@ function normalizeApproval(message, relatedItem = null) {
     command: typeof command === "string" ? command : null,
     cwd: params.cwd ?? null,
     reason: params.reason ?? null,
+    networkHost: params.networkApprovalContext?.host ?? null,
     grantRoot: params.grantRoot ?? null,
     filePaths,
     availableDecisions,
@@ -47,15 +54,35 @@ function normalizeApproval(message, relatedItem = null) {
 
 export class CodexBridge extends EventEmitter {
   #pollTimer = null;
+  #reconnectTimer = null;
+  #reconnectAttempt = 0;
+  #connectPromise = null;
   #requestMap = new Map();
+  #clientBound = false;
+  #started = false;
+  #stopping = false;
 
-  constructor({ store, mode = "direct", pollIntervalMs = 2_500, client = null } = {}) {
+  constructor({
+    store,
+    mode = "direct",
+    pollIntervalMs = 2_500,
+    client = null,
+    reconnectDelaysMs = [1_000, 2_000, 5_000, 10_000, 30_000],
+    reconnectJitterRatio = 0.2,
+    random = Math.random,
+  } = {}) {
     super();
     if (!store) throw new TypeError("CodexBridge requires a DeskStore");
+    if (!Array.isArray(reconnectDelaysMs) || reconnectDelaysMs.length === 0) {
+      throw new TypeError("reconnectDelaysMs must contain at least one delay");
+    }
     this.store = store;
     this.mode = mode;
     this.pollIntervalMs = pollIntervalMs;
     this.client = client;
+    this.reconnectDelaysMs = reconnectDelaysMs;
+    this.reconnectJitterRatio = reconnectJitterRatio;
+    this.random = random;
   }
 
   get isMock() {
@@ -63,6 +90,9 @@ export class CodexBridge extends EventEmitter {
   }
 
   async start() {
+    if (this.#started) return;
+    this.#started = true;
+    this.#stopping = false;
     if (this.isMock) {
       this.store.setConnection({ status: "connected", mode: "mock", error: null });
       this.store.replaceThreads([{
@@ -78,30 +108,58 @@ export class CodexBridge extends EventEmitter {
       return;
     }
 
-    this.store.setConnection({ status: "connecting", mode: this.mode, error: null });
     this.client ??= new JsonRpcClient({ mode: this.mode });
-    this.client.on("notification", (method, params) => this.#handleNotification(method, params));
-    this.client.on("request", (message) => this.#handleServerRequest(message));
-    this.client.on("diagnostic", (message) => this.emit("diagnostic", message));
-    this.client.on("error", (error) => this.#handleDisconnect(error));
-    this.client.on("exit", () => this.#handleDisconnect(new Error("Codex App Server disconnected")));
-
+    this.#bindClient();
     try {
-      await this.client.start();
-      this.store.setConnection({ status: "connected", mode: this.mode, error: null });
-      await this.refreshThreads();
-      this.#pollTimer = setInterval(() => {
-        this.refreshThreads().catch((error) => this.emit("diagnostic", error.message));
-      }, this.pollIntervalMs);
-      this.#pollTimer.unref?.();
+      await this.#connect();
     } catch (error) {
-      this.store.setConnection({ status: "error", mode: this.mode, error: error.message });
+      this.#handleDisconnect(error);
       throw error;
     }
   }
 
+  async #connect() {
+    if (this.#connectPromise) return this.#connectPromise;
+    const connecting = this.#connectOnce();
+    this.#connectPromise = connecting;
+    try {
+      return await connecting;
+    } finally {
+      if (this.#connectPromise === connecting) this.#connectPromise = null;
+    }
+  }
+
+  async #connectOnce() {
+    if (this.#stopping || !this.#started) return;
+    this.store.setConnection({
+      status: this.#reconnectAttempt ? "reconnecting" : "connecting",
+      mode: this.mode,
+      error: null,
+    });
+    await this.client.start();
+    if (this.#stopping || !this.#started) return;
+    await this.refreshThreads();
+    if (this.#stopping || !this.#started) return;
+    this.#reconnectAttempt = 0;
+    this.store.setConnection({ status: "connected", mode: this.mode, error: null });
+    this.#startPolling();
+  }
+
+  #bindClient() {
+    if (this.#clientBound) return;
+    this.#clientBound = true;
+    this.client.on("notification", (method, params) => this.#handleNotification(method, params));
+    this.client.on("request", (message) => this.#handleServerRequest(message));
+    this.client.on("diagnostic", (message) => this.emit("diagnostic", message));
+    this.client.on("error", (error) => this.#handleDisconnect(error));
+    this.client.on("exit", (_code, _signal, details = {}) => {
+      if (!details.intentional) this.#handleDisconnect(new Error("Codex App Server disconnected"));
+    });
+  }
+
   async refreshThreads() {
     if (this.isMock) return;
+    if (!this.client?.running) throw new Error("Codex App Server is not running");
     const response = await this.client.request("thread/list", {
       limit: 30,
       sortKey: "recency_at",
@@ -157,10 +215,14 @@ export class CodexBridge extends EventEmitter {
   }
 
   async stop() {
-    if (this.#pollTimer) clearInterval(this.#pollTimer);
-    this.#pollTimer = null;
+    this.#stopping = true;
+    this.#started = false;
+    this.#clearPolling();
+    if (this.#reconnectTimer) clearTimeout(this.#reconnectTimer);
+    this.#reconnectTimer = null;
+    this.#expirePendingRequests();
     await this.client?.stop();
-    this.store.setConnection({ status: "disconnected", error: null });
+    this.store.setConnection({ status: "disconnected", mode: this.mode, error: null });
   }
 
   #handleServerRequest(message) {
@@ -211,6 +273,44 @@ export class CodexBridge extends EventEmitter {
   }
 
   #handleDisconnect(error) {
-    this.store.setConnection({ status: "error", mode: this.mode, error: error.message });
+    if (this.#stopping || !this.#started) return;
+    this.#clearPolling();
+    this.#expirePendingRequests();
+    this.store.setConnection({ status: "reconnecting", mode: this.mode, error: error.message });
+    this.#scheduleReconnect();
+  }
+
+  #startPolling() {
+    this.#clearPolling();
+    if (!Number.isFinite(this.pollIntervalMs) || this.pollIntervalMs <= 0) return;
+    this.#pollTimer = setInterval(() => {
+      this.refreshThreads().catch((error) => this.#handleDisconnect(error));
+    }, this.pollIntervalMs);
+    this.#pollTimer.unref?.();
+  }
+
+  #clearPolling() {
+    if (this.#pollTimer) clearInterval(this.#pollTimer);
+    this.#pollTimer = null;
+  }
+
+  #scheduleReconnect() {
+    if (this.#reconnectTimer || this.#stopping || !this.#started) return;
+    const index = Math.min(this.#reconnectAttempt, this.reconnectDelaysMs.length - 1);
+    const baseDelay = Math.max(0, Number(this.reconnectDelaysMs[index]) || 0);
+    const jitter = baseDelay * this.reconnectJitterRatio * ((this.random() * 2) - 1);
+    const delay = Math.max(0, Math.round(baseDelay + jitter));
+    this.#reconnectAttempt += 1;
+    this.#reconnectTimer = setTimeout(() => {
+      this.#reconnectTimer = null;
+      this.#connect().catch((error) => this.#handleDisconnect(error));
+    }, delay);
+    this.#reconnectTimer.unref?.();
+  }
+
+  #expirePendingRequests() {
+    this.#requestMap.clear();
+    this.store.clearApprovals("connection-lost");
+    this.store.clearPendingUserInput();
   }
 }

@@ -18,6 +18,10 @@ export class JsonLineDecoder {
     this.#buffer = "";
     return line ? [line] : [];
   }
+
+  reset() {
+    this.#buffer = "";
+  }
 }
 
 export class JsonRpcClient extends EventEmitter {
@@ -25,6 +29,7 @@ export class JsonRpcClient extends EventEmitter {
   #nextRequestId = 1;
   #pending = new Map();
   #decoder = new JsonLineDecoder();
+  #intentionallyStopped = new WeakSet();
 
   constructor({ command = "codex", mode = "direct", requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, spawnProcess = spawn } = {}) {
     super();
@@ -40,40 +45,44 @@ export class JsonRpcClient extends EventEmitter {
 
   async start() {
     if (this.running) return;
+    this.#decoder.reset();
     const args = this.mode === "daemon"
       ? ["app-server", "proxy"]
       : ["app-server", "--stdio"];
-    this.#child = this.spawnProcess(this.command, args, {
+    const child = this.spawnProcess(this.command, args, {
       stdio: ["pipe", "pipe", "pipe"],
       env: process.env,
     });
+    this.#child = child;
 
     await new Promise((resolve, reject) => {
       const onSpawn = () => {
-        this.#child.off("error", onError);
+        child.off("error", onError);
         resolve();
       };
       const onError = (error) => {
-        this.#child.off("spawn", onSpawn);
+        child.off("spawn", onSpawn);
+        if (this.#child === child) this.#child = null;
         reject(error);
       };
-      this.#child.once("spawn", onSpawn);
-      this.#child.once("error", onError);
+      child.once("spawn", onSpawn);
+      child.once("error", onError);
     });
 
-    this.#child.stdout.on("data", (chunk) => {
+    child.stdout.on("data", (chunk) => {
       for (const line of this.#decoder.push(chunk)) this.#handleLine(line);
     });
-    this.#child.stderr.on("data", (chunk) => this.emit("diagnostic", chunk.toString("utf8").trim()));
-    this.#child.on("error", (error) => this.emit("error", error));
-    this.#child.on("exit", (code, signal) => {
+    child.stderr.on("data", (chunk) => this.emit("diagnostic", chunk.toString("utf8").trim()));
+    child.on("error", (error) => this.emit("error", error));
+    child.on("exit", (code, signal) => {
       const error = new Error(`Codex App Server exited (${code ?? signal ?? "unknown"})`);
       for (const pending of this.#pending.values()) {
         clearTimeout(pending.timer);
         pending.reject(error);
       }
       this.#pending.clear();
-      this.emit("exit", code, signal);
+      if (this.#child === child) this.#child = null;
+      this.emit("exit", code, signal, { intentional: this.#intentionallyStopped.has(child) });
     });
 
     const initialized = await this.request("initialize", {
@@ -124,12 +133,14 @@ export class JsonRpcClient extends EventEmitter {
   }
 
   async stop() {
-    if (!this.#child || this.#child.exitCode !== null) return;
-    this.#child.kill("SIGTERM");
+    const child = this.#child;
+    if (!child || child.exitCode !== null) return;
+    this.#intentionallyStopped.add(child);
+    child.kill("SIGTERM");
     await new Promise((resolve) => {
       const timer = setTimeout(resolve, 2_000);
       timer.unref?.();
-      this.#child.once("exit", () => {
+      child.once("exit", () => {
         clearTimeout(timer);
         resolve();
       });
