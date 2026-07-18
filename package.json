@@ -8,8 +8,9 @@
     "node": ">=22"
   },
   "scripts": {
+    "start": "node src/server/index.js",
+    "start:mock": "CODEX_DESK_MODE=mock node src/server/index.js",
     "test": "node --test",
     "check": "node --run test"
   }
 }
-
