@@ -1,0 +1,15 @@
+{
+  "name": "codex-desk-buddy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Codex Desk Buddy desktop bridge and 320x240 device simulator",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test",
+    "check": "node --run test"
+  }
+}
+
