@@ -3,9 +3,11 @@ import { readFile, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { CommandDeduplicator } from "../shared/device-protocol.js";
 
 const MAX_BODY_BYTES = 16 * 1024;
+const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -28,7 +30,12 @@ function json(res, status, body, extraHeaders = {}) {
 function parseCookies(header = "") {
   return Object.fromEntries(header.split(";").map((part) => part.trim()).filter(Boolean).map((part) => {
     const index = part.indexOf("=");
-    return index === -1 ? [part, ""] : [part.slice(0, index), decodeURIComponent(part.slice(index + 1))];
+    if (index === -1) return [part, ""];
+    try {
+      return [part.slice(0, index), decodeURIComponent(part.slice(index + 1))];
+    } catch {
+      return [part.slice(0, index), ""];
+    }
   }));
 }
 
@@ -66,7 +73,7 @@ export class DeskHttpServer {
   #csrfToken = randomUUID();
   #deduplicator = new CommandDeduplicator(512);
 
-  constructor({ store, bridge, catalog, settings, publicDirectory = path.join(process.cwd(), "public") }) {
+  constructor({ store, bridge, catalog, settings, publicDirectory = path.join(PROJECT_ROOT, "public") }) {
     this.store = store;
     this.bridge = bridge;
     this.catalog = catalog;
@@ -161,7 +168,7 @@ export class DeskHttpServer {
       ["/", [path.join(this.publicDirectory, "index.html"), "text/html; charset=utf-8"]],
       ["/app.css", [path.join(this.publicDirectory, "app.css"), "text/css; charset=utf-8"]],
       ["/app.js", [path.join(this.publicDirectory, "app.js"), "text/javascript; charset=utf-8"]],
-      ["/shared/pet-spec.js", [path.join(process.cwd(), "src", "shared", "pet-spec.js"), "text/javascript; charset=utf-8"]],
+      ["/shared/pet-spec.js", [path.join(PROJECT_ROOT, "src", "shared", "pet-spec.js"), "text/javascript; charset=utf-8"]],
     ]);
     if (req.method === "GET" && staticFiles.has(route)) {
       const [filePath, contentType] = staticFiles.get(route);
@@ -256,7 +263,14 @@ export class DeskHttpServer {
     const fetchSite = req.headers["sec-fetch-site"];
     if (fetchSite && !["same-origin", "none"].includes(fetchSite)) throw new HttpError(403, "Cross-site requests are not allowed");
     const origin = req.headers.origin;
-    if (origin && new URL(origin).host !== req.headers.host) throw new HttpError(403, "Request origin does not match");
+    if (origin) {
+      try {
+        if (new URL(origin).host !== req.headers.host) throw new HttpError(403, "Request origin does not match");
+      } catch (error) {
+        if (error instanceof HttpError) throw error;
+        throw new HttpError(403, "Request origin is invalid");
+      }
+    }
   }
 
   #broadcast(snapshot) {
