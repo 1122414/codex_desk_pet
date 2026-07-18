@@ -1,6 +1,6 @@
 # Codex Desk Buddy
 
-Codex Desk Buddy 是面向 M5Stack CoreS3 Lite 的桌面宠物项目。当前 MVP 先在电脑上运行：它连接 Codex App Server，展示最近活动的任务、Pet 动画、Token、等级、时钟和模拟设备遥测，并提供严格 320×240 的触摸屏模拟器。
+Codex Desk Buddy 是面向 M5Stack CoreS3 完整版（SKU `K128`）的桌面宠物项目。它连接 Codex App Server，展示最近活动的任务、Pet 动画、Token、等级、时钟和设备遥测，并提供严格 320×240 的触摸屏模拟器。设备允许 USB-C 常联，也将支持拔线后通过 Wi-Fi 与仍在运行的电脑 Bridge 通信；Bluetooth LE 用于配网和恢复。
 
 ## 当前已经实现
 
@@ -12,7 +12,7 @@ Codex Desk Buddy 是面向 M5Stack CoreS3 Lite 的桌面宠物项目。当前 MV
 - 触摸/滑动、屏幕左右键、电脑下拉框、键盘方向键切换 Pet，所有界面共享 Bridge 选择状态。
 - 声音、中文语音提示、时钟、电池、当前线程 Token 和等级进度。
 - HTTP + SSE 控制面板、会话 Cookie、CSRF 防护、命令去重和仅本机回环监听。
-- USB/Wi‑Fi 共用的版本化消息封装、序号、ACK、心跳和断线恢复契约。
+- USB/Wi‑Fi/BLE 共用的版本化消息封装、序号、ACK、心跳和断线恢复契约。
 
 ## 快速启动
 
@@ -89,8 +89,7 @@ npm run smoke:codex
 
 - 当前 Codex App Server 没有公开 Pet 列表或 Pet 选择事件。MVP 由 Desk Bridge 同步触屏和电脑控制面板，但不会写入 Codex 原生客户端的私有设置。
 - 当前等级根据“正在展示的线程”的累计 Token 计算，每 50,000 Token 一级；它不是 Codex 官方等级。
-- 真机 USB Serial、Wi‑Fi WebSocket、Pet 文件传输、扬声器与电量读取尚未实现。共享协议和模拟器已经准备好，购买硬件后进入固件阶段。
+- 真机 USB Serial、Wi‑Fi、BLE、Pet 文件传输、扬声器与电量读取尚未经过物理验证；设备服务、虚拟链路和 CoreS3 固件会在硬件到手前完成到可测试、可构建状态。
 - MVP HTTP 服务只监听 `127.0.0.1`。真机 Wi‑Fi 接入必须先实现配对认证，不能直接把当前控制端口暴露到局域网。
 
-详细链路约束见 [设备协议](docs/device-protocol.md)，硬件阶段见 [2026-07-18_002.md](2026-07-18_002.md)。
-
+详细链路约束见 [设备协议](docs/device-protocol.md)，完整路线和逐项证据见 [2026-07-19_001.md](2026-07-19_001.md)。
