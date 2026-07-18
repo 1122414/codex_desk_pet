@@ -189,6 +189,8 @@ export class DeskStore extends EventEmitter {
     const mapped = selected ? mapThreadToPresentation(selected, { now }) : { state: "ready", animation: "idle" };
     const totalTokens = extractTotalTokens(selected?.tokenUsage);
     const level = computeLevel(totalTokens, this.tokensPerLevel);
+    const previewBlocked = mapped.state === "needs-input" || mapped.state === "blocked";
+    const previewing = this.previewAnimation !== null && !previewBlocked;
     const approval = selected
       ? [...this.#approvals.values()].find((candidate) => candidate.threadId === selected.id)
       : [...this.#approvals.values()][0];
@@ -199,8 +201,8 @@ export class DeskStore extends EventEmitter {
       connection: { ...this.connection },
       presentation: {
         state: mapped.state,
-        animation: this.previewAnimation ?? mapped.animation,
-        previewing: this.previewAnimation !== null,
+        animation: previewing ? this.previewAnimation : mapped.animation,
+        previewing,
       },
       task: selected ? {
         id: selected.id,

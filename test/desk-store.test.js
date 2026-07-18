@@ -27,6 +27,7 @@ test("desk store reduces Codex notifications into a device snapshot", () => {
 
 test("approval snapshots omit internal JSON-RPC correlation ids", () => {
   const store = new DeskStore();
+  store.setPreviewAnimation("jumping");
   store.addApproval({
     id: "public-approval",
     rpcId: 42,
@@ -38,9 +39,9 @@ test("approval snapshots omit internal JSON-RPC correlation ids", () => {
   });
   const snapshot = store.snapshot();
   assert.equal(snapshot.presentation.animation, "waiting");
+  assert.equal(snapshot.presentation.previewing, false);
   assert.equal(snapshot.approval.id, "public-approval");
   assert.equal(Object.hasOwn(snapshot.approval, "rpcId"), false);
   store.resolveApproval("public-approval", "decline");
   assert.equal(store.snapshot().approval, null);
 });
-

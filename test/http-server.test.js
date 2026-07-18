@@ -26,6 +26,15 @@ test("HTTP API requires a same-origin session for state changes", async (t) => {
   assert.equal(health.status, 200);
   assert.equal((await health.json()).ok, true);
 
+  const page = await fetch(base);
+  assert.equal(page.status, 200);
+  assert.match(page.headers.get("content-security-policy"), /script-src 'self'/);
+  assert.match(await page.text(), /Codex Desk Buddy/);
+
+  const sharedModule = await fetch(`${base}/shared/pet-spec.js`);
+  assert.equal(sharedModule.status, 200);
+  assert.match(await sharedModule.text(), /STANDARD_ANIMATIONS/);
+
   const denied = await fetch(`${base}/api/pet/select`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -49,4 +58,3 @@ test("HTTP API requires a same-origin session for state changes", async (t) => {
   assert.equal(selected.status, 200);
   assert.equal((await selected.json()).selectedId, "codex-core");
 });
-

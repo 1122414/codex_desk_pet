@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <title>Codex Desk Buddy</title>
+    <link rel="stylesheet" href="/app.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero" aria-labelledby="page-title">
+        <p class="eyebrow">CODEX · DESK COMPANION</p>
+        <h1 id="page-title">Codex Desk Buddy</h1>
+        <p class="subtitle">CoreS3 Lite 的电脑端 MVP 与 320×240 触摸屏模拟器</p>
+      </section>
+
+      <section class="workspace">
+        <div class="device-column">
+          <div class="device-shell" aria-label="320×240 触摸屏模拟器">
+            <div class="device-camera" aria-hidden="true"></div>
+            <div id="device-screen" class="device-screen" tabindex="0">
+              <header class="screen-statusbar">
+                <span class="brand-mark" aria-label="Codex">C</span>
+                <span id="screen-connection" class="connection-mark"><i></i>离线</span>
+                <span id="screen-time" class="screen-time">--:--</span>
+                <span id="screen-battery" class="battery" aria-label="电池 100%"><i></i></span>
+              </header>
+
+              <div id="pet-stage" class="pet-stage" aria-label="触摸宠物区域">
+                <button id="device-prev" class="screen-arrow screen-arrow-left" type="button" aria-label="上一个 Pet">‹</button>
+                <canvas id="pet-canvas" width="192" height="208" aria-label="Codex Pet"></canvas>
+                <button id="device-next" class="screen-arrow screen-arrow-right" type="button" aria-label="下一个 Pet">›</button>
+                <div class="pet-caption">
+                  <span id="screen-pet-name">Codex Core</span>
+                  <span id="screen-state">待命</span>
+                </div>
+              </div>
+
+              <div id="approval-card" class="approval-card" hidden>
+                <div class="approval-heading">
+                  <span class="approval-pulse"></span>
+                  <strong id="approval-title">需要确认</strong>
+                </div>
+                <code id="approval-detail">—</code>
+                <p id="approval-reason"></p>
+                <div class="approval-actions">
+                  <button id="approval-decline" class="touch-button decline" type="button">拒绝</button>
+                  <button id="approval-accept" class="touch-button accept" type="button">允许一次</button>
+                </div>
+              </div>
+
+              <div class="task-strip">
+                <span id="screen-task">暂无 Codex 任务</span>
+              </div>
+              <footer class="screen-footer">
+                <span id="screen-tokens">0 tk</span>
+                <div class="level-meter" aria-label="等级进度"><i id="level-progress"></i></div>
+                <span id="screen-level">Lv.1</span>
+                <span id="screen-transport">SIM</span>
+              </footer>
+            </div>
+            <div class="device-labels"><span>CORE S3 LITE · 320×240</span><span>CODEX DESK</span></div>
+          </div>
+          <p class="touch-hint">触摸 Pet 看向指尖 · 左右滑动或按 ← → 换 Pet</p>
+        </div>
+
+        <aside class="control-panel" aria-label="电脑控制面板">
+          <section class="panel-section connection-section">
+            <div>
+              <span class="section-label">BRIDGE</span>
+              <h2>连接状态</h2>
+            </div>
+            <div id="bridge-status" class="status-chip"><i></i><span>正在连接</span></div>
+          </section>
+
+          <section class="panel-section">
+            <label class="field-label" for="pet-select">当前 Pet</label>
+            <div class="select-row">
+              <select id="pet-select" aria-label="选择 Pet"></select>
+              <span id="pet-version" class="version-badge">V2</span>
+            </div>
+            <p id="pet-description" class="field-help">从电脑端 Pet 目录读取，并同步到所有设备。</p>
+          </section>
+
+          <section class="panel-section">
+            <div class="section-title-row">
+              <div>
+                <span class="section-label">ANIMATION LAB</span>
+                <h2>全部状态</h2>
+              </div>
+              <button id="restore-sync" class="text-button" type="button">恢复 Codex 同步</button>
+            </div>
+            <div id="animation-grid" class="animation-grid" aria-label="标准动画预览"></div>
+            <details class="look-panel">
+              <summary>16 个看向方向 <span id="look-support">V2</span></summary>
+              <div id="look-grid" class="look-grid" aria-label="看向方向预览"></div>
+            </details>
+          </section>
+
+          <section class="panel-section two-column-controls">
+            <div>
+              <span class="field-label">提示反馈</span>
+              <div class="toggle-row">
+                <button id="sound-toggle" class="toggle-button" type="button" aria-pressed="false">声音 关</button>
+                <button id="voice-toggle" class="toggle-button" type="button" aria-pressed="false">语音 关</button>
+              </div>
+            </div>
+            <div>
+              <label class="field-label" for="battery-slider">设备电量 <span id="battery-value">100%</span></label>
+              <input id="battery-slider" type="range" min="0" max="100" value="100">
+            </div>
+          </section>
+
+          <section class="panel-section transport-section">
+            <div>
+              <span class="section-label">TRANSPORT</span>
+              <h2>链路模拟</h2>
+            </div>
+            <div class="segmented" role="group" aria-label="链路选择">
+              <button type="button" data-transport="simulator" class="active">模拟</button>
+              <button type="button" data-transport="usb">USB</button>
+              <button type="button" data-transport="wifi">Wi‑Fi</button>
+            </div>
+          </section>
+
+          <section id="mock-tools" class="panel-section mock-tools" hidden>
+            <div>
+              <span class="section-label">DEMO</span>
+              <h2>审批演示</h2>
+            </div>
+            <button id="mock-approval" class="primary-button" type="button">生成一次审批请求</button>
+          </section>
+        </aside>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
+

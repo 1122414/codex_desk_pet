@@ -1,7 +1,8 @@
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import { CommandDeduplicator } from "../shared/device-protocol.js";
 
 const MAX_BODY_BYTES = 16 * 1024;
@@ -65,11 +66,12 @@ export class DeskHttpServer {
   #csrfToken = randomUUID();
   #deduplicator = new CommandDeduplicator(512);
 
-  constructor({ store, bridge, catalog, settings }) {
+  constructor({ store, bridge, catalog, settings, publicDirectory = path.join(process.cwd(), "public") }) {
     this.store = store;
     this.bridge = bridge;
     this.catalog = catalog;
     this.settings = settings;
+    this.publicDirectory = path.resolve(publicDirectory);
     this.#server = createServer((req, res) => {
       this.#handle(req, res).catch((error) => {
         const status = error.status ?? 500;
@@ -149,6 +151,31 @@ export class DeskHttpServer {
       return;
     }
 
+    if (req.method === "GET" && route === "/favicon.ico") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    const staticFiles = new Map([
+      ["/", [path.join(this.publicDirectory, "index.html"), "text/html; charset=utf-8"]],
+      ["/app.css", [path.join(this.publicDirectory, "app.css"), "text/css; charset=utf-8"]],
+      ["/app.js", [path.join(this.publicDirectory, "app.js"), "text/javascript; charset=utf-8"]],
+      ["/shared/pet-spec.js", [path.join(process.cwd(), "src", "shared", "pet-spec.js"), "text/javascript; charset=utf-8"]],
+    ]);
+    if (req.method === "GET" && staticFiles.has(route)) {
+      const [filePath, contentType] = staticFiles.get(route);
+      const data = await readFile(filePath);
+      res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'");
+      res.writeHead(200, {
+        "Content-Type": contentType,
+        "Content-Length": data.length,
+        "Cache-Control": route === "/" ? "no-store" : "private, max-age=60",
+      });
+      res.end(data);
+      return;
+    }
+
     const assetMatch = route.match(/^\/api\/pets\/([a-z0-9][a-z0-9-]{0,63})\/spritesheet$/);
     if (req.method === "GET" && assetMatch) {
       const assetPath = this.catalog.getAssetPath(assetMatch[1]);
@@ -174,8 +201,8 @@ export class DeskHttpServer {
 
       if (route === "/api/pet/select") {
         if (typeof body.petId !== "string" || !this.catalog.has(body.petId)) throw new HttpError(404, "Pet was not found");
-        this.store.setSelectedPet(body.petId);
         await this.settings.save({ selectedPetId: body.petId });
+        this.store.setSelectedPet(body.petId);
         json(res, 200, { ok: true, selectedId: body.petId });
         return;
       }
