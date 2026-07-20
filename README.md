@@ -16,6 +16,9 @@ Codex Desk Buddy 是面向 M5Stack CoreS3 完整版（SKU `K128`）的桌面宠�
 - USB CDC 自动发现/重连、独立 Wi‑Fi WebSocket 设备服务、BLE GATT 分片抽象，以及三条链路共用的版本化协议。
 - USB/BLE 单次配对码、每设备独立密钥、HMAC 双向认证、凭据撤销、会话替换和未认证连接清理。
 - ACK 窗口流控、指数退避、全量快照恢复、跨链路命令去重和 Pet 资源原子安装。
+- 可实际编译为 CoreS3 K128 固件的 PlatformIO 工程：320×240 双缓冲界面、电容触摸、Port B GPIO 8/9 双按键、扬声器提示、电池、RTC、看向方向、审批和链路优先级。
+- 电脑使用 Sharp 将 WebP 图集转换为设备专用的 144×156 透明 RGB565 帧；固件在 microSD 上做分块校验、断点续传、整包 SHA‑256 校验和不可变版本发布。
+- Web Bluetooth 首次写入 Wi‑Fi、Bridge 地址和端口；设备屏幕上的独立 6 位配网码用于防止误配。
 
 ## 快速启动
 
@@ -93,6 +96,18 @@ v2 manifest 示例：
 
 v2 图集必须为 1536×2288；v1 图集为 1536×1872。单格均为 192×208。`spriteVersionNumber` 可以省略，此时 Bridge 按真实尺寸识别版本；如果声明了版本或 `spritesheetSha256`，文件必须匹配。图集最大 16 MiB。新 Pet 继续在电脑端制作，设备端只同步、缓存和播放成品。
 
+真机自定义 Pet 需要一张 FAT32 microSD 卡。内置 `codex-core` 不依赖存储卡；microSD 缺失或资源损坏时固件会继续显示内置回退 Pet。
+
+## 编译 CoreS3 固件
+
+安装 PlatformIO Core 后运行：
+
+```bash
+npm run build:firmware
+```
+
+固件目标、Arduino 框架和库版本都固定在 `firmware/platformio.ini`。当前构建证据使用 PlatformIO 6.1.19、`espressif32@6.9.0` 与 `m5stack-cores3`。拿到设备后才执行 `pio run -d firmware -t upload`，避免在没有真机时声称烧录成功。
+
 ## 验证
 
 ```bash
@@ -103,13 +118,16 @@ npm run smoke:codex
 
 - `npm test`：运行 64 项领域、协议、审批、配对、传输、Pet 资源与 HTTP 安全测试。
 - `npm run check`：先检查全部 JavaScript 语法，再运行测试。
+- `npm run test:firmware`：使用本机 C++17 编译器运行不依赖硬件的固件状态机、动画、输入、重连、序号与资源恢复测试。
+- `npm run build:firmware`：使用真实 ESP32-S3 工具链编译完整 CoreS3 固件。
 - `npm run smoke:codex`：真实启动 App Server 并读取最近线程，然后立即关闭。
 
 ## 重要边界
 
 - 当前 Codex App Server 没有公开 Pet 列表或 Pet 选择事件。MVP 由 Desk Bridge 同步触屏和电脑控制面板，但不会写入 Codex 原生客户端的私有设置。
 - 当前等级根据“正在展示的线程”的累计 Token 计算，每 50,000 Token 一级；它不是 Codex 官方等级。
-- 真机 USB CDC、Wi‑Fi、BLE、Pet 文件传输、扬声器与电量读取尚未经过物理验证；电脑端设备服务与虚拟故障测试已经完成，CoreS3 固件仍在实现。
+- 完整 CoreS3 固件已经通过真实 ESP32-S3 工具链编译，但 USB CDC、Wi‑Fi、BLE、microSD、触摸、扬声器与电量读取仍需设备到手后做物理验证。
+- 浏览器已有中文语音提示；当前固件只提供不同状态的扬声器音型。设备端离线中文语音包仍属于真机前待完成项，不能把提示音称作语音。
 - 控制面板固定监听 `127.0.0.1`；真机只连接独立的 `4318` 设备端口。明文 WebSocket 不是最终产品的保密方案。
 
 详细链路约束见 [设备协议](docs/device-protocol.md)，完整路线和逐项证据见 [2026-07-19_001.md](2026-07-19_001.md)。

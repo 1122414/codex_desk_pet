@@ -1,0 +1,9 @@
+{
+  "name": "codex-core",
+  "version": "0.1.0",
+  "description": "Hardware-independent Codex Desk Buddy state, input and recovery logic",
+  "build": {
+    "srcDir": "src",
+    "includeDir": "src"
+  }
+}

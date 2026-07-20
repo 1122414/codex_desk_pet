@@ -134,6 +134,17 @@
               <button id="start-pairing" class="primary-button" type="button">生成配对码</button>
             </div>
             <p id="pairing-code" class="pairing-code" hidden></p>
+            <details class="provision-panel">
+              <summary>通过蓝牙配置 Wi‑Fi</summary>
+              <div class="provision-grid">
+                <label>设备配网码<input id="setup-code" inputmode="numeric" maxlength="6" autocomplete="one-time-code"></label>
+                <label>Wi‑Fi 名称<input id="wifi-ssid" maxlength="32" autocomplete="off"></label>
+                <label>Wi‑Fi 密码<input id="wifi-password" type="password" maxlength="64" autocomplete="new-password"></label>
+                <label>电脑局域网地址<input id="bridge-host" maxlength="253" autocomplete="off"></label>
+                <label>设备端口<input id="bridge-port" type="number" min="1" max="65535" value="4318"></label>
+                <button id="provision-wifi" class="primary-button" type="button">连接 CoreS3 并写入</button>
+              </div>
+            </details>
             <div id="device-list" class="device-list"><span>暂无已配对设备</span></div>
           </section>
 

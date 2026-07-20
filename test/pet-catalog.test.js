@@ -75,6 +75,34 @@ test("pet catalog exposes a built-in pet and valid custom manifests", async () =
   await assert.rejects(() => catalog.readAsset("test-pet"), /changed/);
 });
 
+test("device Pet assets are converted once per immutable source hash", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codex-desk-device-pets-"));
+  const petDir = path.join(root, "device-pet");
+  await mkdir(petDir);
+  const spritesheet = makeWebp("VP8X", 1536, 2288);
+  await writeFile(path.join(petDir, "pet.json"), JSON.stringify({
+    id: "device-pet",
+    displayName: "Device Pet",
+    spriteVersionNumber: 2,
+    spritesheetPath: "spritesheet.webp",
+  }));
+  await writeFile(path.join(petDir, "spritesheet.webp"), spritesheet);
+  let conversions = 0;
+  const catalog = new PetCatalog(root, {
+    deviceAssetConverter: async ({ data }) => {
+      conversions += 1;
+      return { data: Buffer.from(data), sha256: "a".repeat(64), bytes: data.length };
+    },
+  });
+  await catalog.refresh();
+  const first = await catalog.readDeviceAsset("device-pet");
+  first.data[0] ^= 0xff;
+  const second = await catalog.readDeviceAsset("device-pet");
+  assert.equal(conversions, 1);
+  assert.deepEqual(second.data, spritesheet);
+  assert.equal(second.sourceSha256, createHash("sha256").update(spritesheet).digest("hex"));
+});
+
 test("pet catalog ignores mismatched ids, dimensions, and hashes", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "codex-desk-invalid-pets-"));
   const wrongIdDir = path.join(root, "folder-name");

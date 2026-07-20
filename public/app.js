@@ -36,7 +36,11 @@ const elements = Object.fromEntries([
   "pet-description", "animation-grid", "restore-sync", "look-grid", "look-support", "sound-toggle",
   "voice-toggle", "battery-slider", "battery-value", "mock-tools", "mock-approval", "toast",
   "start-pairing", "pairing-code", "device-list",
+  "setup-code", "wifi-ssid", "wifi-password", "bridge-host", "bridge-port", "provision-wifi",
 ].map((id) => [id, document.getElementById(id)]));
+
+const BLE_SERVICE_UUID = "7a5c0001-1f4b-4e29-a9a0-4e0f0c0d0001";
+const BLE_PROVISION_UUID = "7a5c0004-1f4b-4e29-a9a0-4e0f0c0d0001";
 
 let csrfToken = "";
 let snapshot = null;
@@ -410,6 +414,48 @@ async function startPairing() {
   }
 }
 
+async function provisionWifi() {
+  const setupCode = elements["setup-code"].value.trim();
+  const ssid = elements["wifi-ssid"].value.trim();
+  const password = elements["wifi-password"].value;
+  const bridgeHost = elements["bridge-host"].value.trim();
+  const bridgePort = Number(elements["bridge-port"].value);
+  if (!/^\d{6}$/.test(setupCode) || !ssid || !bridgeHost ||
+      !Number.isInteger(bridgePort) || bridgePort < 1 || bridgePort > 65535) {
+    showToast("请完整填写设备上的6位配网码、Wi‑Fi和电脑局域网地址");
+    return;
+  }
+  if (!navigator.bluetooth) {
+    showToast("当前浏览器不支持 Web Bluetooth，请使用 Chrome/Edge 或先通过 USB 配置");
+    return;
+  }
+  elements["provision-wifi"].disabled = true;
+  try {
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [BLE_SERVICE_UUID] }],
+    });
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService(BLE_SERVICE_UUID);
+    const characteristic = await service.getCharacteristic(BLE_PROVISION_UUID);
+    const bytes = new TextEncoder().encode(JSON.stringify({
+      setupCode,
+      ssid,
+      password,
+      bridgeHost,
+      bridgePort,
+    }));
+    if (bytes.byteLength > 512) throw new Error("配网数据过长");
+    await characteristic.writeValue(bytes);
+    elements["wifi-password"].value = "";
+    server.disconnect();
+    showToast("Wi‑Fi 配置已写入，CoreS3 正在连接电脑");
+  } catch (error) {
+    showToast(`蓝牙配网失败：${error.message}`);
+  } finally {
+    elements["provision-wifi"].disabled = false;
+  }
+}
+
 async function revokeDevice(deviceId) {
   try {
     await mutate("/api/devices/revoke", { deviceId });
@@ -552,6 +598,7 @@ function bindInteractions() {
     try { await mutate("/api/mock/approval", {}); } catch (error) { showToast(error.message); }
   });
   elements["start-pairing"].addEventListener("click", startPairing);
+  elements["provision-wifi"].addEventListener("click", provisionWifi);
 
   elements["sound-toggle"].addEventListener("click", () => {
     soundEnabled = !soundEnabled;
@@ -626,6 +673,7 @@ async function init() {
   setToggle(elements["sound-toggle"], soundEnabled, "声音");
   setToggle(elements["voice-toggle"], voiceEnabled, "语音");
   updateClock();
+  elements["bridge-host"].value = location.hostname === "localhost" ? "" : location.hostname;
   setInterval(updateClock, 10_000);
 
   try {

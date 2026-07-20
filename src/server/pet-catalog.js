@@ -4,6 +4,7 @@ import { open, readdir, realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { validatePetManifest } from "../shared/pet-spec.js";
+import { convertSpritesheetToDeviceAsset } from "./device-pet-asset.js";
 
 export const MAX_SPRITESHEET_BYTES = 16 * 1024 * 1024;
 const MAX_MANIFEST_BYTES = 64 * 1024;
@@ -95,10 +96,15 @@ export function inspectWebp(buffer) {
 export class PetCatalog {
   #assetPaths = new Map();
   #assetInfo = new Map();
+  #deviceAssets = new Map();
   #pets = [...BUILTIN_PETS];
 
-  constructor(root = defaultPetRoot()) {
+  constructor(root = defaultPetRoot(), { deviceAssetConverter = convertSpritesheetToDeviceAsset } = {}) {
     this.root = path.resolve(root);
+    if (typeof deviceAssetConverter !== "function") {
+      throw new TypeError("PetCatalog deviceAssetConverter must be a function");
+    }
+    this.deviceAssetConverter = deviceAssetConverter;
   }
 
   async refresh() {
@@ -210,5 +216,21 @@ export class PetCatalog {
       width: expected.width,
       height: expected.height,
     };
+  }
+
+  async readDeviceAsset(id) {
+    const pet = this.get(id);
+    if (!pet || pet.kind !== "custom") return null;
+    const source = await this.readAsset(id);
+    if (!source) return null;
+    const cached = this.#deviceAssets.get(source.sha256);
+    if (cached) return { ...cached, data: Buffer.from(cached.data) };
+    const converted = await this.deviceAssetConverter({
+      data: source.data,
+      spriteVersionNumber: pet.spriteVersionNumber,
+    });
+    const value = { ...converted, sourceSha256: source.sha256 };
+    this.#deviceAssets.set(source.sha256, value);
+    return { ...value, data: Buffer.from(value.data) };
   }
 }

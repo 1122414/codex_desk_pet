@@ -11,6 +11,12 @@ export const DEVICE_PROTOCOL_VERSION = 1;
 export const HEARTBEAT_INTERVAL_MS = 5_000;
 export const CONNECTION_TIMEOUT_MS = 15_000;
 export const MAX_RESOURCE_BYTES = 16 * 1024 * 1024;
+export const DEVICE_PET_RESOURCE = Object.freeze({
+  format: "rgb565-key-v1",
+  frameWidth: 144,
+  frameHeight: 156,
+  transparentColor: 0x0001,
+});
 const MAX_RESOURCE_RANGES = 1_024;
 
 export const MESSAGE_TYPES = Object.freeze([
@@ -42,7 +48,7 @@ export const DEVICE_COMMANDS = Object.freeze([
 
 export const TRANSPORT_PROFILES = Object.freeze({
   usb: Object.freeze({ maxEnvelopeBytes: 8 * 1024, resourceChunkBytes: 3 * 1024 }),
-  wifi: Object.freeze({ maxEnvelopeBytes: 64 * 1024, resourceChunkBytes: 12 * 1024 }),
+  wifi: Object.freeze({ maxEnvelopeBytes: 15 * 1024, resourceChunkBytes: 9 * 1024 }),
   ble: Object.freeze({ maxEnvelopeBytes: 8 * 1024, resourceChunkBytes: 96, linkMtuBytes: 180 }),
   memory: Object.freeze({ maxEnvelopeBytes: 64 * 1024, resourceChunkBytes: 12 * 1024 }),
 });
@@ -82,8 +88,14 @@ function validateResourceManifest(payload) {
   }
   if (![1, 2].includes(payload.spriteVersionNumber)) throw new ProtocolError("resource sprite version is invalid");
   const atlas = PET_ATLAS[payload.spriteVersionNumber];
-  if (payload.width !== atlas.width || payload.height !== atlas.height) {
-    throw new ProtocolError("resource atlas dimensions are invalid");
+  if (
+    payload.format !== DEVICE_PET_RESOURCE.format ||
+    payload.frameWidth !== DEVICE_PET_RESOURCE.frameWidth ||
+    payload.frameHeight !== DEVICE_PET_RESOURCE.frameHeight ||
+    payload.frameCount !== atlas.rows * 8 ||
+    payload.transparentColor !== DEVICE_PET_RESOURCE.transparentColor
+  ) {
+    throw new ProtocolError("resource device frame layout is invalid");
   }
 }
 
@@ -494,8 +506,11 @@ export function createPetResourceManifest(pet, data) {
     sha256: createHash("sha256").update(data).digest("hex"),
     bytes: data.length,
     spriteVersionNumber: pet.spriteVersionNumber,
-    width: atlas.width,
-    height: atlas.height,
+    format: DEVICE_PET_RESOURCE.format,
+    frameWidth: DEVICE_PET_RESOURCE.frameWidth,
+    frameHeight: DEVICE_PET_RESOURCE.frameHeight,
+    frameCount: atlas.rows * 8,
+    transparentColor: DEVICE_PET_RESOURCE.transparentColor,
   };
   validateResourceManifest(manifest);
   return manifest;

@@ -20,6 +20,12 @@ import {
   createResourceChunks,
 } from "../src/shared/device-protocol.js";
 
+const passthroughDeviceConverter = async ({ data }) => ({
+  data: Buffer.from(data),
+  sha256: "a".repeat(64),
+  bytes: data.length,
+});
+
 async function waitFor(predicate, timeoutMs = 750) {
   const startedAt = Date.now();
   while (!predicate()) {
@@ -50,7 +56,7 @@ test("USB pairing provisions a secret and authenticated device commands update t
   const hub = new DeviceHub({
     store,
     bridge,
-    catalog: new PetCatalog(path.join(root, "pets")),
+    catalog: new PetCatalog(path.join(root, "pets"), { deviceAssetConverter: passthroughDeviceConverter }),
     settings: new SettingsRepository(path.join(root, "settings.json")),
     credentials,
     pairingCodes,
@@ -98,7 +104,7 @@ test("global command deduplication prevents dual-link duplicate approval executi
         decisions.push({ requestId, decision });
       },
     },
-    catalog: new PetCatalog(path.join(root, "pets")),
+    catalog: new PetCatalog(path.join(root, "pets"), { deviceAssetConverter: passthroughDeviceConverter }),
     settings: new SettingsRepository(path.join(root, "settings.json")),
     credentials,
   });
@@ -155,7 +161,7 @@ test("device resource requests stream a validated custom Pet into the atomic cac
   const hub = new DeviceHub({
     store: new DeskStore(),
     bridge: { decideApproval: async () => null },
-    catalog: new PetCatalog(path.join(root, "pets")),
+    catalog: new PetCatalog(path.join(root, "pets"), { deviceAssetConverter: passthroughDeviceConverter }),
     settings: new SettingsRepository(path.join(root, "settings.json")),
     credentials,
   });
@@ -193,7 +199,7 @@ test("BLE resource requests require USB or Wi-Fi instead of starting an impracti
   const hub = new DeviceHub({
     store: new DeskStore(),
     bridge: { decideApproval: async () => null },
-    catalog: new PetCatalog(path.join(root, "pets")),
+    catalog: new PetCatalog(path.join(root, "pets"), { deviceAssetConverter: passthroughDeviceConverter }),
     settings: new SettingsRepository(path.join(root, "settings.json")),
     credentials,
   });
@@ -232,7 +238,7 @@ test("an interrupted Pet transfer resumes only its missing byte ranges", async (
   await writeFile(path.join(petDir, "spritesheet.webp"), resource);
   const credentials = new DeviceCredentialRepository(path.join(root, "devices.json"));
   await credentials.pair({ deviceId: "core-s3-resume", secret: "5".repeat(64) });
-  const catalog = new PetCatalog(path.join(root, "pets"));
+  const catalog = new PetCatalog(path.join(root, "pets"), { deviceAssetConverter: passthroughDeviceConverter });
   const pets = await catalog.refresh();
   const pet = pets.find((candidate) => candidate.id === "hub-pet");
   const manifest = createPetResourceManifest(pet, resource);

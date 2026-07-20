@@ -143,6 +143,13 @@ input[type="range"] { width: 100%; accent-color: var(--green); }
 .segmented button { min-width: 57px; height: 28px; border-color: transparent; font-size: 9px; }
 .primary-button { min-height: 36px; padding: 0 13px; border-color: #3a8058; color: #b6ffd1; background: #153b27; font-size: 10px; }
 .pairing-code { margin: 14px 0 0; padding: 11px 13px; border: 1px solid #745b2f; border-radius: 8px; color: var(--amber); background: #241b0d; font: 800 20px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .16em; text-align: center; }
+.provision-panel { margin-top: 13px; border: 1px solid #2d3532; border-radius: 8px; background: #0b0e0d; }
+.provision-panel summary { padding: 10px; color: #bfc9c5; font-size: 10px; cursor: pointer; }
+.provision-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; padding: 0 10px 10px; }
+.provision-grid label { color: var(--muted); font-size: 9px; }
+.provision-grid input { display: block; width: 100%; height: 34px; margin-top: 4px; padding: 0 8px; border: 1px solid #37413e; border-radius: 6px; outline: 0; color: var(--text); background: #080a09; }
+.provision-grid input:focus { border-color: var(--green); }
+.provision-grid .primary-button { align-self: end; }
 .device-list { display: grid; gap: 7px; margin-top: 13px; color: var(--muted); font-size: 10px; }
 .device-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 36px; padding: 7px 9px; border: 1px solid #2d3532; border-radius: 8px; background: #0b0e0d; }
 .device-row strong { display: block; color: #dce7e2; font-size: 10px; }

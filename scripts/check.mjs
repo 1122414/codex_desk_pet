@@ -22,4 +22,10 @@ for (const file of files) {
 }
 
 const tests = spawnSync(process.execPath, ["--test"], { stdio: "inherit" });
-process.exit(tests.status ?? 1);
+if (tests.status !== 0) process.exit(tests.status ?? 1);
+
+const firmware = spawnSync(process.execPath, ["scripts/check-firmware.mjs"], {
+  cwd: process.cwd(),
+  stdio: "inherit",
+});
+process.exit(firmware.status ?? 1);

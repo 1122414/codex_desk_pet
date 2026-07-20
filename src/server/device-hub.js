@@ -72,7 +72,7 @@ export class DeviceHub extends EventEmitter {
       transport,
       secretResolver: (deviceId) => this.credentials.getSecret(deviceId),
       pairClaimHandler: (request) => this.#claimPairing(request),
-      snapshotProvider: () => this.store.snapshot(),
+      snapshotProvider: () => this.#deviceSnapshot(this.store.snapshot()),
       commandHandler: (command) => this.#handleCommand(command, session),
     });
     this.#sessions.add(session);
@@ -170,7 +170,7 @@ export class DeviceHub extends EventEmitter {
     await this.catalog.refresh();
     const pet = this.catalog.get(request.petId);
     if (!pet || pet.kind !== "custom") throw new Error("Pet resource is not available");
-    const asset = await this.catalog.readAsset(pet.id);
+    const asset = await this.catalog.readDeviceAsset(pet.id);
     if (!asset) throw new Error("Pet resource is not available");
     if (request.sha256 === asset.sha256) {
       session.sendEvent({ event: "resource.current", petId: pet.id, sha256: asset.sha256 });
@@ -193,7 +193,22 @@ export class DeviceHub extends EventEmitter {
 
   #broadcastSnapshot(snapshot) {
     for (const session of this.#sessions) {
-      if (session.ready) session.sendSnapshot(snapshot);
+      if (session.ready) session.sendSnapshot(this.#deviceSnapshot(snapshot));
     }
+  }
+
+  #deviceSnapshot(snapshot) {
+    return {
+      ...snapshot,
+      pet: {
+        ...snapshot.pet,
+        available: this.catalog.list().map((pet) => ({
+          id: pet.id,
+          displayName: pet.displayName,
+          spriteVersionNumber: pet.spriteVersionNumber,
+          kind: pet.kind,
+        })),
+      },
+    };
   }
 }
