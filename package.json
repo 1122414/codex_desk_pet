@@ -12,6 +12,7 @@
     "start:mock": "CODEX_DESK_MODE=mock node src/server/index.js",
     "test": "node --test",
     "test:firmware": "node scripts/check-firmware.mjs",
+    "setup:firmware-tts": "node scripts/setup-esp-tts.mjs",
     "build:firmware": "pio run -d firmware",
     "check": "node scripts/check.mjs",
     "smoke:codex": "node scripts/smoke-codex.mjs"

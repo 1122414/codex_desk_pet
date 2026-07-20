@@ -36,7 +36,6 @@ class CoreS3Ui {
       bool paired,
       const String& connection_detail,
       std::uint8_t transfer_progress);
-  void playStateCue(PresentationState state);
   bool approvalCanAccept(const Approval& approval) const;
 
  private:

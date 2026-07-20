@@ -1,12 +1,14 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 #include "codex_core/animation.hpp"
+#include "codex_core/audio.hpp"
 #include "codex_core/input.hpp"
 #include "codex_core/model.hpp"
 #include "codex_core/reconnect.hpp"
@@ -49,6 +51,32 @@ void testAnimations() {
   player.set(codex::Animation::Waving, 100);
   expect(player.frame(239) == 0, "animation keeps the first frame for its duration");
   expect(player.frame(240) == 1, "animation advances at the exact frame boundary");
+}
+
+void testAudioPlans() {
+  const std::vector<codex::PresentationState> states{
+      codex::PresentationState::Ready,
+      codex::PresentationState::Running,
+      codex::PresentationState::NeedsInput,
+      codex::PresentationState::Reviewing,
+      codex::PresentationState::Completed,
+      codex::PresentationState::Blocked,
+  };
+  for (const auto state : states) {
+    const auto& plan = codex::audioPlan(codex::audioCueForState(state));
+    expect(
+        plan.chinese_phrase != nullptr && std::strlen(plan.chinese_phrase) > 0,
+        "every Codex state has an offline Chinese phrase");
+    expect(
+        plan.tone_count > 0 && plan.tone_count <= plan.fallback_tones.size(),
+        "every Codex state has a bounded fallback tone plan");
+  }
+  expect(
+      codex::audioPlan(codex::AudioCue::NeedsInput).tone_count == 2,
+      "approval prompt keeps its distinctive double tone");
+  expect(
+      codex::audioPlan(codex::AudioCue::PetInstalled).chinese_phrase != nullptr,
+      "Pet installation has an offline Chinese phrase");
 }
 
 void testModel() {
@@ -192,6 +220,7 @@ void testResources() {
 
 int main() {
   testAnimations();
+  testAudioPlans();
   testModel();
   testInput();
   testReconnectAndSequence();

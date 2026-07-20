@@ -4,6 +4,7 @@
 
 #include "codex_core/model.hpp"
 #include "cores3_ui.hpp"
+#include "device_audio.hpp"
 #include "device_config.hpp"
 #include "device_protocol.hpp"
 #include "pet_store.hpp"
@@ -36,6 +37,7 @@ class FirmwareApp {
 
   DeviceConfigStore config_store_;
   PetStore pet_store_;
+  DeviceAudio audio_;
   CoreS3Ui ui_;
   UsbTransport usb_transport_;
   WifiTransport wifi_transport_;

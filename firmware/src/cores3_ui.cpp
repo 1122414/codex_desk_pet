@@ -92,32 +92,6 @@ void CoreS3Ui::render(
   canvas_.pushSprite(0, 0);
 }
 
-void CoreS3Ui::playStateCue(const PresentationState state) {
-  switch (state) {
-    case PresentationState::Running:
-      M5.Speaker.tone(620, 90);
-      break;
-    case PresentationState::NeedsInput:
-      M5.Speaker.tone(880, 120);
-      delay(140);
-      M5.Speaker.tone(880, 120);
-      break;
-    case PresentationState::Completed:
-      M5.Speaker.tone(660, 80);
-      delay(95);
-      M5.Speaker.tone(880, 150);
-      break;
-    case PresentationState::Blocked:
-      M5.Speaker.tone(260, 220);
-      break;
-    case PresentationState::Reviewing:
-      M5.Speaker.tone(740, 100);
-      break;
-    case PresentationState::Ready:
-      break;
-  }
-}
-
 bool CoreS3Ui::approvalCanAccept(const Approval& approval) const {
   if (!approval.present || !approval.safe_to_approve || approval.detail.empty() ||
       approval.detail.size() > 96) return false;

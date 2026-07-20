@@ -35,6 +35,9 @@ void FirmwareApp::setup() {
   if (!config_store_.begin()) connection_detail_ = "配置存储初始化失败";
   pairing_secret_ = config_store_.config().pairing_secret;
   pet_store_.begin();
+  if (!audio_.begin()) {
+    Serial.println("设备中文语音不可用，将使用非阻塞提示音");
+  }
   if (!ui_.begin(
           pet_store_,
           config_store_.config().device_id,
@@ -112,7 +115,7 @@ void FirmwareApp::handleSnapshot(const Snapshot& snapshot) {
   if (!have_cued_state_ || snapshot.state != last_cued_state_) {
     last_cued_state_ = snapshot.state;
     have_cued_state_ = true;
-    ui_.playStateCue(snapshot.state);
+    audio_.enqueue(audioCueForState(snapshot.state));
   }
 }
 
@@ -136,7 +139,7 @@ void FirmwareApp::handleProtocolEvent(
     if (type == "resource.commit") {
       requested_pet_ = "";
       connection_detail_ = "Pet已安装";
-      M5.Speaker.tone(920, 120);
+      audio_.enqueue(AudioCue::PetInstalled);
     }
     return;
   }
@@ -267,7 +270,7 @@ void FirmwareApp::selectPetOffset(const int offset) {
   if (auto* client = primaryClient(); client != nullptr) {
     client->sendPetSelection(next.id.c_str());
   }
-  M5.Speaker.tone(520, 60);
+  audio_.enqueue(AudioCue::PetSwitched);
 }
 
 void FirmwareApp::applyPairingSecret(const String& secret) {
@@ -281,6 +284,7 @@ void FirmwareApp::applyPairingSecret(const String& secret) {
   wifi_client_.setPairingSecret(secret);
   ble_client_.setPairingSecret(secret);
   connection_detail_ = "配对成功";
+  audio_.enqueue(AudioCue::PairingSucceeded);
 }
 
 void FirmwareApp::updateConnectionState() {
