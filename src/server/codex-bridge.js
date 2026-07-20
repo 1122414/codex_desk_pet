@@ -5,19 +5,130 @@ import { JsonRpcClient } from "./json-rpc-client.js";
 const APPROVAL_METHODS = new Set([
   "item/commandExecution/requestApproval",
   "item/fileChange/requestApproval",
+  "item/permissions/requestApproval",
   "execCommandApproval",
   "applyPatchApproval",
 ]);
+const MAX_DEVICE_APPROVAL_BYTES = 96;
+const MAX_DEVICE_APPROVAL_LINES = 3;
 
 function filePathsFromItem(item) {
   if (item?.type !== "fileChange" || !Array.isArray(item.changes)) return [];
   return item.changes.map((change) => change.path).filter((value) => typeof value === "string");
 }
 
+function isPlainObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function summarizePermissionPath(path) {
+  if (!isPlainObject(path)) return null;
+  if (path.type === "path" && typeof path.path === "string" && path.path) {
+    return path.path;
+  }
+  if (
+    path.type === "glob_pattern" &&
+    typeof path.pattern === "string" &&
+    path.pattern
+  ) {
+    return `匹配 ${path.pattern}`;
+  }
+  if (path.type === "special" && isPlainObject(path.value)) {
+    const suffix = typeof path.value.subpath === "string" && path.value.subpath
+      ? `/${path.value.subpath}`
+      : "";
+    if (path.value.kind === "unknown" && typeof path.value.path === "string") {
+      return `${path.value.path}${suffix}`;
+    }
+    if (typeof path.value.kind === "string" && path.value.kind) {
+      return `${path.value.kind}${suffix}`;
+    }
+  }
+  return null;
+}
+
+function summarizePermissions(profile) {
+  if (!isPlainObject(profile)) {
+    return { valid: false, lines: [], summary: "" };
+  }
+  if (Object.keys(profile).some((key) => !["fileSystem", "network"].includes(key))) {
+    return { valid: false, lines: [], summary: "" };
+  }
+  const lines = [];
+  if (profile.network !== undefined && profile.network !== null) {
+    if (
+      !isPlainObject(profile.network) ||
+      Object.keys(profile.network).some((key) => key !== "enabled") ||
+      ![true, false, null, undefined].includes(profile.network.enabled)
+    ) {
+      return { valid: false, lines: [], summary: "" };
+    }
+    if (profile.network.enabled === true) lines.push("网络访问");
+  }
+  if (profile.fileSystem !== undefined && profile.fileSystem !== null) {
+    const fileSystem = profile.fileSystem;
+    if (
+      !isPlainObject(fileSystem) ||
+      Object.keys(fileSystem).some((key) =>
+        !["entries", "globScanMaxDepth", "read", "write"].includes(key))
+    ) {
+      return { valid: false, lines: [], summary: "" };
+    }
+    if (
+      fileSystem.globScanMaxDepth !== undefined &&
+      fileSystem.globScanMaxDepth !== null &&
+      (!Number.isSafeInteger(fileSystem.globScanMaxDepth) ||
+        fileSystem.globScanMaxDepth < 1)
+    ) {
+      return { valid: false, lines: [], summary: "" };
+    }
+    for (const [access, label] of [["read", "读"], ["write", "写"]]) {
+      const paths = fileSystem[access];
+      if (paths === undefined || paths === null) continue;
+      if (!Array.isArray(paths) || paths.some((path) => typeof path !== "string" || !path)) {
+        return { valid: false, lines: [], summary: "" };
+      }
+      for (const path of paths) lines.push(`${label} ${path}`);
+    }
+    if (fileSystem.entries !== undefined && fileSystem.entries !== null) {
+      if (!Array.isArray(fileSystem.entries)) {
+        return { valid: false, lines: [], summary: "" };
+      }
+      for (const entry of fileSystem.entries) {
+        const path = summarizePermissionPath(entry?.path);
+        const label = { read: "读", write: "写", deny: "拒" }[entry?.access];
+        if (!path || !label || Object.keys(entry).some((key) => !["access", "path"].includes(key))) {
+          return { valid: false, lines: [], summary: "" };
+        }
+        lines.push(`${label} ${path}`);
+      }
+    }
+  }
+  return {
+    valid: true,
+    lines,
+    summary: lines.join(" · "),
+  };
+}
+
+function deviceApproval(detail, safeToApprove) {
+  const lines = typeof detail === "string" ? detail.split("\n") : [];
+  const complete =
+    safeToApprove &&
+    lines.length > 0 &&
+    lines.length <= MAX_DEVICE_APPROVAL_LINES &&
+    Buffer.byteLength(detail) <= MAX_DEVICE_APPROVAL_BYTES;
+  return {
+    deviceDetail: typeof detail === "string" ? detail : "",
+    deviceSafeToApprove: complete,
+  };
+}
+
 function normalizeApproval(message, relatedItem = null) {
   const params = message.params ?? {};
   const isLegacyCommand = message.method === "execCommandApproval";
   const isCommand = message.method === "item/commandExecution/requestApproval" || isLegacyCommand;
+  const isPermission = message.method === "item/permissions/requestApproval";
   const threadId = params.threadId ?? params.conversationId ?? "unknown";
   const actionCommands = Array.isArray(params.commandActions)
     ? params.commandActions.map((action) => action?.command).filter((value) => typeof value === "string" && value.trim())
@@ -31,7 +142,49 @@ function normalizeApproval(message, relatedItem = null) {
     ? params.availableDecisions.filter((decision) => typeof decision === "string" && ["accept", "decline"].includes(decision))
     : ["accept", "decline"];
   const availableDecisions = declaredDecisions.includes("decline") ? declaredDecisions : [...declaredDecisions, "decline"];
-  const safeToApprove = isCommand ? Boolean(command?.trim()) : Boolean(filePaths.length || params.grantRoot);
+  const requestedPermissions = isPermission && isPlainObject(params.permissions)
+    ? structuredClone(params.permissions)
+    : null;
+  const permissionDetails = summarizePermissions(
+    isPermission ? params.permissions : params.additionalPermissions,
+  );
+  const hasAdditionalPermissions = params.additionalPermissions !== undefined &&
+    params.additionalPermissions !== null;
+  const networkHost = params.networkApprovalContext?.host ?? null;
+  const isNetwork = Boolean(
+    isCommand &&
+    !command?.trim() &&
+    typeof networkHost === "string" &&
+    networkHost,
+  );
+  const kind = isPermission
+    ? "permission"
+    : isNetwork ? "network" : isCommand ? "command" : "file-change";
+  const title = {
+    command: "Codex 请求执行命令",
+    network: "Codex 请求访问网络",
+    "file-change": "Codex 请求修改文件",
+    permission: "Codex 请求额外权限",
+  }[kind];
+  const detailLines = isPermission
+    ? permissionDetails.lines
+    : isCommand
+      ? [
+          command?.trim() || (isNetwork ? `网络 ${networkHost}` : ""),
+          ...(hasAdditionalPermissions ? permissionDetails.lines : []),
+        ].filter(Boolean)
+      : [...filePaths, ...(!filePaths.length && params.grantRoot ? [params.grantRoot] : [])];
+  const displayDetail = isPermission
+    ? permissionDetails.summary
+    : detailLines.join("\n");
+  const safeToApprove = isPermission
+    ? Boolean(requestedPermissions && permissionDetails.valid && permissionDetails.lines.length)
+    : isCommand
+      ? Boolean(
+          (command?.trim() || isNetwork) &&
+          (!hasAdditionalPermissions || permissionDetails.valid),
+        )
+      : Boolean(filePaths.length || params.grantRoot);
   return {
     id: randomUUID(),
     rpcId: message.id,
@@ -39,16 +192,20 @@ function normalizeApproval(message, relatedItem = null) {
     threadId,
     turnId: params.turnId ?? null,
     itemId: params.itemId ?? params.callId ?? null,
-    kind: isCommand ? "command" : "file-change",
-    title: isCommand ? "Codex 请求执行命令" : "Codex 请求修改文件",
+    kind,
+    title,
     command: typeof command === "string" ? command : null,
     cwd: params.cwd ?? null,
     reason: params.reason ?? null,
-    networkHost: params.networkApprovalContext?.host ?? null,
+    networkHost,
     grantRoot: params.grantRoot ?? null,
     filePaths,
+    requestedPermissions,
+    permissionSummary: permissionDetails.summary || null,
+    displayDetail,
     availableDecisions,
     safeToApprove,
+    ...deviceApproval(displayDetail, safeToApprove),
   };
 }
 
@@ -180,11 +337,20 @@ export class CodexBridge extends EventEmitter {
     if (!this.isMock) {
       const request = this.#requestMap.get(id);
       if (!request || request.rpcId !== approval.rpcId) throw new Error("Approval request cannot be safely correlated");
-      const legacy = request.method === "execCommandApproval" || request.method === "applyPatchApproval";
-      const wireDecision = legacy
-        ? (decision === "accept" ? "approved" : "denied")
-        : decision;
-      this.client.respond(request.rpcId, { decision: wireDecision });
+      if (request.method === "item/permissions/requestApproval") {
+        this.client.respond(request.rpcId, {
+          permissions: decision === "accept"
+            ? structuredClone(approval.requestedPermissions)
+            : {},
+          scope: "turn",
+        });
+      } else {
+        const legacy = request.method === "execCommandApproval" || request.method === "applyPatchApproval";
+        const wireDecision = legacy
+          ? (decision === "accept" ? "approved" : "denied")
+          : decision;
+        this.client.respond(request.rpcId, { decision: wireDecision });
+      }
       this.#requestMap.delete(id);
     }
 
@@ -207,8 +373,12 @@ export class CodexBridge extends EventEmitter {
       reason: "运行项目测试",
       grantRoot: null,
       filePaths: [],
+      requestedPermissions: null,
+      permissionSummary: null,
+      displayDetail: "npm test",
       availableDecisions: ["accept", "decline"],
       safeToApprove: true,
+      ...deviceApproval("npm test", true),
     };
     this.store.addApproval(approval);
     return approval;
@@ -269,7 +439,15 @@ export class CodexBridge extends EventEmitter {
     const items = (response?.thread?.turns ?? []).flatMap((turn) => turn.items ?? []);
     const item = items.find((candidate) => candidate.id === approval.itemId);
     const filePaths = filePathsFromItem(item);
-    if (filePaths.length) this.store.updateApproval(approval.id, { filePaths, safeToApprove: true });
+    if (filePaths.length) {
+      const displayDetail = filePaths.join("\n");
+      this.store.updateApproval(approval.id, {
+        filePaths,
+        displayDetail,
+        safeToApprove: true,
+        ...deviceApproval(displayDetail, true),
+      });
+    }
   }
 
   #handleDisconnect(error) {

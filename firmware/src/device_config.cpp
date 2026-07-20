@@ -18,7 +18,13 @@ bool DeviceConfigStore::begin() {
     }
   }
   config_.setup_code = preferences_.getString("setup_code");
-  if (config_.setup_code.length() != 6) {
+  auto valid_setup_code = config_.setup_code.length() == 6;
+  for (std::size_t index = 0;
+       valid_setup_code && index < config_.setup_code.length();
+       ++index) {
+    valid_setup_code = isDigit(config_.setup_code[index]);
+  }
+  if (!valid_setup_code) {
     config_.setup_code = makeSetupCode();
     if (!writeString("setup_code", config_.setup_code)) {
       return false;
@@ -96,6 +102,14 @@ bool DeviceConfigStore::clearPairing() {
   if (!open_) return false;
   preferences_.remove("pair_secret");
   config_.pairing_secret = "";
+  return true;
+}
+
+bool DeviceConfigStore::rotateSetupCode() {
+  if (!open_) return false;
+  const auto next = makeSetupCode();
+  if (!writeString("setup_code", next)) return false;
+  config_.setup_code = next;
   return true;
 }
 

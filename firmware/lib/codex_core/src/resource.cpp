@@ -5,6 +5,23 @@
 
 namespace codex {
 
+int newestPointerSlot(
+    const PointerSlotState& first,
+    const PointerSlotState& second) {
+  if (!first.valid && !second.valid) return -1;
+  if (!second.valid) return 0;
+  if (!first.valid) return 1;
+  return second.generation > first.generation ? 1 : 0;
+}
+
+int nextPointerWriteSlot(
+    const PointerSlotState& first,
+    const PointerSlotState& second) {
+  if (!first.valid) return 0;
+  if (!second.valid) return 1;
+  return first.generation <= second.generation ? 0 : 1;
+}
+
 bool validateDevicePetManifest(const DevicePetManifest& manifest) {
   if (manifest.pet_id.empty() || manifest.pet_id.size() > 64) {
     return false;
@@ -82,6 +99,17 @@ bool ResourceTransferTracker::accept(
         return left.offset < right.offset;
       });
   return true;
+}
+
+bool ResourceTransferTracker::contains(
+    const std::uint32_t offset,
+    const std::uint32_t length) const {
+  return std::any_of(
+      received_.begin(),
+      received_.end(),
+      [offset, length](const ByteRange& range) {
+        return range.offset == offset && range.length == length;
+      });
 }
 
 std::vector<ByteRange> ResourceTransferTracker::missingRanges() const {

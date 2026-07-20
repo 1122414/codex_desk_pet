@@ -330,9 +330,12 @@ function renderApproval(approval) {
   elements["approval-card"].hidden = !approval;
   if (!approval) return;
   elements["approval-title"].textContent = approval.title;
-  const detail = approval.kind === "command"
-    ? approval.command || "命令详情尚未加载"
-    : approval.filePaths?.length ? approval.filePaths.join(" · ") : approval.grantRoot || "文件详情尚未加载";
+  const detail = approval.displayDetail ||
+    (approval.kind === "command"
+      ? approval.command || "命令详情尚未加载"
+      : approval.filePaths?.length
+        ? approval.filePaths.join(" · ")
+        : approval.grantRoot || "审批详情尚未加载");
   elements["approval-detail"].textContent = detail;
   elements["approval-reason"].textContent =
     [approval.reason, approval.cwd, approval.networkHost].filter(Boolean).join(" · ") || "请确认是否允许本次操作";

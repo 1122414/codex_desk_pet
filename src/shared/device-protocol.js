@@ -1,4 +1,6 @@
 import {
+  createCipheriv,
+  createDecipheriv,
   createHash,
   createHmac,
   randomBytes,
@@ -7,10 +9,11 @@ import {
 } from "node:crypto";
 import { PET_ATLAS, STANDARD_ANIMATIONS } from "./pet-spec.js";
 
-export const DEVICE_PROTOCOL_VERSION = 1;
+export const DEVICE_PROTOCOL_VERSION = 2;
 export const HEARTBEAT_INTERVAL_MS = 5_000;
 export const CONNECTION_TIMEOUT_MS = 15_000;
 export const MAX_RESOURCE_BYTES = 16 * 1024 * 1024;
+export const DEVICE_ENCRYPTION_ALGORITHM = "A256GCM";
 export const DEVICE_PET_RESOURCE = Object.freeze({
   format: "rgb565-key-v1",
   frameWidth: 144,
@@ -48,7 +51,7 @@ export const DEVICE_COMMANDS = Object.freeze([
 
 export const TRANSPORT_PROFILES = Object.freeze({
   usb: Object.freeze({ maxEnvelopeBytes: 8 * 1024, resourceChunkBytes: 3 * 1024 }),
-  wifi: Object.freeze({ maxEnvelopeBytes: 15 * 1024, resourceChunkBytes: 9 * 1024 }),
+  wifi: Object.freeze({ maxEnvelopeBytes: 15 * 1024, resourceChunkBytes: 6 * 1024 }),
   ble: Object.freeze({ maxEnvelopeBytes: 8 * 1024, resourceChunkBytes: 96, linkMtuBytes: 180 }),
   memory: Object.freeze({ maxEnvelopeBytes: 64 * 1024, resourceChunkBytes: 12 * 1024 }),
 });
@@ -56,6 +59,16 @@ export const TRANSPORT_PROFILES = Object.freeze({
 export const RELIABLE_MESSAGE_TYPES = Object.freeze(
   MESSAGE_TYPES.filter((type) => !["ack", "heartbeat", "error"].includes(type)),
 );
+
+export const HANDSHAKE_MESSAGE_TYPES = Object.freeze([
+  "hello",
+  "pair.request",
+  "pair.accepted",
+  "pair.rejected",
+  "challenge",
+  "authenticate",
+  "ready",
+]);
 
 export class ProtocolError extends Error {
   constructor(message, code = "INVALID_MESSAGE") {
@@ -67,6 +80,10 @@ export class ProtocolError extends Error {
 
 function isPlainObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+export function isEncryptedEnvelope(envelope) {
+  return isPlainObject(envelope?.payload) && envelope.payload.encrypted === true;
 }
 
 function requireString(value, field, pattern = null) {
@@ -227,6 +244,24 @@ function validatePayload(type, payload) {
   }
 }
 
+function validateEncryptedPayload(type, payload) {
+  if (HANDSHAKE_MESSAGE_TYPES.includes(type)) {
+    throw new ProtocolError("Handshake messages cannot be encrypted", "INVALID_ENCRYPTION_STATE");
+  }
+  if (
+    payload.encrypted !== true ||
+    payload.algorithm !== DEVICE_ENCRYPTION_ALGORITHM ||
+    typeof payload.nonce !== "string" ||
+    !/^[A-Za-z0-9_-]{16}$/.test(payload.nonce) ||
+    typeof payload.data !== "string" ||
+    !/^[A-Za-z0-9+/]*={0,2}$/.test(payload.data) ||
+    typeof payload.tag !== "string" ||
+    !/^[A-Za-z0-9_-]{22}$/.test(payload.tag)
+  ) {
+    throw new ProtocolError("Encrypted payload is invalid", "INVALID_ENCRYPTED_PAYLOAD");
+  }
+}
+
 export function createEnvelope({
   sequence,
   type,
@@ -277,7 +312,11 @@ export function validateEnvelope(envelope) {
   )) {
     throw new ProtocolError("Message sessionId is invalid");
   }
-  validatePayload(envelope.type, envelope.payload);
+  if (isEncryptedEnvelope(envelope)) {
+    validateEncryptedPayload(envelope.type, envelope.payload);
+  } else {
+    validatePayload(envelope.type, envelope.payload);
+  }
   return envelope;
 }
 
@@ -367,6 +406,120 @@ function normalizeSecret(secret) {
     : typeof secret === "string" && /^[a-f0-9]{64,}$/.test(secret) ? Buffer.from(secret, "hex") : null;
   if (!value || value.length < 32) throw new ProtocolError("Pairing secret must contain at least 32 bytes", "INVALID_SECRET");
   return value;
+}
+
+function encryptionContextMaterial({
+  deviceId,
+  deviceNonce,
+  bridgeNonce,
+  direction,
+}) {
+  requireString(deviceId, "deviceId", /^[a-z0-9][a-z0-9-]{0,63}$/);
+  requireString(deviceNonce, "deviceNonce", /^[A-Za-z0-9_-]{16,128}$/);
+  requireString(bridgeNonce, "bridgeNonce", /^[A-Za-z0-9_-]{16,128}$/);
+  if (!["bridge-to-device", "device-to-bridge"].includes(direction)) {
+    throw new ProtocolError("Encryption direction is invalid", "INVALID_ENCRYPTION_CONTEXT");
+  }
+  return JSON.stringify([
+    "codex-desk-aead-v1",
+    DEVICE_PROTOCOL_VERSION,
+    deviceId,
+    deviceNonce,
+    bridgeNonce,
+    direction,
+  ]);
+}
+
+function deriveEncryptionKey({ secret, ...context }) {
+  return createHmac("sha256", normalizeSecret(secret))
+    .update(encryptionContextMaterial(context))
+    .digest();
+}
+
+function deriveEnvelopeNonce(key, sequence) {
+  const nonce = Buffer.alloc(12);
+  createHmac("sha256", key)
+    .update("codex-desk-nonce-prefix-v1")
+    .digest()
+    .copy(nonce, 0, 0, 4);
+  nonce.writeBigUInt64BE(BigInt(sequence), 4);
+  return nonce;
+}
+
+function envelopeAdditionalData(envelope) {
+  return Buffer.from(JSON.stringify([
+    envelope.version,
+    envelope.id,
+    envelope.sequence,
+    envelope.type,
+    envelope.sentAt,
+    envelope.sessionId ?? null,
+  ]));
+}
+
+export function encryptEnvelopePayload(envelope, context) {
+  validateEnvelope(envelope);
+  if (isEncryptedEnvelope(envelope)) {
+    throw new ProtocolError("Envelope is already encrypted", "INVALID_ENCRYPTION_STATE");
+  }
+  if (HANDSHAKE_MESSAGE_TYPES.includes(envelope.type)) {
+    throw new ProtocolError("Handshake messages must remain plaintext", "INVALID_ENCRYPTION_STATE");
+  }
+  const key = deriveEncryptionKey(context);
+  const nonce = deriveEnvelopeNonce(key, envelope.sequence);
+  const cipher = createCipheriv("aes-256-gcm", key, nonce, { authTagLength: 16 });
+  cipher.setAAD(envelopeAdditionalData(envelope));
+  const data = Buffer.concat([
+    cipher.update(JSON.stringify(envelope.payload), "utf8"),
+    cipher.final(),
+  ]);
+  const encrypted = {
+    ...envelope,
+    payload: {
+      encrypted: true,
+      algorithm: DEVICE_ENCRYPTION_ALGORITHM,
+      nonce: nonce.toString("base64url"),
+      data: data.toString("base64"),
+      tag: cipher.getAuthTag().toString("base64url"),
+    },
+  };
+  return validateEnvelope(encrypted);
+}
+
+export function decryptEnvelopePayload(envelope, context) {
+  validateEnvelope(envelope);
+  if (!isEncryptedEnvelope(envelope)) {
+    throw new ProtocolError("Encrypted envelope is required", "ENCRYPTION_REQUIRED");
+  }
+  const key = deriveEncryptionKey(context);
+  const expectedNonce = deriveEnvelopeNonce(key, envelope.sequence);
+  const nonce = Buffer.from(envelope.payload.nonce, "base64url");
+  const tag = Buffer.from(envelope.payload.tag, "base64url");
+  if (
+    nonce.length !== expectedNonce.length ||
+    tag.length !== 16 ||
+    !timingSafeEqual(nonce, expectedNonce)
+  ) {
+    throw new ProtocolError("Encrypted envelope nonce is invalid", "DECRYPTION_FAILED");
+  }
+  try {
+    const decipher = createDecipheriv("aes-256-gcm", key, nonce, { authTagLength: 16 });
+    decipher.setAAD(envelopeAdditionalData(envelope));
+    decipher.setAuthTag(tag);
+    const plaintext = Buffer.concat([
+      decipher.update(Buffer.from(envelope.payload.data, "base64")),
+      decipher.final(),
+    ]).toString("utf8");
+    const payload = JSON.parse(plaintext);
+    if (!isPlainObject(payload)) {
+      throw new ProtocolError("Decrypted payload must be an object", "DECRYPTION_FAILED");
+    }
+    validatePayload(envelope.type, payload);
+    return { ...envelope, payload };
+  } catch (error) {
+    if (error instanceof ProtocolError) throw error;
+    throw new ProtocolError("Encrypted envelope authentication failed", "DECRYPTION_FAILED");
+  }
 }
 
 function handshakeMaterial({ deviceId, deviceNonce, bridgeNonce, role }) {

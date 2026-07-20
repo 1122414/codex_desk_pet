@@ -200,6 +200,15 @@ export class DeviceHub extends EventEmitter {
   #deviceSnapshot(snapshot) {
     return {
       ...snapshot,
+      approval: snapshot.approval ? {
+        id: snapshot.approval.id,
+        kind: snapshot.approval.kind,
+        title: snapshot.approval.title,
+        detail: snapshot.approval.deviceDetail,
+        reason: snapshot.approval.reason,
+        safeToApprove: snapshot.approval.deviceSafeToApprove,
+        availableDecisions: snapshot.approval.availableDecisions,
+      } : null,
       pet: {
         ...snapshot.pet,
         available: this.catalog.list().map((pet) => ({

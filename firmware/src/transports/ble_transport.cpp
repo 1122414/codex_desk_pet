@@ -2,6 +2,7 @@
 
 #include <BLE2902.h>
 #include <BLEDevice.h>
+#include <BLESecurity.h>
 #include <mbedtls/sha256.h>
 
 #include <algorithm>
@@ -11,7 +12,7 @@
 namespace codex::firmware {
 namespace {
 
-constexpr std::uint8_t kProtocolVersion = 1;
+constexpr std::uint8_t kProtocolVersion = 2;
 
 std::uint16_t readU16(const std::uint8_t* value) {
   return static_cast<std::uint16_t>(
@@ -99,9 +100,21 @@ class ProvisionCallbacks final : public BLECharacteristicCallbacks {
 
 }  // namespace
 
-void BleTransport::begin(const String& device_name) {
+void BleTransport::begin(
+    const String& device_name,
+    const String& setup_code) {
   BLEDevice::init(device_name.c_str());
   BLEDevice::setMTU(kMtuBytes + 3);
+  BLEDevice::setEncryptionLevel(ESP_BLE_SEC_ENCRYPT_MITM);
+  auto* security = new BLESecurity();
+  security->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);
+  security->setKeySize(16);
+  security->setInitEncryptionKey(
+      ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
+  security->setRespEncryptionKey(
+      ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
+  security->setStaticPIN(
+      static_cast<std::uint32_t>(setup_code.toInt()));
   server_ = BLEDevice::createServer();
   server_->setCallbacks(new ServerCallbacks(this));
   auto* service = server_->createService(kServiceUuid);
@@ -116,9 +129,24 @@ void BleTransport::begin(const String& device_name) {
       kProvisionUuid,
       BLECharacteristic::PROPERTY_WRITE |
           BLECharacteristic::PROPERTY_WRITE_NR);
+  const auto write_permissions = static_cast<esp_gatt_perm_t>(
+      ESP_GATT_PERM_WRITE_ENCRYPTED |
+      ESP_GATT_PERM_WRITE_ENC_MITM);
+  const auto read_permissions = static_cast<esp_gatt_perm_t>(
+      ESP_GATT_PERM_READ_ENCRYPTED |
+      ESP_GATT_PERM_READ_ENC_MITM);
+  rx->setAccessPermissions(write_permissions);
+  provision->setAccessPermissions(write_permissions);
+  tx_->setAccessPermissions(read_permissions);
   rx->setCallbacks(new RxCallbacks(this));
   provision->setCallbacks(new ProvisionCallbacks(this));
-  tx_->addDescriptor(new BLE2902());
+  auto* notifications = new BLE2902();
+  notifications->setAccessPermissions(static_cast<esp_gatt_perm_t>(
+      ESP_GATT_PERM_READ_ENCRYPTED |
+      ESP_GATT_PERM_WRITE_ENCRYPTED |
+      ESP_GATT_PERM_READ_ENC_MITM |
+      ESP_GATT_PERM_WRITE_ENC_MITM));
+  tx_->addDescriptor(notifications);
   service->start();
   auto* advertising = BLEDevice::getAdvertising();
   advertising->addServiceUUID(kServiceUuid);

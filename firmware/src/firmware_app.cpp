@@ -46,7 +46,9 @@ void FirmwareApp::setup() {
   usb_transport_.begin();
   const auto& stored = config_store_.config();
   const auto suffix_at = std::max<int>(0, static_cast<int>(stored.device_id.length()) - 8);
-  ble_transport_.begin("CodexDesk-" + stored.device_id.substring(suffix_at));
+  ble_transport_.begin(
+      "CodexDesk-" + stored.device_id.substring(suffix_at),
+      stored.setup_code);
   if (!stored.wifi_ssid.isEmpty() && !stored.bridge_host.isEmpty()) {
     wifi_transport_.begin(
         stored.wifi_ssid, stored.wifi_password, stored.bridge_host, stored.bridge_port);
@@ -80,6 +82,7 @@ void FirmwareApp::loop() {
     pet_store_.checkpoint();
     config_store_.clearNetwork();
     config_store_.clearPairing();
+    config_store_.rotateSetupCode();
     delay(100);
     ESP.restart();
   }
@@ -153,7 +156,9 @@ void FirmwareApp::handleUiAction(const UiAction& action) {
       selectPetOffset(1);
       break;
     case UiActionType::AcceptApproval:
-      if (client != nullptr && model_.snapshot().approval.present) {
+      if (client != nullptr &&
+          model_.snapshot().approval.present &&
+          model_.snapshot().approval.safe_to_approve) {
         client->sendApprovalDecision(model_.snapshot().approval.request_id.c_str(), true);
       }
       break;
@@ -190,9 +195,14 @@ void FirmwareApp::handleProvisioning() {
     connection_detail_ = "蓝牙配网验证失败";
     return;
   }
-  wifi_transport_.close();
-  wifi_transport_.begin(ssid, password, host, port);
-  connection_detail_ = "Wi-Fi配置已保存";
+  if (!config_store_.rotateSetupCode()) {
+    connection_detail_ = "配网码轮换失败";
+    return;
+  }
+  connection_detail_ = "Wi-Fi配置已保存，正在重启";
+  pet_store_.checkpoint();
+  delay(100);
+  ESP.restart();
 }
 
 void FirmwareApp::updateTelemetry(const std::uint64_t now_ms) {

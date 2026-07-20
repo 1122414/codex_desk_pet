@@ -3,32 +3,28 @@ import {
   AtomicPetResourceCache,
   CommandDeduplicator,
   CONNECTION_TIMEOUT_MS,
+  HANDSHAKE_MESSAGE_TYPES,
   HEARTBEAT_INTERVAL_MS,
   PetResourceAssembler,
+  ProtocolError,
   RELIABLE_MESSAGE_TYPES,
   ReliableOutbox,
   SequenceWindow,
   TRANSPORT_PROFILES,
-  createAck,
   createEnvelope,
   createHandshakeNonce,
   createHandshakeProof,
   createPetResourceManifest,
   createResourceChunks,
+  decryptEnvelopePayload,
   deriveSessionId,
+  encryptEnvelopePayload,
+  isEncryptedEnvelope,
   validateEnvelope,
   verifyHandshakeProof,
 } from "../shared/device-protocol.js";
 
-const HANDSHAKE_TYPES = new Set([
-  "hello",
-  "pair.request",
-  "pair.accepted",
-  "pair.rejected",
-  "challenge",
-  "authenticate",
-  "ready",
-]);
+const HANDSHAKE_TYPES = new Set(HANDSHAKE_MESSAGE_TYPES);
 
 const DEFAULT_RELIABLE_WINDOWS = Object.freeze({
   usb: 8,
@@ -111,7 +107,16 @@ export class DeviceSession extends EventEmitter {
     this.#outbox = new ReliableOutbox(retry);
     this.#commandDeduplicator = new CommandDeduplicator(512);
     this.onTransportMessage = (message) => {
-      this.#receive(message).catch((error) => this.emit("sessionError", error));
+      this.#receive(message).catch((error) => {
+        this.emit("sessionError", error);
+        if (["DECRYPTION_FAILED", "ENCRYPTION_REQUIRED"].includes(error?.code)) {
+          this.emit("authenticationFailed", {
+            deviceId: this.deviceId,
+            reason: error.code,
+          });
+          this.close();
+        }
+      });
     };
     this.onTransportClose = () => this.#handleClose();
     this.onTransportError = (error) => this.emit("sessionError", error);
@@ -275,13 +280,16 @@ export class DeviceSession extends EventEmitter {
   }
 
   #transmit(type, payload, reliable) {
-    const envelope = createEnvelope({
+    const plaintextEnvelope = createEnvelope({
       sequence: this.#nextSequence++,
       type,
       payload,
       sentAt: this.now(),
       sessionId: this.sessionId,
     });
+    const envelope = this.ready && !HANDSHAKE_TYPES.has(type)
+      ? encryptEnvelopePayload(plaintextEnvelope, this.#encryptionContext("outgoing"))
+      : plaintextEnvelope;
     this.transport.send(envelope);
     this.lastSentAt = this.now();
     if (reliable) this.#outbox.track(envelope, this.lastSentAt);
@@ -300,21 +308,30 @@ export class DeviceSession extends EventEmitter {
   }
 
   #sendAck(envelope) {
-    const acknowledgement = createAck(envelope, this.#nextSequence++);
-    this.transport.send(acknowledgement);
-    this.lastSentAt = this.now();
+    this.#send("ack", {
+      acknowledgedId: envelope.id,
+      acknowledgedSequence: envelope.sequence,
+    }, false);
   }
 
   async #receive(message) {
-    const envelope = validateEnvelope(message);
+    let envelope = validateEnvelope(message);
     this.lastReceivedAt = this.now();
-    if (
-      this.ready &&
-      !HANDSHAKE_TYPES.has(envelope.type) &&
-      envelope.type !== "ack" &&
-      envelope.sessionId !== this.sessionId
-    ) {
+    const handshake = HANDSHAKE_TYPES.has(envelope.type);
+    if (this.ready && !handshake && envelope.sessionId !== this.sessionId) {
       this.#send("error", { code: "INVALID_SESSION", message: "Message session does not match" }, false);
+      return;
+    }
+    if (this.ready && !handshake) {
+      if (!isEncryptedEnvelope(envelope)) {
+        this.#send("error", { code: "ENCRYPTION_REQUIRED" }, false);
+        throw new ProtocolError("Authenticated messages must be encrypted", "ENCRYPTION_REQUIRED");
+      }
+      envelope = decryptEnvelopePayload(envelope, this.#encryptionContext("incoming"));
+    } else if (isEncryptedEnvelope(envelope)) {
+      throw new ProtocolError("Encryption is not available before authentication", "INVALID_ENCRYPTION_STATE");
+    } else if (!this.ready && !handshake && envelope.type !== "ack") {
+      this.#send("error", { code: "AUTHENTICATION_REQUIRED" }, false);
       return;
     }
 
@@ -337,17 +354,19 @@ export class DeviceSession extends EventEmitter {
       return;
     }
 
-    if (RELIABLE_MESSAGE_TYPES.includes(envelope.type)) {
-      this.#sendAck(envelope);
+    if (handshake) {
+      if (envelope.type !== "ready" && RELIABLE_MESSAGE_TYPES.includes(envelope.type)) {
+        this.#sendAck(envelope);
+      }
+      await this.#handleHandshake(envelope);
+      if (envelope.type === "ready" && RELIABLE_MESSAGE_TYPES.includes(envelope.type)) {
+        this.#sendAck(envelope);
+      }
+      return;
     }
 
-    if (HANDSHAKE_TYPES.has(envelope.type)) {
-      await this.#handleHandshake(envelope);
-      return;
-    }
-    if (!this.ready) {
-      this.#send("error", { code: "AUTHENTICATION_REQUIRED" }, false);
-      return;
+    if (RELIABLE_MESSAGE_TYPES.includes(envelope.type)) {
+      this.#sendAck(envelope);
     }
 
     switch (envelope.type) {
@@ -434,6 +453,11 @@ export class DeviceSession extends EventEmitter {
         return;
       }
       const bridgeNonce = this.nonceFactory();
+      this.state = "handshaking";
+      this.sessionId = null;
+      this.#handshakeStartedAt = this.now();
+      this.#outbox.clear();
+      this.#reliableQueue = [];
       this.deviceId = payload.deviceId;
       this.secret = secret;
       this.#handshake = {
@@ -554,6 +578,21 @@ export class DeviceSession extends EventEmitter {
       deviceNonce: this.#handshake.deviceNonce,
       transport: this.transport.kind,
     });
+  }
+
+  #encryptionContext(flow) {
+    if (!["incoming", "outgoing"].includes(flow) || !this.#handshake?.bridgeNonce) {
+      throw new ProtocolError("Encryption context is not ready", "INVALID_ENCRYPTION_CONTEXT");
+    }
+    const outgoing = flow === "outgoing";
+    const bridgeToDevice = this.role === "bridge" ? outgoing : !outgoing;
+    return {
+      secret: this.secret,
+      deviceId: this.#handshake.deviceId,
+      deviceNonce: this.#handshake.deviceNonce,
+      bridgeNonce: this.#handshake.bridgeNonce,
+      direction: bridgeToDevice ? "bridge-to-device" : "device-to-bridge",
+    };
   }
 }
 

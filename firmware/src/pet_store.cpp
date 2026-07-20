@@ -190,6 +190,14 @@ bool PetStore::acceptChunk(const JsonObjectConst payload, String& error) {
     error = "resource chunk checksum failed";
     return false;
   }
+  if (tracker_.contains(offset, decoded_bytes)) {
+    if (!verifyExistingChunk(
+            pet_id, offset, decoded.data(), decoded_bytes)) {
+      error = "duplicate resource chunk conflicts with stored bytes";
+      return false;
+    }
+    return true;
+  }
   if (!tracker_.accept(offset, decoded_bytes)) {
     error = "resource chunk range overlaps or exceeds manifest";
     return false;
@@ -231,25 +239,23 @@ bool PetStore::commitTransfer(const JsonObjectConst payload, String& error) {
   const auto manifest = manifestPath(pet_id, sha256);
   const auto manifest_temp = manifest + ".tmp";
   SD.remove(manifest_temp);
-  if (!writeManifest(transfer_, manifest_temp) || !SD.rename(manifest_temp, manifest)) {
+  if (!writeManifest(transfer_, manifest_temp)) {
+    error = "cannot write Pet manifest";
+    return false;
+  }
+  SD.remove(manifest);
+  if (!SD.rename(manifest_temp, manifest)) {
     error = "cannot publish Pet manifest";
     return false;
   }
-  const auto active = activePath(pet_id);
-  const auto active_temp = active + ".tmp";
-  SD.remove(active_temp);
-  auto pointer = SD.open(active_temp, FILE_WRITE);
-  if (!pointer || pointer.print(sha256) != sha256.length()) {
-    pointer.close();
-    error = "cannot update active Pet pointer";
-    return false;
-  }
-  pointer.flush();
-  pointer.close();
-  SD.remove(active);
-  if (!SD.rename(active_temp, active)) {
-    error = "cannot activate installed Pet";
-    return false;
+  if (!publishActivePointer(pet_id, sha256, error)) return false;
+  const auto verified_key = pet_id + ":" + sha256;
+  if (std::find(
+          verified_assets_.begin(),
+          verified_assets_.end(),
+          verified_key) == verified_assets_.end()) {
+    if (verified_assets_.size() >= 64) verified_assets_.erase(verified_assets_.begin());
+    verified_assets_.push_back(verified_key);
   }
   SD.remove(resumePath(pet_id));
   tracker_.reset();
@@ -293,9 +299,33 @@ bool PetStore::validateManifest(
 
 bool PetStore::loadActiveManifest(const String& pet_id, ActiveManifest& manifest) {
   if (!mounted_ || !safePetId(pet_id)) return false;
-  String sha256;
-  if (!readText(SD, activePath(pet_id), sha256, 64)) return false;
-  sha256.trim();
+  ActivePointer first;
+  ActivePointer second;
+  const auto have_first = readActivePointer(pet_id, 'a', first);
+  const auto have_second = readActivePointer(pet_id, 'b', second);
+  const auto newest = newestPointerSlot(
+      {have_first, first.generation},
+      {have_second, second.generation});
+  if (newest == 0) {
+    if (loadManifestBySha(pet_id, first.sha256, manifest)) return true;
+    if (have_second &&
+        loadManifestBySha(pet_id, second.sha256, manifest)) return true;
+  } else if (newest == 1) {
+    if (loadManifestBySha(pet_id, second.sha256, manifest)) return true;
+    if (have_first &&
+        loadManifestBySha(pet_id, first.sha256, manifest)) return true;
+  }
+
+  String legacy_sha;
+  if (!readText(SD, legacyActivePath(pet_id), legacy_sha, 64)) return false;
+  legacy_sha.trim();
+  return loadManifestBySha(pet_id, legacy_sha, manifest);
+}
+
+bool PetStore::loadManifestBySha(
+    const String& pet_id,
+    const String& sha256,
+    ActiveManifest& manifest) {
   if (sha256.length() != 64) return false;
   String text;
   if (!readText(SD, manifestPath(pet_id, sha256), text, 2'048)) return false;
@@ -304,10 +334,124 @@ bool PetStore::loadActiveManifest(const String& pet_id, ActiveManifest& manifest
   String error;
   if (!validateManifest(document.as<JsonObjectConst>(), manifest, error) ||
       manifest.pet_id != pet_id || manifest.sha256 != sha256) return false;
-  auto file = SD.open(assetPath(pet_id, sha256), FILE_READ);
-  const auto valid = file && !file.isDirectory() && file.size() == manifest.bytes;
-  file.close();
-  return valid;
+  const auto verified_key = pet_id + ":" + sha256;
+  if (std::find(
+          verified_assets_.begin(),
+          verified_assets_.end(),
+          verified_key) != verified_assets_.end()) {
+    return true;
+  }
+  if (!verifyFile(
+          assetPath(pet_id, sha256),
+          manifest.bytes,
+          manifest.sha256)) {
+    return false;
+  }
+  if (verified_assets_.size() >= 64) verified_assets_.erase(verified_assets_.begin());
+  verified_assets_.push_back(verified_key);
+  return true;
+}
+
+bool PetStore::readActivePointer(
+    const String& pet_id,
+    const char slot,
+    ActivePointer& pointer) {
+  String text;
+  if (!readText(SD, activeSlotPath(pet_id, slot), text, 512)) return false;
+  JsonDocument document;
+  if (deserializeJson(document, text) ||
+      (document["version"] | 0) != 1 ||
+      String(document["petId"] | "") != pet_id ||
+      !document["sha256"].is<const char*>() ||
+      !document["generation"].is<std::uint64_t>()) {
+    return false;
+  }
+  pointer.sha256 = String(document["sha256"].as<const char*>());
+  pointer.generation = document["generation"].as<std::uint64_t>();
+  if (pointer.sha256.length() != 64 || pointer.generation == 0) return false;
+  for (std::size_t index = 0; index < pointer.sha256.length(); ++index) {
+    const auto value = pointer.sha256[index];
+    if (!isHexadecimalDigit(value) || (value >= 'A' && value <= 'F')) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool PetStore::publishActivePointer(
+    const String& pet_id,
+    const String& sha256,
+    String& error) {
+  ActivePointer first;
+  ActivePointer second;
+  const auto have_first = readActivePointer(pet_id, 'a', first);
+  const auto have_second = readActivePointer(pet_id, 'b', second);
+  const auto highest_generation = std::max(
+      have_first ? first.generation : 0U,
+      have_second ? second.generation : 0U);
+  const auto target_slot = nextPointerWriteSlot(
+      {have_first, first.generation},
+      {have_second, second.generation}) == 0 ? 'a' : 'b';
+  const auto path = activeSlotPath(pet_id, target_slot);
+  const auto temporary = path + ".tmp";
+  JsonDocument document;
+  document["version"] = 1;
+  document["petId"] = pet_id;
+  document["sha256"] = sha256;
+  document["generation"] = highest_generation + 1U;
+  SD.remove(temporary);
+  auto pointer = SD.open(temporary, FILE_WRITE);
+  if (!pointer || serializeJson(document, pointer) == 0) {
+    pointer.close();
+    error = "cannot write active Pet pointer";
+    return false;
+  }
+  pointer.flush();
+  pointer.close();
+  SD.remove(path);
+  if (!SD.rename(temporary, path)) {
+    error = "cannot publish active Pet pointer";
+    return false;
+  }
+  ActivePointer published;
+  if (!readActivePointer(pet_id, target_slot, published) ||
+      published.sha256 != sha256 ||
+      published.generation != highest_generation + 1U) {
+    error = "active Pet pointer verification failed";
+    return false;
+  }
+  return true;
+}
+
+bool PetStore::verifyExistingChunk(
+    const String& pet_id,
+    const std::uint32_t offset,
+    const std::uint8_t* data,
+    const std::size_t length) {
+  if (data == nullptr || length == 0) return false;
+  auto part = SD.open(partPath(pet_id), FILE_READ);
+  if (!part || part.isDirectory() || !part.seek(offset)) {
+    part.close();
+    return false;
+  }
+  std::array<std::uint8_t, 512> buffer{};
+  std::size_t compared = 0;
+  std::uint8_t difference = 0;
+  while (compared < length) {
+    const auto expected =
+        std::min<std::size_t>(buffer.size(), length - compared);
+    const auto count = part.read(buffer.data(), expected);
+    if (count != expected) {
+      part.close();
+      return false;
+    }
+    for (std::size_t index = 0; index < count; ++index) {
+      difference |= buffer[index] ^ data[compared + index];
+    }
+    compared += count;
+  }
+  part.close();
+  return difference == 0;
 }
 
 bool PetStore::loadResume(const String& pet_id, const String& expected_sha) {
@@ -323,14 +467,22 @@ bool PetStore::loadResume(const String& pet_id, const String& expected_sha) {
     return false;
   }
   std::vector<ByteRange> ranges;
+  std::uint32_t highest_received_end = 0;
   for (const auto range : document["received"].as<JsonArrayConst>()) {
-    ranges.push_back({
-        range["offset"] | UINT32_MAX,
-        static_cast<std::uint32_t>(range["length"] | 0U),
-    });
+    const auto offset = range["offset"] | UINT32_MAX;
+    const auto length =
+        static_cast<std::uint32_t>(range["length"] | 0U);
+    ranges.push_back({offset, length});
+    if (offset != UINT32_MAX && length <= UINT32_MAX - offset) {
+      highest_received_end =
+          std::max(highest_received_end, offset + length);
+    }
   }
   auto part = SD.open(partPath(pet_id), FILE_READ);
-  const auto valid_file = part && !part.isDirectory() && part.size() <= manifest.bytes;
+  const auto valid_file =
+      part && !part.isDirectory() &&
+      part.size() <= manifest.bytes &&
+      highest_received_end <= part.size();
   part.close();
   if (!valid_file || !tracker_.restore(pet_id.c_str(), manifest.bytes, ranges)) return false;
   transfer_ = manifest;
@@ -456,8 +608,14 @@ String PetStore::resumePath(const String& pet_id) const {
   return String(kPetRoot) + "/" + pet_id + ".resume.json";
 }
 
-String PetStore::activePath(const String& pet_id) const {
+String PetStore::legacyActivePath(const String& pet_id) const {
   return String(kPetRoot) + "/" + pet_id + ".active";
+}
+
+String PetStore::activeSlotPath(
+    const String& pet_id,
+    const char slot) const {
+  return String(kPetRoot) + "/" + pet_id + ".active." + slot;
 }
 
 String PetStore::assetPath(const String& pet_id, const String& sha256) const {

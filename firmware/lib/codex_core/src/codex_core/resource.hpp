@@ -20,6 +20,18 @@ struct ByteRange {
   std::uint32_t length = 0;
 };
 
+struct PointerSlotState {
+  bool valid = false;
+  std::uint64_t generation = 0;
+};
+
+int newestPointerSlot(
+    const PointerSlotState& first,
+    const PointerSlotState& second);
+int nextPointerWriteSlot(
+    const PointerSlotState& first,
+    const PointerSlotState& second);
+
 struct DevicePetManifest {
   std::string pet_id;
   std::uint8_t sprite_version = 2;
@@ -38,6 +50,7 @@ class ResourceTransferTracker {
       std::uint32_t bytes,
       const std::vector<ByteRange>& received);
   bool accept(std::uint32_t offset, std::uint32_t length);
+  bool contains(std::uint32_t offset, std::uint32_t length) const;
   std::vector<ByteRange> missingRanges() const;
   bool complete() const;
   const std::string& petId() const;

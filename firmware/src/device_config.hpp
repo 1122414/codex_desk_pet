@@ -27,6 +27,7 @@ class DeviceConfigStore {
   bool savePairingSecret(const String& secret);
   bool clearNetwork();
   bool clearPairing();
+  bool rotateSetupCode();
 
  private:
   String makeDeviceId() const;

@@ -136,6 +136,22 @@ void testReconnectAndSequence() {
 }
 
 void testResources() {
+  codex::PointerSlotState first_pointer{true, 1};
+  codex::PointerSlotState second_pointer;
+  expect(
+      codex::newestPointerSlot(first_pointer, second_pointer) == 0 &&
+          codex::nextPointerWriteSlot(first_pointer, second_pointer) == 1,
+      "second pointer slot is updated while the first remains recoverable");
+  second_pointer = {true, 2};
+  expect(
+      codex::newestPointerSlot(first_pointer, second_pointer) == 1 &&
+          codex::nextPointerWriteSlot(first_pointer, second_pointer) == 0,
+      "newest generation wins and the older slot becomes the next target");
+  first_pointer = {false, 0};
+  expect(
+      codex::newestPointerSlot(first_pointer, second_pointer) == 1,
+      "power loss while replacing one slot preserves the other active pointer");
+
   codex::DevicePetManifest v2;
   v2.pet_id = "desk-fox";
   v2.sprite_version = 2;
@@ -148,6 +164,8 @@ void testResources() {
   codex::ResourceTransferTracker tracker;
   expect(tracker.begin("desk-fox", 1'000), "resource transfer starts");
   expect(tracker.accept(400, 200), "out-of-order chunk is accepted");
+  expect(tracker.contains(400, 200), "exact duplicate range is detectable before writing");
+  expect(!tracker.contains(400, 199), "different range is not treated as an exact duplicate");
   expect(tracker.accept(0, 400), "leading chunk is accepted");
   expect(!tracker.accept(300, 200), "overlapping chunk is rejected");
   auto missing = tracker.missingRanges();

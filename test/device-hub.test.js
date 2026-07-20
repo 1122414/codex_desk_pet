@@ -76,9 +76,33 @@ test("USB pairing provisions a secret and authenticated device commands update t
   });
   t.after(() => device.close());
   let provisionedSecret = null;
+  let lastDeviceSnapshot = null;
   device.on("paired", ({ secret }) => { provisionedSecret = secret; });
+  device.on("snapshot", (snapshot) => { lastDeviceSnapshot = snapshot; });
   device.start();
   await waitFor(() => bridgeSession.ready && device.ready && provisionedSecret !== null);
+
+  store.addApproval({
+    id: "approval-compact-1",
+    rpcId: 99,
+    threadId: "approval-thread",
+    kind: "command",
+    title: "Codex 请求执行命令",
+    command: "npm test",
+    displayDetail: "npm test",
+    deviceDetail: "npm test",
+    reason: "运行测试",
+    requestedPermissions: {
+      fileSystem: { write: ["/private/project"] },
+    },
+    availableDecisions: ["accept", "decline"],
+    safeToApprove: true,
+    deviceSafeToApprove: true,
+  });
+  await waitFor(() => lastDeviceSnapshot?.approval?.id === "approval-compact-1");
+  assert.equal(lastDeviceSnapshot.approval.detail, "npm test");
+  assert.equal(lastDeviceSnapshot.approval.safeToApprove, true);
+  assert.equal(Object.hasOwn(lastDeviceSnapshot.approval, "requestedPermissions"), false);
 
   device.sendCommand("pet.select", { petId: "codex-core" }, randomUUID());
   device.sendCommand("telemetry.update", {

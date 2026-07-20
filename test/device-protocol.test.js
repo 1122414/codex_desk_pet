@@ -13,7 +13,10 @@ import {
   createHandshakeProof,
   createPetResourceManifest,
   createResourceChunks,
+  decryptEnvelopePayload,
   deriveSessionId,
+  encryptEnvelopePayload,
+  isEncryptedEnvelope,
   parseEnvelope,
   serializeEnvelope,
   validateEnvelope,
@@ -110,6 +113,107 @@ test("mutual authentication proofs bind both nonces, device, and role", () => {
   assert.equal(verifyHandshakeProof({ ...context, role: "bridge", proof }), true);
   assert.equal(verifyHandshakeProof({ ...context, role: "device", proof }), false);
   assert.equal(deriveSessionId(context).length, 32);
+});
+
+test("authenticated payloads use deterministic per-direction AES-256-GCM envelopes", () => {
+  const context = {
+    secret: "d".repeat(64),
+    deviceId: "desk-unit-2",
+    deviceNonce: "device_nonce_abcdefghij",
+    bridgeNonce: "bridge_nonce_abcdefghij",
+    direction: "bridge-to-device",
+  };
+  const plaintext = createEnvelope({
+    sequence: 41,
+    type: "snapshot",
+    payload: {
+      revision: 7,
+      task: { title: "检查加密链路" },
+      approval: { id: "approval-1", command: "npm test" },
+    },
+    id: "encrypted-message-0001",
+    sentAt: 1_725_000_000_000,
+    sessionId: "session-encrypted-0001",
+  });
+  const encrypted = encryptEnvelopePayload(plaintext, context);
+  assert.equal(isEncryptedEnvelope(encrypted), true);
+  assert.equal(encrypted.payload.algorithm, "A256GCM");
+  assert.equal(JSON.stringify(encrypted).includes("npm test"), false);
+  assert.deepEqual(decryptEnvelopePayload(encrypted, context), plaintext);
+  assert.deepEqual(encryptEnvelopePayload(plaintext, context), encrypted);
+  assert.throws(
+    () => decryptEnvelopePayload(encrypted, {
+      ...context,
+      direction: "device-to-bridge",
+    }),
+    (error) => error instanceof ProtocolError && error.code === "DECRYPTION_FAILED",
+  );
+});
+
+test("authenticated encryption rejects metadata and ciphertext tampering", () => {
+  const context = {
+    secret: "e".repeat(64),
+    deviceId: "desk-unit-3",
+    deviceNonce: "device_nonce_klmnopqrst",
+    bridgeNonce: "bridge_nonce_klmnopqrst",
+    direction: "device-to-bridge",
+  };
+  const encrypted = encryptEnvelopePayload(createEnvelope({
+    sequence: 9,
+    type: "command",
+    payload: {
+      command: "pet.select",
+      commandId: "command-encrypted-0001",
+      petId: "codex-core",
+    },
+    id: "encrypted-message-0002",
+    sentAt: 2_000,
+    sessionId: "session-encrypted-0002",
+  }), context);
+  const tamperedData = structuredClone(encrypted);
+  tamperedData.payload.data =
+    `${tamperedData.payload.data[0] === "A" ? "B" : "A"}${tamperedData.payload.data.slice(1)}`;
+  assert.throws(
+    () => decryptEnvelopePayload(tamperedData, context),
+    (error) => error instanceof ProtocolError && error.code === "DECRYPTION_FAILED",
+  );
+  const tamperedMetadata = { ...encrypted, sentAt: encrypted.sentAt + 1 };
+  assert.throws(
+    () => decryptEnvelopePayload(tamperedMetadata, context),
+    (error) => error instanceof ProtocolError && error.code === "DECRYPTION_FAILED",
+  );
+});
+
+test("encrypted Wi-Fi resource chunks remain below the transport frame limit", () => {
+  const data = Buffer.alloc(TRANSPORT_PROFILES.wifi.resourceChunkBytes, 0x6a);
+  const pet = {
+    id: "encrypted-pet",
+    displayName: "Encrypted Pet",
+    description: "",
+    spriteVersionNumber: 2,
+  };
+  const manifest = createPetResourceManifest(pet, data);
+  const [chunk] = createResourceChunks(
+    manifest,
+    data,
+    TRANSPORT_PROFILES.wifi.resourceChunkBytes,
+  );
+  const envelope = createEnvelope({
+    sequence: 3,
+    type: "resource.chunk",
+    payload: chunk,
+    id: "encrypted-resource-0001",
+    sentAt: 3_000,
+    sessionId: "session-encrypted-0003",
+  });
+  const encrypted = encryptEnvelopePayload(envelope, {
+    secret: "f".repeat(64),
+    deviceId: "desk-unit-4",
+    deviceNonce: "device_nonce_uvwx123456",
+    bridgeNonce: "bridge_nonce_uvwx123456",
+    direction: "bridge-to-device",
+  });
+  assert.doesNotThrow(() => serializeEnvelope(encrypted, "wifi"));
 });
 
 test("reliable outbox retries with backoff and stops after its attempt limit", () => {

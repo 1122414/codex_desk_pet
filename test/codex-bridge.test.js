@@ -95,6 +95,95 @@ test("bridge maps current command approval fields and returns the exact wire dec
   await bridge.stop();
 });
 
+test("bridge grants only the requested permission subset and denies with an empty profile", async () => {
+  const store = new DeskStore();
+  const client = new FakeAppServerClient();
+  const bridge = new CodexBridge({ store, client, pollIntervalMs: 0 });
+  await bridge.start();
+  const requestedPermissions = {
+    network: { enabled: true },
+    fileSystem: { write: ["/workspace"] },
+  };
+  client.emit("request", {
+    id: 72,
+    method: "item/permissions/requestApproval",
+    params: {
+      threadId: "thread-permissions",
+      turnId: "turn-permissions",
+      itemId: "item-permissions",
+      cwd: "/workspace",
+      reason: "下载依赖并写入工作区",
+      permissions: requestedPermissions,
+      startedAtMs: Date.now(),
+    },
+  });
+  const accepted = store.snapshot().approval;
+  assert.equal(accepted.kind, "permission");
+  assert.equal(accepted.safeToApprove, true);
+  assert.equal(accepted.deviceSafeToApprove, true);
+  assert.match(accepted.displayDetail, /网络访问/);
+  assert.match(accepted.displayDetail, /写 \/workspace/);
+  await bridge.decideApproval(accepted.id, "accept");
+  assert.deepEqual(client.responses.at(-1), {
+    id: 72,
+    result: {
+      permissions: requestedPermissions,
+      scope: "turn",
+    },
+  });
+
+  client.emit("request", {
+    id: 73,
+    method: "item/permissions/requestApproval",
+    params: {
+      threadId: "thread-permissions",
+      turnId: "turn-permissions",
+      itemId: "item-permissions-2",
+      cwd: "/workspace",
+      permissions: { network: { enabled: true } },
+      startedAtMs: Date.now(),
+    },
+  });
+  const declined = store.snapshot().approval;
+  await bridge.decideApproval(declined.id, "decline");
+  assert.deepEqual(client.responses.at(-1), {
+    id: 73,
+    result: { permissions: {}, scope: "turn" },
+  });
+  await bridge.stop();
+});
+
+test("device approval is disabled when its compact display cannot show every permission", async () => {
+  const store = new DeskStore();
+  const client = new FakeAppServerClient();
+  const bridge = new CodexBridge({ store, client, pollIntervalMs: 0 });
+  await bridge.start();
+  client.emit("request", {
+    id: 74,
+    method: "item/commandExecution/requestApproval",
+    params: {
+      threadId: "thread-long-approval",
+      turnId: "turn-long-approval",
+      itemId: "item-long-approval",
+      command: "npm run release",
+      additionalPermissions: {
+        fileSystem: {
+          write: [
+            `/workspace/${"very-long-directory/".repeat(8)}artifact`,
+          ],
+        },
+      },
+    },
+  });
+  const approval = store.snapshot().approval;
+  assert.equal(approval.safeToApprove, true);
+  assert.equal(approval.deviceSafeToApprove, false);
+  assert.match(approval.displayDetail, /npm run release/);
+  assert.match(approval.displayDetail, /artifact/);
+  await bridge.decideApproval(approval.id, "decline");
+  await bridge.stop();
+});
+
 test("bridge keeps legacy approval responses compatible", async () => {
   const store = new DeskStore();
   const client = new FakeAppServerClient();

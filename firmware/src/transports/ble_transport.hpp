@@ -21,7 +21,7 @@ class BleTransport final : public TextTransport {
   static constexpr const char* kProvisionUuid =
       "7a5c0004-1f4b-4e29-a9a0-4e0f0c0d0001";
 
-  void begin(const String& device_name);
+  void begin(const String& device_name, const String& setup_code);
   const char* kind() const override;
   bool connected() const override;
   void poll(const MessageHandler& handler) override;

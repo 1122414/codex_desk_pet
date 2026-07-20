@@ -74,7 +74,7 @@ class DeviceProtocolClient {
   void handleHandshake(const String& type, JsonObjectConst payload);
   void handleReadyMessage(const String& type, JsonObjectConst payload);
   void handleSnapshot(JsonObjectConst payload);
-  void sendAck(const String& id, std::uint64_t sequence, const String& session_id);
+  void sendAck(const String& id, std::uint64_t sequence);
   void sendError(const String& code);
   bool sendEnvelope(
       const String& type,
@@ -85,6 +85,29 @@ class DeviceProtocolClient {
       const std::function<void(JsonObject)>& args_writer);
   bool isReliableType(const String& type) const;
   bool isHandshakeType(const String& type) const;
+  bool encryptPayload(
+      JsonObject output,
+      const String& id,
+      std::uint64_t sequence,
+      const String& type,
+      std::uint64_t sent_at,
+      const String& session_id,
+      const String& plaintext) const;
+  bool decryptPayload(
+      JsonObjectConst input,
+      const String& id,
+      std::uint64_t sequence,
+      const String& type,
+      std::uint64_t sent_at,
+      const String& session_id,
+      JsonDocument& plaintext) const;
+  String encryptionMaterial(bool outgoing) const;
+  String envelopeAdditionalData(
+      const String& id,
+      std::uint64_t sequence,
+      const String& type,
+      std::uint64_t sent_at,
+      const String& session_id) const;
   void acknowledge(const String& id, std::uint64_t sequence);
   void retryPending(std::uint64_t now_ms);
   void clearSession(bool reset_sequences);

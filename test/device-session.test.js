@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { DeviceSession } from "../src/server/device-session.js";
 import { createMemoryTransportPair } from "../src/server/transports/memory-transport.js";
+import {
+  createEnvelope,
+  isEncryptedEnvelope,
+} from "../src/shared/device-protocol.js";
 
 const SECRET = "b".repeat(64);
 
@@ -47,21 +51,62 @@ function createSessions({
   return { bridge, device, transports, clock };
 }
 
-test("device and bridge mutually authenticate before the initial snapshot", async (t) => {
-  const { bridge, device } = createSessions();
+test("device and bridge mutually authenticate before the encrypted initial snapshot", async (t) => {
+  const { bridge, device, transports } = createSessions();
   t.after(() => {
     bridge.close();
     device.close();
   });
   const snapshots = [];
+  const wireSnapshots = [];
   device.on("snapshot", (snapshot) => snapshots.push(snapshot));
+  transports.right.on("message", (envelope) => {
+    if (envelope.type === "snapshot") wireSnapshots.push(envelope);
+  });
   bridge.start({ autoTick: false });
   device.start({ autoTick: false });
 
   await waitFor(() => bridge.ready && device.ready && snapshots.length === 1);
   assert.equal(bridge.sessionId, device.sessionId);
   assert.equal(snapshots[0].revision, 1);
+  assert.equal(wireSnapshots.length, 1);
+  assert.equal(isEncryptedEnvelope(wireSnapshots[0]), true);
+  assert.equal(JSON.stringify(wireSnapshots[0]).includes("\"revision\":1"), false);
   await waitFor(() => bridge.pendingAcknowledgements === 0 && device.pendingAcknowledgements === 0);
+});
+
+test("an authenticated session rejects a plaintext downgrade and closes the link", async (t) => {
+  const { bridge, device, transports } = createSessions();
+  t.after(() => {
+    bridge.close();
+    device.close();
+  });
+  let highestDeviceSequence = 0;
+  let sessionError = null;
+  transports.left.on("message", (envelope) => {
+    highestDeviceSequence = Math.max(highestDeviceSequence, envelope.sequence);
+  });
+  bridge.on("sessionError", (error) => { sessionError = error; });
+  bridge.start({ autoTick: false });
+  device.start({ autoTick: false });
+  await waitFor(() =>
+    bridge.ready &&
+    device.ready &&
+    bridge.pendingAcknowledgements === 0 &&
+    device.pendingAcknowledgements === 0,
+  );
+
+  transports.right.send(createEnvelope({
+    sequence: highestDeviceSequence + 1,
+    type: "heartbeat",
+    payload: { lastReceivedSequence: 0 },
+    id: "plaintext-downgrade-0001",
+    sentAt: 5_000,
+    sessionId: bridge.sessionId,
+  }));
+  await waitFor(() => sessionError !== null && bridge.state === "closed");
+  assert.equal(sessionError.code, "ENCRYPTION_REQUIRED");
+  assert.equal(transports.left.open, false);
 });
 
 test("device rejects a bridge proof produced with a different pairing secret", async (t) => {

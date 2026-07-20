@@ -44,6 +44,11 @@ class PetStore {
     std::uint32_t bytes = 0;
   };
 
+  struct ActivePointer {
+    String sha256;
+    std::uint64_t generation = 0;
+  };
+
   static constexpr std::uint8_t kSdCs = 4;
   static constexpr std::uint8_t kSdSck = 36;
   static constexpr std::uint8_t kSdMiso = 35;
@@ -57,6 +62,23 @@ class PetStore {
   bool commitTransfer(JsonObjectConst payload, String& error);
   bool validateManifest(JsonObjectConst payload, ActiveManifest& manifest, String& error) const;
   bool loadActiveManifest(const String& pet_id, ActiveManifest& manifest);
+  bool loadManifestBySha(
+      const String& pet_id,
+      const String& sha256,
+      ActiveManifest& manifest);
+  bool readActivePointer(
+      const String& pet_id,
+      char slot,
+      ActivePointer& pointer);
+  bool publishActivePointer(
+      const String& pet_id,
+      const String& sha256,
+      String& error);
+  bool verifyExistingChunk(
+      const String& pet_id,
+      std::uint32_t offset,
+      const std::uint8_t* data,
+      std::size_t length);
   bool loadResume(const String& pet_id, const String& expected_sha = "");
   bool saveResume();
   bool writeManifest(const ActiveManifest& manifest, const String& path);
@@ -64,7 +86,8 @@ class PetStore {
   bool safePetId(const String& pet_id) const;
   String partPath(const String& pet_id) const;
   String resumePath(const String& pet_id) const;
-  String activePath(const String& pet_id) const;
+  String legacyActivePath(const String& pet_id) const;
+  String activeSlotPath(const String& pet_id, char slot) const;
   String assetPath(const String& pet_id, const String& sha256) const;
   String manifestPath(const String& pet_id, const String& sha256) const;
 
@@ -72,6 +95,7 @@ class PetStore {
   ActiveManifest transfer_;
   ResourceTransferTracker tracker_;
   std::uint16_t uncheckpointed_chunks_ = 0;
+  std::vector<String> verified_assets_;
 };
 
 }  // namespace codex::firmware
