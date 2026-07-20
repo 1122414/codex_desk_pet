@@ -254,7 +254,7 @@ export class DeskStore extends EventEmitter {
         petSelection: true,
         voice: true,
         sound: true,
-        transports: ["usb", "wifi"],
+        transports: ["usb", "wifi", "ble"],
       },
     };
   }

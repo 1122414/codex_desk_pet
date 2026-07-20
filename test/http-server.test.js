@@ -39,7 +39,12 @@ test("HTTP API requires a same-origin session for state changes", async (t) => {
   const store = new DeskStore();
   const bridge = new CodexBridge({ store, mode: "mock" });
   await bridge.start();
-  const server = new DeskHttpServer({ store, bridge, catalog, settings });
+  const deviceHub = {
+    listDevices: () => [{ deviceId: "core-s3-1", displayName: "Desk Unit", connected: false, transports: [] }],
+    createPairingOffer: () => ({ code: "123456", expiresAt: 123_000 }),
+    revokeDevice: async (deviceId) => deviceId === "core-s3-1",
+  };
+  const server = new DeskHttpServer({ store, bridge, catalog, settings, deviceHub });
   const address = await server.listen({ port: 0 });
   t.after(async () => server.close());
   const base = `http://127.0.0.1:${address.port}`;
@@ -72,6 +77,9 @@ test("HTTP API requires a same-origin session for state changes", async (t) => {
   });
   assert.equal(notModified.status, 304);
 
+  const devices = await fetch(`${base}/api/devices`);
+  assert.equal((await devices.json()).devices[0].deviceId, "core-s3-1");
+
   const denied = await fetch(`${base}/api/pet/select`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -94,4 +102,28 @@ test("HTTP API requires a same-origin session for state changes", async (t) => {
   });
   assert.equal(selected.status, 200);
   assert.equal((await selected.json()).selectedId, "codex-core");
+
+  const pairing = await fetch(`${base}/api/devices/pairing`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: cookie,
+      "X-Codex-Desk-CSRF": csrfToken,
+      Origin: base,
+    },
+    body: JSON.stringify({ commandId: "command-0003" }),
+  });
+  assert.deepEqual(await pairing.json(), { ok: true, code: "123456", expiresAt: 123_000 });
+
+  const revoked = await fetch(`${base}/api/devices/revoke`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: cookie,
+      "X-Codex-Desk-CSRF": csrfToken,
+      Origin: base,
+    },
+    body: JSON.stringify({ commandId: "command-0004", deviceId: "core-s3-1" }),
+  });
+  assert.equal(revoked.status, 200);
 });

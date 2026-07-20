@@ -121,7 +121,20 @@
               <button type="button" data-transport="simulator" class="active">模拟</button>
               <button type="button" data-transport="usb">USB</button>
               <button type="button" data-transport="wifi">Wi‑Fi</button>
+              <button type="button" data-transport="ble">BLE</button>
             </div>
+          </section>
+
+          <section class="panel-section device-section">
+            <div class="section-title-row">
+              <div>
+                <span class="section-label">DEVICES</span>
+                <h2>设备配对</h2>
+              </div>
+              <button id="start-pairing" class="primary-button" type="button">生成配对码</button>
+            </div>
+            <p id="pairing-code" class="pairing-code" hidden></p>
+            <div id="device-list" class="device-list"><span>暂无已配对设备</span></div>
           </section>
 
           <section id="mock-tools" class="panel-section mock-tools" hidden>

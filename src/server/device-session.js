@@ -1,0 +1,560 @@
+import { EventEmitter } from "node:events";
+import {
+  AtomicPetResourceCache,
+  CommandDeduplicator,
+  CONNECTION_TIMEOUT_MS,
+  HEARTBEAT_INTERVAL_MS,
+  PetResourceAssembler,
+  RELIABLE_MESSAGE_TYPES,
+  ReliableOutbox,
+  SequenceWindow,
+  TRANSPORT_PROFILES,
+  createAck,
+  createEnvelope,
+  createHandshakeNonce,
+  createHandshakeProof,
+  createPetResourceManifest,
+  createResourceChunks,
+  deriveSessionId,
+  validateEnvelope,
+  verifyHandshakeProof,
+} from "../shared/device-protocol.js";
+
+const HANDSHAKE_TYPES = new Set([
+  "hello",
+  "pair.request",
+  "pair.accepted",
+  "pair.rejected",
+  "challenge",
+  "authenticate",
+  "ready",
+]);
+
+const DEFAULT_RELIABLE_WINDOWS = Object.freeze({
+  usb: 8,
+  wifi: 24,
+  ble: 4,
+  memory: 64,
+});
+
+export class DeviceSession extends EventEmitter {
+  #nextSequence = 1;
+  #receiveWindow = new SequenceWindow();
+  #outbox;
+  #commandDeduplicator;
+  #timer = null;
+  #handshake = null;
+  #started = false;
+  #handshakeStartedAt = 0;
+  #reliableQueue = [];
+
+  constructor({
+    role,
+    transport,
+    deviceId = null,
+    secret = null,
+    pairingCode = null,
+    secretResolver = null,
+    pairClaimHandler = null,
+    snapshotProvider = null,
+    commandHandler = null,
+    resourceCache = new AtomicPetResourceCache(),
+    now = Date.now,
+    nonceFactory = createHandshakeNonce,
+    heartbeatIntervalMs = HEARTBEAT_INTERVAL_MS,
+    connectionTimeoutMs = CONNECTION_TIMEOUT_MS,
+    handshakeTimeoutMs = 10_000,
+    maxReliableInFlight = DEFAULT_RELIABLE_WINDOWS[transport?.kind] ?? 16,
+    maxQueuedReliable = 8_192,
+    retry = {},
+  } = {}) {
+    super();
+    if (!["bridge", "device"].includes(role)) throw new TypeError("DeviceSession role must be bridge or device");
+    if (!transport?.on || typeof transport.send !== "function") throw new TypeError("DeviceSession requires a transport");
+    if (role === "device" && (!deviceId || (!secret && !pairingCode))) {
+      throw new TypeError("Device sessions require deviceId and either a secret or pairing code");
+    }
+    if (role === "bridge" && typeof secretResolver !== "function") {
+      throw new TypeError("Bridge sessions require a secretResolver");
+    }
+    if (connectionTimeoutMs <= heartbeatIntervalMs) throw new RangeError("Connection timeout must exceed heartbeat interval");
+    if (!Number.isFinite(handshakeTimeoutMs) || handshakeTimeoutMs < 1_000) {
+      throw new RangeError("Handshake timeout must be at least one second");
+    }
+    if (!Number.isInteger(maxReliableInFlight) || maxReliableInFlight < 1) {
+      throw new RangeError("Reliable in-flight limit must be positive");
+    }
+    if (!Number.isInteger(maxQueuedReliable) || maxQueuedReliable < 1) {
+      throw new RangeError("Reliable queue limit must be positive");
+    }
+    this.role = role;
+    this.transport = transport;
+    this.deviceId = deviceId;
+    this.secret = secret;
+    this.pairingCode = pairingCode;
+    this.secretResolver = secretResolver;
+    this.pairClaimHandler = pairClaimHandler;
+    this.snapshotProvider = snapshotProvider;
+    this.commandHandler = commandHandler;
+    this.resourceCache = resourceCache;
+    this.now = now;
+    this.nonceFactory = nonceFactory;
+    this.heartbeatIntervalMs = heartbeatIntervalMs;
+    this.connectionTimeoutMs = connectionTimeoutMs;
+    this.handshakeTimeoutMs = handshakeTimeoutMs;
+    this.maxReliableInFlight = maxReliableInFlight;
+    this.maxQueuedReliable = maxQueuedReliable;
+    this.state = "idle";
+    this.sessionId = null;
+    this.lastReceivedAt = 0;
+    this.lastSentAt = 0;
+    this.#outbox = new ReliableOutbox(retry);
+    this.#commandDeduplicator = new CommandDeduplicator(512);
+    this.onTransportMessage = (message) => {
+      this.#receive(message).catch((error) => this.emit("sessionError", error));
+    };
+    this.onTransportClose = () => this.#handleClose();
+    this.onTransportError = (error) => this.emit("sessionError", error);
+  }
+
+  get ready() {
+    return this.state === "ready";
+  }
+
+  get pendingAcknowledgements() {
+    return this.#outbox.size;
+  }
+
+  get queuedMessages() {
+    return this.#reliableQueue.length;
+  }
+
+  start({ autoTick = true } = {}) {
+    if (this.#started) return;
+    this.#started = true;
+    this.state = "handshaking";
+    this.lastReceivedAt = this.now();
+    this.lastSentAt = this.now();
+    this.#handshakeStartedAt = this.now();
+    this.transport.on("message", this.onTransportMessage);
+    this.transport.on("close", this.onTransportClose);
+    this.transport.on("error", this.onTransportError);
+    if (autoTick) {
+      this.#timer = setInterval(() => this.tick(), Math.min(250, Math.max(50, this.heartbeatIntervalMs / 4)));
+      this.#timer.unref?.();
+    }
+    if (this.role === "device") {
+      const deviceNonce = this.nonceFactory();
+      this.#handshake = { deviceId: this.deviceId, deviceNonce, bridgeNonce: null };
+      if (this.secret) this.#sendHello();
+      else {
+        this.#send("pair.request", {
+          deviceId: this.deviceId,
+          deviceNonce,
+          pairingCode: this.pairingCode,
+        });
+      }
+    }
+  }
+
+  tick(now = this.now()) {
+    if (!this.#started || ["closed", "rejected"].includes(this.state)) return;
+    const { retry, failed } = this.#outbox.poll(now);
+    for (const envelope of retry) {
+      this.transport.send(envelope);
+      this.lastSentAt = now;
+      this.emit("retry", envelope);
+    }
+    if (failed.length) {
+      this.state = "stale";
+      this.emit("reliabilityFailure", failed);
+      this.close();
+      return;
+    }
+    if (!this.ready && now - this.#handshakeStartedAt >= this.handshakeTimeoutMs) {
+      this.state = "stale";
+      this.emit("timeout", { phase: "handshake" });
+      this.close();
+      return;
+    }
+    if (this.ready && now - this.lastReceivedAt >= this.connectionTimeoutMs) {
+      this.state = "stale";
+      this.emit("timeout", { phase: "connection" });
+      this.close();
+      return;
+    }
+    if (this.ready && now - this.lastSentAt >= this.heartbeatIntervalMs) {
+      this.#send("heartbeat", { lastReceivedSequence: this.#receiveWindow.lastAccepted }, false);
+    }
+  }
+
+  sendSnapshot(snapshot = this.snapshotProvider?.()) {
+    if (this.role !== "bridge" || !this.ready) throw new Error("Only an authenticated bridge can send snapshots");
+    if (!snapshot || typeof snapshot !== "object") throw new TypeError("Snapshot is required");
+    return this.#send("snapshot", snapshot);
+  }
+
+  sendEvent(event) {
+    if (!this.ready) throw new Error("Session is not authenticated");
+    return this.#send("event", event);
+  }
+
+  sendCommand(command, args = {}, commandId) {
+    if (!this.ready) throw new Error("Session is not authenticated");
+    return this.#send("command", { command, commandId, ...args });
+  }
+
+  requestResource(petId, sha256 = null) {
+    if (this.role !== "device" || !this.ready) throw new Error("Only an authenticated device can request resources");
+    const resume = this.resourceCache.resumeState(petId);
+    return this.#send("resource.request", {
+      petId,
+      sha256,
+      ...(resume?.sha256 ? {
+        resumeSha256: resume.sha256,
+        missingRanges: resume.missingRanges,
+      } : {}),
+    });
+  }
+
+  sendResource(pet, data, { missingRanges = null } = {}) {
+    if (this.role !== "bridge" || !this.ready) throw new Error("Only an authenticated bridge can send resources");
+    const manifest = createPetResourceManifest(pet, data);
+    this.#send("resource.manifest", manifest);
+    const profile = TRANSPORT_PROFILES[this.transport.kind] ?? TRANSPORT_PROFILES.memory;
+    for (const chunk of createResourceChunks(
+      manifest,
+      data,
+      profile.resourceChunkBytes,
+      missingRanges ?? [{ offset: 0, length: data.length }],
+    )) {
+      this.#send("resource.chunk", chunk);
+    }
+    this.#send("resource.commit", { petId: manifest.petId, sha256: manifest.sha256 });
+    return manifest;
+  }
+
+  close() {
+    if (!this.#started) return;
+    this.#started = false;
+    if (this.#timer) clearInterval(this.#timer);
+    this.#timer = null;
+    this.#outbox.clear();
+    this.#reliableQueue = [];
+    this.transport.off("message", this.onTransportMessage);
+    this.transport.off("close", this.onTransportClose);
+    this.transport.off("error", this.onTransportError);
+    this.transport.close?.();
+    this.state = "closed";
+    this.emit("closed");
+  }
+
+  #send(type, payload, reliable = RELIABLE_MESSAGE_TYPES.includes(type)) {
+    if (reliable && this.#outbox.size >= this.maxReliableInFlight) {
+      if (type === "snapshot") {
+        const queuedSnapshot = this.#reliableQueue.find((entry) => entry.type === "snapshot");
+        if (queuedSnapshot) {
+          queuedSnapshot.payload = payload;
+          return null;
+        }
+      }
+      if (this.#reliableQueue.length >= this.maxQueuedReliable) {
+        throw new Error("Reliable send queue exceeded its limit");
+      }
+      const entry = { type, payload };
+      if (type.startsWith("resource.")) {
+        this.#reliableQueue.push(entry);
+      } else {
+        const firstResource = this.#reliableQueue.findIndex((queued) => queued.type.startsWith("resource."));
+        if (firstResource === -1) this.#reliableQueue.push(entry);
+        else this.#reliableQueue.splice(firstResource, 0, entry);
+      }
+      return null;
+    }
+    return this.#transmit(type, payload, reliable);
+  }
+
+  #transmit(type, payload, reliable) {
+    const envelope = createEnvelope({
+      sequence: this.#nextSequence++,
+      type,
+      payload,
+      sentAt: this.now(),
+      sessionId: this.sessionId,
+    });
+    this.transport.send(envelope);
+    this.lastSentAt = this.now();
+    if (reliable) this.#outbox.track(envelope, this.lastSentAt);
+    return envelope;
+  }
+
+  #flushReliableQueue() {
+    while (
+      this.#reliableQueue.length > 0 &&
+      this.#outbox.size < this.maxReliableInFlight &&
+      this.#started
+    ) {
+      const next = this.#reliableQueue.shift();
+      this.#transmit(next.type, next.payload, true);
+    }
+  }
+
+  #sendAck(envelope) {
+    const acknowledgement = createAck(envelope, this.#nextSequence++);
+    this.transport.send(acknowledgement);
+    this.lastSentAt = this.now();
+  }
+
+  async #receive(message) {
+    const envelope = validateEnvelope(message);
+    this.lastReceivedAt = this.now();
+    if (
+      this.ready &&
+      !HANDSHAKE_TYPES.has(envelope.type) &&
+      envelope.type !== "ack" &&
+      envelope.sessionId !== this.sessionId
+    ) {
+      this.#send("error", { code: "INVALID_SESSION", message: "Message session does not match" }, false);
+      return;
+    }
+
+    const observation = this.#receiveWindow.observe(envelope);
+    if (observation.status === "duplicate") {
+      if (RELIABLE_MESSAGE_TYPES.includes(envelope.type)) this.#sendAck(envelope);
+      return;
+    }
+    if (observation.status === "gap") {
+      this.#send("error", {
+        code: "RESYNC_REQUIRED",
+        expectedSequence: observation.expected,
+        receivedSequence: envelope.sequence,
+      }, false);
+      return;
+    }
+
+    if (envelope.type === "ack") {
+      if (this.#outbox.acknowledge(envelope)) this.#flushReliableQueue();
+      return;
+    }
+
+    if (RELIABLE_MESSAGE_TYPES.includes(envelope.type)) {
+      this.#sendAck(envelope);
+    }
+
+    if (HANDSHAKE_TYPES.has(envelope.type)) {
+      await this.#handleHandshake(envelope);
+      return;
+    }
+    if (!this.ready) {
+      this.#send("error", { code: "AUTHENTICATION_REQUIRED" }, false);
+      return;
+    }
+
+    switch (envelope.type) {
+      case "heartbeat":
+        this.emit("heartbeat", envelope.payload);
+        return;
+      case "snapshot":
+        this.emit("snapshot", envelope.payload);
+        return;
+      case "event":
+        this.emit("event", envelope.payload);
+        return;
+      case "command":
+        await this.#handleCommand(envelope.payload);
+        return;
+      case "resource.manifest":
+        this.resourceCache.begin(envelope.payload);
+        this.emit("resourceStarted", envelope.payload);
+        return;
+      case "resource.chunk":
+        this.resourceCache.acceptChunk(envelope.payload);
+        this.emit("resourceProgress", this.resourceCache.resumeState(envelope.payload.petId));
+        return;
+      case "resource.commit": {
+        const manifest = this.resourceCache.commit(envelope.payload.petId, envelope.payload.sha256);
+        this.emit("resourceInstalled", manifest);
+        return;
+      }
+      case "resource.request":
+        this.emit("resourceRequest", envelope.payload);
+        return;
+      case "error":
+        if (envelope.payload.code === "RESYNC_REQUIRED" && this.role === "bridge" && this.ready) {
+          this.sendSnapshot();
+        }
+        this.emit("remoteError", envelope.payload);
+        return;
+      default:
+    }
+  }
+
+  async #handleHandshake(envelope) {
+    const payload = envelope.payload;
+    if (envelope.type === "pair.request" && this.role === "bridge") {
+      if (!["usb", "ble"].includes(this.transport.kind) || typeof this.pairClaimHandler !== "function") {
+        this.#send("pair.rejected", { reason: "pairing-not-allowed-on-this-transport" });
+        return;
+      }
+      const paired = await this.pairClaimHandler(payload);
+      if (!paired?.secret) {
+        this.#send("pair.rejected", { reason: "invalid-or-expired-code" });
+        return;
+      }
+      this.#send("pair.accepted", { deviceId: payload.deviceId, secret: paired.secret });
+      this.emit("paired", { deviceId: payload.deviceId });
+      return;
+    }
+
+    if (envelope.type === "pair.accepted" && this.role === "device") {
+      if (payload.deviceId !== this.deviceId) {
+        this.state = "rejected";
+        this.emit("authenticationFailed", { deviceId: this.deviceId, reason: "pairing-device-id" });
+        return;
+      }
+      this.secret = payload.secret;
+      this.pairingCode = null;
+      this.emit("paired", { deviceId: this.deviceId, secret: this.secret });
+      this.#sendHello();
+      return;
+    }
+
+    if (envelope.type === "pair.rejected" && this.role === "device") {
+      this.state = "rejected";
+      this.emit("authenticationFailed", { deviceId: this.deviceId, reason: payload.reason });
+      return;
+    }
+
+    if (envelope.type === "hello" && this.role === "bridge") {
+      const secret = await this.secretResolver(payload.deviceId);
+      if (!secret) {
+        this.state = "rejected";
+        this.#send("error", { code: "DEVICE_NOT_PAIRED" }, false);
+        this.emit("authenticationFailed", { deviceId: payload.deviceId, reason: "unpaired" });
+        return;
+      }
+      const bridgeNonce = this.nonceFactory();
+      this.deviceId = payload.deviceId;
+      this.secret = secret;
+      this.#handshake = {
+        deviceId: payload.deviceId,
+        deviceNonce: payload.deviceNonce,
+        bridgeNonce,
+      };
+      this.#send("challenge", {
+        ...this.#handshake,
+        proof: createHandshakeProof({ secret, ...this.#handshake, role: "bridge" }),
+      });
+      return;
+    }
+
+    if (envelope.type === "challenge" && this.role === "device") {
+      const matchesHello =
+        payload.deviceId === this.#handshake?.deviceId &&
+        payload.deviceNonce === this.#handshake?.deviceNonce;
+      const valid = matchesHello && verifyHandshakeProof({
+        secret: this.secret,
+        ...payload,
+        role: "bridge",
+      });
+      if (!valid) {
+        this.state = "rejected";
+        this.emit("authenticationFailed", { deviceId: this.deviceId, reason: "bridge-proof" });
+        return;
+      }
+      this.#handshake.bridgeNonce = payload.bridgeNonce;
+      this.#send("authenticate", {
+        ...this.#handshake,
+        proof: createHandshakeProof({ secret: this.secret, ...this.#handshake, role: "device" }),
+      });
+      return;
+    }
+
+    if (envelope.type === "authenticate" && this.role === "bridge") {
+      const matchesChallenge =
+        payload.deviceId === this.#handshake?.deviceId &&
+        payload.deviceNonce === this.#handshake?.deviceNonce &&
+        payload.bridgeNonce === this.#handshake?.bridgeNonce;
+      const valid = matchesChallenge && verifyHandshakeProof({
+        secret: this.secret,
+        ...payload,
+        role: "device",
+      });
+      if (!valid) {
+        this.state = "rejected";
+        this.#send("error", { code: "AUTHENTICATION_FAILED" }, false);
+        this.emit("authenticationFailed", { deviceId: payload.deviceId, reason: "device-proof" });
+        return;
+      }
+      this.sessionId = deriveSessionId({ secret: this.secret, ...this.#handshake });
+      this.state = "ready";
+      this.#send("ready", {
+        sessionId: this.sessionId,
+        heartbeatIntervalMs: this.heartbeatIntervalMs,
+        connectionTimeoutMs: this.connectionTimeoutMs,
+      });
+      this.emit("ready", { deviceId: this.deviceId, sessionId: this.sessionId });
+      if (this.snapshotProvider) this.sendSnapshot();
+      return;
+    }
+
+    if (envelope.type === "ready" && this.role === "device") {
+      const expectedSessionId = deriveSessionId({ secret: this.secret, ...this.#handshake });
+      if (payload.sessionId !== expectedSessionId || envelope.sessionId !== expectedSessionId) {
+        this.state = "rejected";
+        this.emit("authenticationFailed", { deviceId: this.deviceId, reason: "session-id" });
+        return;
+      }
+      this.sessionId = expectedSessionId;
+      this.state = "ready";
+      this.emit("ready", { deviceId: this.deviceId, sessionId: this.sessionId });
+    }
+  }
+
+  async #handleCommand(payload) {
+    if (!this.#commandDeduplicator.accept(payload.commandId)) {
+      this.emit("duplicateCommand", payload);
+      return;
+    }
+    try {
+      const result = await this.commandHandler?.(payload);
+      this.#send("event", {
+        event: "command.result",
+        commandId: payload.commandId,
+        ok: true,
+        result: result ?? null,
+      });
+    } catch (error) {
+      this.#send("event", {
+        event: "command.result",
+        commandId: payload.commandId,
+        ok: false,
+        error: error.message,
+      });
+    }
+  }
+
+  #handleClose() {
+    if (!this.#started) return;
+    this.#started = false;
+    if (this.#timer) clearInterval(this.#timer);
+    this.#timer = null;
+    this.#outbox.clear();
+    this.#reliableQueue = [];
+    this.transport.off("message", this.onTransportMessage);
+    this.transport.off("close", this.onTransportClose);
+    this.transport.off("error", this.onTransportError);
+    this.state = "closed";
+    this.emit("closed");
+  }
+
+  #sendHello() {
+    this.#send("hello", {
+      deviceId: this.deviceId,
+      deviceNonce: this.#handshake.deviceNonce,
+      transport: this.transport.kind,
+    });
+  }
+}
+
+export { PetResourceAssembler };

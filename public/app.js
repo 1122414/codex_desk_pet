@@ -35,6 +35,7 @@ const elements = Object.fromEntries([
   "level-progress", "screen-level", "screen-transport", "bridge-status", "pet-select", "pet-version",
   "pet-description", "animation-grid", "restore-sync", "look-grid", "look-support", "sound-toggle",
   "voice-toggle", "battery-slider", "battery-value", "mock-tools", "mock-approval", "toast",
+  "start-pairing", "pairing-code", "device-list",
 ].map((id) => [id, document.getElementById(id)]));
 
 let csrfToken = "";
@@ -311,7 +312,7 @@ async function render(nextSnapshot) {
   elements["screen-battery"].setAttribute("aria-label", `电池 ${battery}%`);
   elements["battery-slider"].value = battery;
   elements["battery-value"].textContent = `${battery}%`;
-  elements["screen-transport"].textContent = { simulator: "SIM", usb: "USB", wifi: "WIFI" }[snapshot.telemetry.transport] || "—";
+  elements["screen-transport"].textContent = { simulator: "SIM", usb: "USB", wifi: "WIFI", ble: "BLE" }[snapshot.telemetry.transport] || "—";
   document.querySelectorAll("[data-transport]").forEach((button) => button.classList.toggle("active", button.dataset.transport === snapshot.telemetry.transport));
 
   renderApproval(snapshot.approval);
@@ -366,6 +367,57 @@ async function loadPets() {
     option.textContent = `${pet.displayName} · ${pet.kind === "builtin" ? "内置" : `V${pet.spriteVersionNumber}`}`;
     return option;
   }));
+}
+
+async function loadDevices() {
+  try {
+    const { devices } = await fetchJson("/api/devices");
+    if (!devices.length) {
+      elements["device-list"].replaceChildren(Object.assign(document.createElement("span"), { textContent: "暂无已配对设备" }));
+      return;
+    }
+    elements["device-list"].replaceChildren(...devices.map((device) => {
+      const row = document.createElement("div");
+      row.className = "device-row";
+      const info = document.createElement("div");
+      const name = document.createElement("strong");
+      name.textContent = device.displayName;
+      const status = document.createElement("small");
+      status.textContent = device.connected
+        ? `${device.primaryTransport.toUpperCase()} · 已连接`
+        : "离线";
+      info.append(name, status);
+      const revoke = document.createElement("button");
+      revoke.type = "button";
+      revoke.textContent = "撤销";
+      revoke.addEventListener("click", () => revokeDevice(device.deviceId));
+      row.append(info, revoke);
+      return row;
+    }));
+  } catch (error) {
+    elements["device-list"].textContent = error.message;
+  }
+}
+
+async function startPairing() {
+  try {
+    const offer = await mutate("/api/devices/pairing", {});
+    elements["pairing-code"].hidden = false;
+    elements["pairing-code"].textContent = offer.code;
+    showToast("请在 5 分钟内通过 USB 或 BLE 输入配对码");
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function revokeDevice(deviceId) {
+  try {
+    await mutate("/api/devices/revoke", { deviceId });
+    await loadDevices();
+    showToast("设备凭据已撤销");
+  } catch (error) {
+    showToast(error.message);
+  }
 }
 
 async function selectPetOffset(offset) {
@@ -499,6 +551,7 @@ function bindInteractions() {
   elements["mock-approval"].addEventListener("click", async () => {
     try { await mutate("/api/mock/approval", {}); } catch (error) { showToast(error.message); }
   });
+  elements["start-pairing"].addEventListener("click", startPairing);
 
   elements["sound-toggle"].addEventListener("click", () => {
     soundEnabled = !soundEnabled;
@@ -579,8 +632,10 @@ async function init() {
     const session = await fetchJson("/api/session");
     csrfToken = session.csrfToken;
     await loadPets();
+    await loadDevices();
     await render(await fetchJson("/api/snapshot"));
     connectEvents();
+    setInterval(loadDevices, 5_000);
   } catch (error) {
     showToast(`初始化失败：${error.message}`);
   }

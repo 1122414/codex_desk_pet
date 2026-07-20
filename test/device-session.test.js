@@ -1,0 +1,244 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { DeviceSession } from "../src/server/device-session.js";
+import { createMemoryTransportPair } from "../src/server/transports/memory-transport.js";
+
+const SECRET = "b".repeat(64);
+
+async function waitFor(predicate, timeoutMs = 500) {
+  const startedAt = Date.now();
+  while (!predicate()) {
+    if (Date.now() - startedAt > timeoutMs) throw new Error("Timed out waiting for session state");
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+}
+
+function createSessions({
+  clock = { value: 1_000 },
+  snapshotProvider = () => ({ revision: 1, presentation: { state: "ready" } }),
+  commandHandler = null,
+  deviceSecret = SECRET,
+  transportKind = "memory",
+  sessionOptions = {},
+} = {}) {
+  const transports = createMemoryTransportPair({ kind: transportKind });
+  const bridge = new DeviceSession({
+    role: "bridge",
+    transport: transports.left,
+    secretResolver: (deviceId) => deviceId === "core-s3-1" ? SECRET : null,
+    snapshotProvider,
+    commandHandler,
+    now: () => clock.value,
+    nonceFactory: () => "bridge_nonce_1234567890",
+    retry: { baseRetryMs: 10, maxRetryMs: 40, maxAttempts: 5 },
+    ...sessionOptions,
+  });
+  const device = new DeviceSession({
+    role: "device",
+    transport: transports.right,
+    deviceId: "core-s3-1",
+    secret: deviceSecret,
+    now: () => clock.value,
+    nonceFactory: () => "device_nonce_1234567890",
+    retry: { baseRetryMs: 10, maxRetryMs: 40, maxAttempts: 5 },
+    ...sessionOptions,
+  });
+  return { bridge, device, transports, clock };
+}
+
+test("device and bridge mutually authenticate before the initial snapshot", async (t) => {
+  const { bridge, device } = createSessions();
+  t.after(() => {
+    bridge.close();
+    device.close();
+  });
+  const snapshots = [];
+  device.on("snapshot", (snapshot) => snapshots.push(snapshot));
+  bridge.start({ autoTick: false });
+  device.start({ autoTick: false });
+
+  await waitFor(() => bridge.ready && device.ready && snapshots.length === 1);
+  assert.equal(bridge.sessionId, device.sessionId);
+  assert.equal(snapshots[0].revision, 1);
+  await waitFor(() => bridge.pendingAcknowledgements === 0 && device.pendingAcknowledgements === 0);
+});
+
+test("device rejects a bridge proof produced with a different pairing secret", async (t) => {
+  const { bridge, device } = createSessions({ deviceSecret: "c".repeat(64) });
+  t.after(() => {
+    bridge.close();
+    device.close();
+  });
+  let failed = null;
+  device.on("authenticationFailed", (result) => { failed = result; });
+  bridge.start({ autoTick: false });
+  device.start({ autoTick: false });
+  await waitFor(() => failed !== null);
+  assert.equal(device.state, "rejected");
+  assert.equal(failed.reason, "bridge-proof");
+});
+
+test("duplicate device commands execute once and return a correlated result", async (t) => {
+  const commands = [];
+  const { bridge, device, transports } = createSessions({
+    commandHandler: async (payload) => {
+      commands.push(payload);
+      return { selectedId: payload.petId };
+    },
+  });
+  t.after(() => {
+    bridge.close();
+    device.close();
+  });
+  const results = [];
+  device.on("event", (event) => {
+    if (event.event === "command.result") results.push(event);
+  });
+  bridge.start({ autoTick: false });
+  device.start({ autoTick: false });
+  await waitFor(() => bridge.ready && device.ready);
+
+  transports.right.duplicateNext();
+  const commandId = randomUUID();
+  device.sendCommand("pet.select", { petId: "codex-core" }, commandId);
+  await waitFor(() => results.length === 1 && device.pendingAcknowledgements === 0);
+  assert.equal(commands.length, 1);
+  assert.equal(results[0].commandId, commandId);
+  assert.equal(results[0].ok, true);
+});
+
+test("a lost ACK triggers retry while sequence recovery prevents duplicate execution", async (t) => {
+  const commands = [];
+  const snapshots = [];
+  const { bridge, device, transports, clock } = createSessions({
+    commandHandler: async (payload) => {
+      commands.push(payload);
+      return null;
+    },
+  });
+  t.after(() => {
+    bridge.close();
+    device.close();
+  });
+  device.on("snapshot", (snapshot) => snapshots.push(snapshot));
+  bridge.start({ autoTick: false });
+  device.start({ autoTick: false });
+  await waitFor(() => bridge.ready && device.ready && snapshots.length === 1);
+
+  transports.left.dropNext();
+  device.sendCommand("telemetry.update", {
+    batteryPercent: 80,
+    charging: false,
+    wifiRssi: -60,
+  }, randomUUID());
+  await waitFor(() => commands.length === 1);
+  clock.value += 20;
+  device.tick(clock.value);
+  await waitFor(() => device.pendingAcknowledgements === 0);
+  assert.equal(commands.length, 1);
+  assert.ok(snapshots.length >= 2);
+});
+
+test("pet resources transfer in chunks and install on the device cache", async (t) => {
+  const { bridge, device } = createSessions();
+  t.after(() => {
+    bridge.close();
+    device.close();
+  });
+  let installed = null;
+  device.on("resourceInstalled", (manifest) => { installed = manifest; });
+  bridge.start({ autoTick: false });
+  device.start({ autoTick: false });
+  await waitFor(() => bridge.ready && device.ready);
+
+  const data = Buffer.alloc(25_000, 0x2a);
+  const pet = { id: "resource-pet", displayName: "Resource Pet", spriteVersionNumber: 2 };
+  const manifest = bridge.sendResource(pet, data);
+  await waitFor(() => installed !== null);
+  assert.equal(installed.sha256, manifest.sha256);
+  assert.deepEqual(device.resourceCache.get(pet.id).data, data);
+});
+
+test("large pet transfers use a bounded ACK window before installing", async (t) => {
+  const { bridge, device } = createSessions({
+    transportKind: "usb",
+    sessionOptions: { maxReliableInFlight: 4 },
+  });
+  t.after(() => {
+    bridge.close();
+    device.close();
+  });
+  bridge.start({ autoTick: false });
+  device.start({ autoTick: false });
+  await waitFor(() => bridge.ready && device.ready);
+  const data = Buffer.alloc(256_000, 0x3c);
+  bridge.sendResource({ id: "large-pet", displayName: "Large Pet", spriteVersionNumber: 2 }, data);
+  assert.equal(bridge.pendingAcknowledgements, 4);
+  assert.ok(bridge.queuedMessages > 0);
+  await waitFor(() => device.resourceCache.get("large-pet") !== null, 1_500);
+  assert.deepEqual(device.resourceCache.get("large-pet").data, data);
+  assert.equal(bridge.queuedMessages, 0);
+});
+
+test("snapshots remain responsive while a large resource waits in the reliable queue", async (t) => {
+  const { bridge, device, transports } = createSessions({
+    transportKind: "usb",
+    sessionOptions: { maxReliableInFlight: 1 },
+  });
+  t.after(() => {
+    bridge.close();
+    device.close();
+  });
+  const order = [];
+  device.on("snapshot", (snapshot) => {
+    if (snapshot.revision === 99) order.push("snapshot");
+  });
+  device.on("resourceInstalled", () => order.push("resource"));
+  bridge.start({ autoTick: false });
+  device.start({ autoTick: false });
+  await waitFor(() => bridge.ready && device.ready && bridge.pendingAcknowledgements === 0);
+  const resourceStarted = new Promise((resolve) => device.once("resourceStarted", resolve));
+  transports.right.holdNext();
+  bridge.sendResource(
+    { id: "priority-pet", displayName: "Priority Pet", spriteVersionNumber: 2 },
+    Buffer.alloc(32_000, 0x4d),
+  );
+  await resourceStarted;
+  bridge.sendSnapshot({ revision: 99, presentation: { state: "running" } });
+  transports.right.flushHeld();
+  await waitFor(() => order.includes("resource"));
+  assert.deepEqual(order, ["snapshot", "resource"]);
+});
+
+test("heartbeat timeout closes an authenticated session so its transport can reconnect", async (t) => {
+  const { bridge, device, clock } = createSessions();
+  t.after(() => {
+    bridge.close();
+    device.close();
+  });
+  bridge.start({ autoTick: false });
+  device.start({ autoTick: false });
+  await waitFor(() => bridge.ready && device.ready);
+  clock.value += 16_000;
+  device.tick(clock.value);
+  assert.equal(device.state, "closed");
+  assert.equal(bridge.state, "closed");
+});
+
+test("an idle unauthenticated transport is closed after the handshake deadline", () => {
+  const clock = { value: 1_000 };
+  const transports = createMemoryTransportPair();
+  const bridge = new DeviceSession({
+    role: "bridge",
+    transport: transports.left,
+    secretResolver: async () => null,
+    now: () => clock.value,
+    handshakeTimeoutMs: 1_000,
+  });
+  bridge.start({ autoTick: false });
+  clock.value += 1_001;
+  bridge.tick(clock.value);
+  assert.equal(bridge.state, "closed");
+  assert.equal(transports.left.open, false);
+});

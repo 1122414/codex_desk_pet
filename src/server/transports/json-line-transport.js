@@ -1,0 +1,69 @@
+import { EventEmitter } from "node:events";
+import { StringDecoder } from "node:string_decoder";
+import { parseEnvelope, serializeEnvelope, TRANSPORT_PROFILES } from "../../shared/device-protocol.js";
+
+export class JsonLineTransport extends EventEmitter {
+  #buffer = "";
+  #closed = false;
+  #decoder = new StringDecoder("utf8");
+
+  constructor({ readable, writable, kind = "usb" } = {}) {
+    super();
+    if (!readable?.on || typeof writable?.write !== "function") {
+      throw new TypeError("JsonLineTransport requires readable and writable streams");
+    }
+    if (!TRANSPORT_PROFILES[kind]) throw new TypeError(`Unknown transport profile: ${kind}`);
+    this.readable = readable;
+    this.writable = writable;
+    this.kind = kind;
+    this.maxBufferBytes = TRANSPORT_PROFILES[kind].maxEnvelopeBytes * 2;
+    this.onData = (chunk) => this.#onData(chunk);
+    this.onEnd = () => this.close();
+    this.onStreamError = (error) => this.emit("error", error);
+    readable.on("data", this.onData);
+    readable.on("end", this.onEnd);
+    readable.on("close", this.onEnd);
+    readable.on("error", this.onStreamError);
+    writable.on?.("error", this.onStreamError);
+  }
+
+  get open() {
+    return !this.#closed;
+  }
+
+  send(envelope) {
+    if (this.#closed || this.writable.writable === false) throw new Error(`${this.kind} transport is closed`);
+    const line = `${serializeEnvelope(envelope, this.kind)}\n`;
+    this.writable.write(line);
+  }
+
+  close() {
+    if (this.#closed) return;
+    this.#closed = true;
+    this.readable.off("data", this.onData);
+    this.readable.off("end", this.onEnd);
+    this.readable.off("close", this.onEnd);
+    this.readable.off("error", this.onStreamError);
+    this.writable.off?.("error", this.onStreamError);
+    this.emit("close");
+  }
+
+  #onData(chunk) {
+    this.#buffer += this.#decoder.write(Buffer.from(chunk));
+    if (Buffer.byteLength(this.#buffer) > this.maxBufferBytes) {
+      this.#buffer = "";
+      this.emit("error", new Error(`${this.kind} transport receive buffer exceeded its limit`));
+      return;
+    }
+    const lines = this.#buffer.split("\n");
+    this.#buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        this.emit("message", parseEnvelope(line, this.kind));
+      } catch (error) {
+        this.emit("error", error);
+      }
+    }
+  }
+}

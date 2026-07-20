@@ -72,11 +72,19 @@ export class DeskHttpServer {
   #csrfToken = randomUUID();
   #deduplicator = new CommandDeduplicator(512);
 
-  constructor({ store, bridge, catalog, settings, publicDirectory = path.join(PROJECT_ROOT, "public") }) {
+  constructor({
+    store,
+    bridge,
+    catalog,
+    settings,
+    deviceHub = null,
+    publicDirectory = path.join(PROJECT_ROOT, "public"),
+  }) {
     this.store = store;
     this.bridge = bridge;
     this.catalog = catalog;
     this.settings = settings;
+    this.deviceHub = deviceHub;
     this.publicDirectory = path.resolve(publicDirectory);
     this.#server = createServer((req, res) => {
       this.#handle(req, res).catch((error) => {
@@ -154,6 +162,11 @@ export class DeskHttpServer {
     }
     if (req.method === "GET" && route === "/api/pets") {
       json(res, 200, { pets: await this.catalog.refresh(), selectedId: this.store.selectedPetId });
+      return;
+    }
+    if (req.method === "GET" && route === "/api/devices") {
+      if (!this.deviceHub) throw new HttpError(503, "Device service is unavailable");
+      json(res, 200, { devices: this.deviceHub.listDevices() });
       return;
     }
 
@@ -235,7 +248,7 @@ export class DeskHttpServer {
         if (!Number.isFinite(body.batteryPercent) || body.batteryPercent < 0 || body.batteryPercent > 100) {
           throw new HttpError(400, "batteryPercent must be between 0 and 100");
         }
-        if (!["simulator", "usb", "wifi"].includes(body.transport)) throw new HttpError(400, "transport is invalid");
+        if (!["simulator", "usb", "wifi", "ble"].includes(body.transport)) throw new HttpError(400, "transport is invalid");
         this.store.setTelemetry({
           batteryPercent: Math.round(body.batteryPercent),
           charging: Boolean(body.charging),
@@ -243,6 +256,19 @@ export class DeskHttpServer {
           wifiRssi: Number.isFinite(body.wifiRssi) ? Math.round(body.wifiRssi) : null,
         });
         json(res, 200, { ok: true });
+        return;
+      }
+      if (route === "/api/devices/pairing") {
+        if (!this.deviceHub) throw new HttpError(503, "Device service is unavailable");
+        json(res, 201, { ok: true, ...this.deviceHub.createPairingOffer() });
+        return;
+      }
+      if (route === "/api/devices/revoke") {
+        if (!this.deviceHub) throw new HttpError(503, "Device service is unavailable");
+        if (typeof body.deviceId !== "string") throw new HttpError(400, "deviceId is required");
+        const revoked = await this.deviceHub.revokeDevice(body.deviceId);
+        if (!revoked) throw new HttpError(404, "Paired device was not found");
+        json(res, 200, { ok: true, deviceId: body.deviceId });
         return;
       }
       if (route === "/api/state/preview") {

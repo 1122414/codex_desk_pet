@@ -1,0 +1,199 @@
+import { EventEmitter } from "node:events";
+import { CommandDeduplicator } from "../shared/device-protocol.js";
+import { DeviceSession } from "./device-session.js";
+import { PairingCodeManager } from "./device-credential-repository.js";
+
+const TRANSPORT_PRIORITY = Object.freeze({ usb: 3, wifi: 2, ble: 1, memory: 0 });
+
+export class DeviceHub extends EventEmitter {
+  #sessions = new Set();
+  #globalCommands = new CommandDeduplicator(2_048);
+  #started = false;
+
+  constructor({
+    store,
+    bridge,
+    catalog,
+    settings,
+    credentials,
+    pairingCodes = new PairingCodeManager(),
+    maxSessions = 32,
+  } = {}) {
+    super();
+    if (!store || !bridge || !catalog || !settings || !credentials) {
+      throw new TypeError("DeviceHub requires store, bridge, catalog, settings, and credentials");
+    }
+    this.store = store;
+    this.bridge = bridge;
+    this.catalog = catalog;
+    this.settings = settings;
+    this.credentials = credentials;
+    this.pairingCodes = pairingCodes;
+    if (!Number.isInteger(maxSessions) || maxSessions < 1) throw new RangeError("Device session limit must be positive");
+    this.maxSessions = maxSessions;
+    this.onStoreChange = (snapshot) => this.#broadcastSnapshot(snapshot);
+  }
+
+  async start() {
+    if (this.#started) return;
+    this.#started = true;
+    await this.credentials.load();
+    this.store.on("change", this.onStoreChange);
+  }
+
+  createPairingOffer() {
+    if (!this.#started) throw new Error("DeviceHub is not started");
+    return this.pairingCodes.createOffer();
+  }
+
+  listDevices() {
+    const sessions = [...this.#sessions].filter((session) => session.ready);
+    return this.credentials.list().map((device) => {
+      const connected = sessions
+        .filter((session) => session.deviceId === device.deviceId)
+        .sort((left, right) => (TRANSPORT_PRIORITY[right.transport.kind] ?? -1) - (TRANSPORT_PRIORITY[left.transport.kind] ?? -1));
+      return {
+        ...device,
+        connected: connected.length > 0,
+        transports: connected.map((session) => session.transport.kind),
+        primaryTransport: connected[0]?.transport.kind ?? null,
+      };
+    });
+  }
+
+  attachTransport(transport) {
+    if (!this.#started) throw new Error("DeviceHub is not started");
+    if (this.#sessions.size >= this.maxSessions) {
+      transport.close?.();
+      throw new Error("Device session limit reached");
+    }
+    const session = new DeviceSession({
+      role: "bridge",
+      transport,
+      secretResolver: (deviceId) => this.credentials.getSecret(deviceId),
+      pairClaimHandler: (request) => this.#claimPairing(request),
+      snapshotProvider: () => this.store.snapshot(),
+      commandHandler: (command) => this.#handleCommand(command, session),
+    });
+    this.#sessions.add(session);
+    session.on("ready", ({ deviceId }) => {
+      for (const existing of [...this.#sessions]) {
+        if (
+          existing !== session &&
+          existing.ready &&
+          existing.deviceId === deviceId &&
+          existing.transport.kind === transport.kind
+        ) {
+          existing.close();
+        }
+      }
+      this.credentials.touch(deviceId).catch((error) => this.emit("diagnostic", error.message));
+      this.emit("deviceConnected", { deviceId, transport: transport.kind });
+    });
+    session.on("paired", ({ deviceId }) => this.emit("devicePaired", { deviceId, transport: transport.kind }));
+    session.on("resourceRequest", (request) => {
+      this.#sendResource(session, request).catch((error) => {
+        session.sendEvent({ event: "resource.error", petId: request.petId, error: error.message });
+      });
+    });
+    session.on("closed", () => {
+      this.#sessions.delete(session);
+      this.emit("deviceDisconnected", { deviceId: session.deviceId, transport: transport.kind });
+    });
+    session.on("sessionError", (error) => this.emit("diagnostic", error.message));
+    session.start();
+    return session;
+  }
+
+  async revokeDevice(deviceId) {
+    const revoked = await this.credentials.revoke(deviceId);
+    if (!revoked) return false;
+    for (const session of this.#sessions) {
+      if (session.deviceId === deviceId) session.close();
+    }
+    return true;
+  }
+
+  async close() {
+    if (!this.#started) return;
+    this.#started = false;
+    this.store.off("change", this.onStoreChange);
+    for (const session of [...this.#sessions]) session.close();
+    this.#sessions.clear();
+  }
+
+  async #claimPairing(request) {
+    if (!this.pairingCodes.claim(request.pairingCode)) return null;
+    const record = await this.credentials.pair({
+      deviceId: request.deviceId,
+      displayName: request.deviceId,
+    });
+    return { secret: record.secret };
+  }
+
+  async #handleCommand(payload, session) {
+    if (!this.#globalCommands.accept(payload.commandId)) return { duplicate: true };
+    switch (payload.command) {
+      case "pet.select":
+        await this.catalog.refresh();
+        if (typeof payload.petId !== "string" || !this.catalog.has(payload.petId)) throw new Error("Pet was not found");
+        await this.settings.save({ selectedPetId: payload.petId });
+        this.store.setSelectedPet(payload.petId);
+        return { selectedId: payload.petId };
+      case "approval.decide":
+        if (typeof payload.requestId !== "string" || !["accept", "decline"].includes(payload.decision)) {
+          throw new Error("Approval request and decision are invalid");
+        }
+        await this.bridge.decideApproval(payload.requestId, payload.decision);
+        return { requestId: payload.requestId, decision: payload.decision };
+      case "telemetry.update":
+        if (!Number.isFinite(payload.batteryPercent) || payload.batteryPercent < 0 || payload.batteryPercent > 100) {
+          throw new Error("Battery percentage is invalid");
+        }
+        this.store.setTelemetry({
+          batteryPercent: Math.round(payload.batteryPercent),
+          charging: Boolean(payload.charging),
+          transport: session.transport.kind,
+          wifiRssi: Number.isFinite(payload.wifiRssi) ? Math.round(payload.wifiRssi) : null,
+          deviceId: session.deviceId,
+        });
+        return { accepted: true };
+      case "state.preview":
+        this.store.setPreviewAnimation(payload.animation ?? null);
+        return { animation: payload.animation ?? null };
+      default:
+        throw new Error("Device command is not supported");
+    }
+  }
+
+  async #sendResource(session, request) {
+    await this.catalog.refresh();
+    const pet = this.catalog.get(request.petId);
+    if (!pet || pet.kind !== "custom") throw new Error("Pet resource is not available");
+    const asset = await this.catalog.readAsset(pet.id);
+    if (!asset) throw new Error("Pet resource is not available");
+    if (request.sha256 === asset.sha256) {
+      session.sendEvent({ event: "resource.current", petId: pet.id, sha256: asset.sha256 });
+      return;
+    }
+    if (session.transport.kind === "ble") {
+      session.sendEvent({
+        event: "resource.requires-high-bandwidth",
+        petId: pet.id,
+        sha256: asset.sha256,
+        allowedTransports: ["usb", "wifi"],
+      });
+      return;
+    }
+    const missingRanges = request.resumeSha256 === asset.sha256
+      ? request.missingRanges
+      : null;
+    session.sendResource(pet, asset.data, { missingRanges });
+  }
+
+  #broadcastSnapshot(snapshot) {
+    for (const session of this.#sessions) {
+      if (session.ready) session.sendSnapshot(snapshot);
+    }
+  }
+}
