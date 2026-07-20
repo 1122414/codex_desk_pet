@@ -216,6 +216,83 @@ void testResources() {
       "overlapping persisted ranges are rejected");
 }
 
+std::uint32_t nextRandom(std::uint32_t& state) {
+  state = (state * 1'664'525U) + 1'013'904'223U;
+  return state;
+}
+
+void testStressCycles() {
+  std::uint32_t random_state = 0x5eedc0deU;
+  codex::PointerSlotState slots[2]{{true, 1}, {false, 0}};
+  std::uint32_t generation = 1;
+  bool pointer_invariant = true;
+  for (std::size_t cycle = 0; cycle < 50'000; ++cycle) {
+    const auto previous = codex::newestPointerSlot(slots[0], slots[1]);
+    const auto target = codex::nextPointerWriteSlot(slots[0], slots[1]);
+    pointer_invariant =
+        pointer_invariant && previous >= 0 && target >= 0 && previous != target;
+    const auto next_generation = generation + 1;
+    if ((nextRandom(random_state) % 5U) == 0U) {
+      slots[target] = {false, next_generation};
+      pointer_invariant =
+          pointer_invariant &&
+          codex::newestPointerSlot(slots[0], slots[1]) == previous;
+    } else {
+      generation = next_generation;
+      slots[target] = {true, generation};
+      pointer_invariant =
+          pointer_invariant &&
+          codex::newestPointerSlot(slots[0], slots[1]) == target;
+    }
+  }
+  expect(
+      pointer_invariant,
+      "50,000 simulated pointer writes preserve one valid active slot");
+
+  bool transfer_invariant = true;
+  for (std::size_t cycle = 0; cycle < 10'000; ++cycle) {
+    codex::ResourceTransferTracker tracker;
+    transfer_invariant =
+        transfer_invariant && tracker.begin("stress-pet", 4'096);
+    const auto first = (nextRandom(random_state) % 4U) * 1'024U;
+    for (std::size_t offset_index = 0; offset_index < 4; ++offset_index) {
+      const auto offset =
+          ((first / 1'024U + offset_index) % 4U) * 1'024U;
+      transfer_invariant =
+          transfer_invariant && tracker.accept(offset, 1'024);
+    }
+    transfer_invariant =
+        transfer_invariant && tracker.complete() &&
+        !tracker.accept(512, 1'024);
+  }
+  expect(
+      transfer_invariant,
+      "10,000 out-of-order resource transfers complete without overlap");
+
+  codex::SequenceWindow window;
+  bool sequence_invariant = true;
+  std::uint64_t sequence = 0;
+  for (std::size_t cycle = 0; cycle < 50'000; ++cycle) {
+    ++sequence;
+    sequence_invariant =
+        sequence_invariant &&
+        window.observe(sequence, false).status ==
+            codex::SequenceStatus::Accepted &&
+        window.observe(sequence, false).status ==
+            codex::SequenceStatus::Duplicate;
+    if ((cycle % 97U) == 0U) {
+      sequence += 2;
+      sequence_invariant =
+          sequence_invariant &&
+          window.observe(sequence, true).status ==
+              codex::SequenceStatus::Accepted;
+    }
+  }
+  expect(
+      sequence_invariant,
+      "50,000 sequence cycles preserve duplicate and snapshot-resync rules");
+}
+
 }  // namespace
 
 int main() {
@@ -225,6 +302,7 @@ int main() {
   testInput();
   testReconnectAndSequence();
   testResources();
+  testStressCycles();
   if (failures != 0) {
     std::cerr << failures << " firmware core assertion(s) failed\n";
     return EXIT_FAILURE;

@@ -11,6 +11,7 @@
     "start": "node src/server/index.js",
     "start:mock": "CODEX_DESK_MODE=mock node src/server/index.js",
     "test": "node --test",
+    "test:stability": "node scripts/run-stability.mjs && node scripts/check-firmware.mjs",
     "test:firmware": "node scripts/check-firmware.mjs",
     "setup:firmware-tts": "node scripts/setup-esp-tts.mjs",
     "build:firmware": "pio run -d firmware",

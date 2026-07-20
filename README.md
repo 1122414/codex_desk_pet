@@ -21,6 +21,7 @@ Codex Desk Buddy 是面向 M5Stack CoreS3 完整版（SKU `K128`）的桌面宠�
 - Web Bluetooth 首次写入 Wi‑Fi、Bridge 地址和端口；BLE GATT 强制 Secure Connections + MITM，使用设备屏幕的 6 位配网码，成功后立即轮换配网码。
 - 已认证设备会上报板型、固件、协议、中文语音和 microSD 状态；Bridge 校验兼容性并在控制面板显示诊断结果。
 - 可重复生成包含 bootloader、分区表、应用、OTA 初始化器和离线中文语音数据的完整工厂镜像；发布清单记录每个组件的偏移、大小与 SHA‑256，烧录前会再次验证。
+- 固定种子的故障注入会完成 500 次 USB/Wi‑Fi 切换，并覆盖协议丢包、重复、乱序、ACK 丢失、Pet 中断续传、坏块和未完成提交；原生 C++ 另运行 50,000 次双槽断电与序号循环。
 
 ## 快速启动
 
@@ -125,6 +126,7 @@ npm run flash:firmware -- --port /dev/cu.usbmodemXXXX
 ```bash
 npm test
 npm run check
+npm run test:stability
 npm run smoke:codex
 ```
 
@@ -135,6 +137,7 @@ npm run smoke:codex
 - `npm run build:firmware`：使用真实 ESP32-S3 工具链链接 TTS 并编译完整 CoreS3 固件。
 - `npm run release:firmware`：重新构建并生成经过逐文件 SHA‑256 校验的完整工厂镜像。
 - `npm run flash:firmware -- --port <串口>`：验证发布包后写入明确指定的 CoreS3；只有显式增加 `--erase` 才会先整片擦除。
+- `npm run test:stability`：运行可复现的长循环与故障注入，打印每类实际完成次数，再运行固件核心压力测试。
 - `npm run smoke:codex`：真实启动 App Server 并读取最近线程，然后立即关闭。
 
 ## 重要边界
@@ -145,4 +148,4 @@ npm run smoke:codex
 - 设备固件已链接 Espressif ESP-SR v1.2.0 离线中文 TTS；六种状态、Pet 安装/切换和配对都在独立音频任务中播报，缺失或损坏的 `voice_data` 会安全降级为不同音型。当前只能证明库成功链接、语音数据哈希和调度逻辑，音质与音量仍需真机试听。
 - 控制面板固定监听 `127.0.0.1`；真机只连接独立的 `4318` 设备端口。设备 payload 已做应用层加密，但公网部署仍需额外的防火墙、WSS/反向代理和产品运维方案。
 
-详细链路约束见 [设备协议](docs/device-protocol.md)，音频实现与许可边界见 [固件音频](docs/firmware-audio.md)，首次使用见 [安装与恢复](docs/install-and-recovery.md)，完整路线和逐项证据见 [2026-07-20_001.md](2026-07-20_001.md)。
+详细链路约束见 [设备协议](docs/device-protocol.md)，音频实现与许可边界见 [固件音频](docs/firmware-audio.md)，故障注入边界见 [稳定性验证](docs/stability.md)，首次使用见 [安装与恢复](docs/install-and-recovery.md)，完整路线和逐项证据见 [2026-07-20_001.md](2026-07-20_001.md)。
