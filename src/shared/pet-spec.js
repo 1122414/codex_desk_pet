@@ -61,7 +61,7 @@ export function resolveSpriteVersion(manifest = {}, dimensions = {}) {
   return 1;
 }
 
-export function validatePetManifest(manifest) {
+export function validatePetManifest(manifest, dimensions = {}) {
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
     throw new TypeError("Pet manifest must be an object");
   }
@@ -80,12 +80,28 @@ export function validatePetManifest(manifest) {
     throw new Error("Pet spritesheetPath must be spritesheet.webp");
   }
 
+  const displayName = manifest.displayName.trim();
+  const description = typeof manifest.description === "string" ? manifest.description.trim() : "";
+  if (displayName.length > 80) throw new Error("Pet displayName must be at most 80 characters");
+  if (description.length > 240) throw new Error("Pet description must be at most 240 characters");
+  if (manifest.spritesheetSha256 !== undefined && !/^[a-f0-9]{64}$/.test(manifest.spritesheetSha256)) {
+    throw new Error("Pet spritesheetSha256 must be a lowercase SHA-256 digest");
+  }
+
+  const spriteVersionNumber = resolveSpriteVersion(manifest, dimensions);
+  if (Number.isFinite(dimensions.width) || Number.isFinite(dimensions.height)) {
+    const expected = PET_ATLAS[spriteVersionNumber];
+    if (dimensions.width !== expected.width || dimensions.height !== expected.height) {
+      throw new Error(`Pet spritesheet must be ${expected.width}x${expected.height} for v${spriteVersionNumber}`);
+    }
+  }
+
   return {
     id: manifest.id,
-    displayName: manifest.displayName,
-    description: typeof manifest.description === "string" ? manifest.description : "",
-    spriteVersionNumber: resolveSpriteVersion(manifest),
+    displayName,
+    description,
+    spriteVersionNumber,
     spritesheetPath: manifest.spritesheetPath,
+    ...(manifest.spritesheetSha256 === undefined ? {} : { spritesheetSha256: manifest.spritesheetSha256 }),
   };
 }
-

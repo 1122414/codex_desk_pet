@@ -24,8 +24,16 @@ test("pet manifest validation supports v1 default and explicit v2", () => {
   const base = { id: "desk-fox", displayName: "Desk Fox", spritesheetPath: "spritesheet.webp" };
   assert.equal(validatePetManifest(base).spriteVersionNumber, 1);
   assert.equal(validatePetManifest({ ...base, spriteVersionNumber: 2 }).spriteVersionNumber, 2);
+  assert.equal(validatePetManifest(base, { width: 1536, height: 2288 }).spriteVersionNumber, 2);
   assert.equal(resolveSpriteVersion({}, { width: 1536, height: 2288 }), 2);
   assert.throws(() => validatePetManifest({ ...base, id: "../escape" }), /Pet id/);
   assert.throws(() => validatePetManifest({ ...base, spritesheetPath: "../secret" }), /spritesheetPath/);
+  assert.throws(
+    () => validatePetManifest({ ...base, spriteVersionNumber: 2 }, { width: 1536, height: 1872 }),
+    /version does not match/,
+  );
+  assert.throws(
+    () => validatePetManifest({ ...base, spritesheetSha256: "INVALID" }),
+    /lowercase SHA-256/,
+  );
 });
-

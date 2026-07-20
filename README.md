@@ -8,6 +8,7 @@ Codex Desk Buddy 是面向 M5Stack CoreS3 完整版（SKU `K128`）的桌面宠�
 - `running`、`needs-input`、`reviewing`、`completed`、`blocked` 等状态映射。
 - 命令执行与文件修改的单次允许/拒绝；只在持有原始 JSON-RPC 请求 ID 且审批详情完整时开放“允许”。
 - Codex Pet v1（8×9）和 v2（8×11）图集播放。
+- 自定义 Pet 会校验 WebP 格式、实际尺寸、16 MiB 大小上限和 SHA‑256；声明了清单哈希时必须完全匹配。
 - 9 个标准动画；v2 Pet 和内置 Pet 支持 16 个看向方向。
 - 触摸/滑动、屏幕左右键、电脑下拉框、键盘方向键切换 Pet，所有界面共享 Bridge 选择状态。
 - 声音、中文语音提示、时钟、电池、当前线程 Token 和等级进度。
@@ -67,11 +68,12 @@ v2 manifest 示例：
   "displayName": "My Pet",
   "description": "A custom Codex companion.",
   "spriteVersionNumber": 2,
-  "spritesheetPath": "spritesheet.webp"
+  "spritesheetPath": "spritesheet.webp",
+  "spritesheetSha256": "可选的64位小写SHA-256"
 }
 ```
 
-v2 图集必须为 1536×2288；v1 图集为 1536×1872。单格均为 192×208。新 Pet 继续在电脑端制作，设备端只同步、缓存和播放成品。
+v2 图集必须为 1536×2288；v1 图集为 1536×1872。单格均为 192×208。`spriteVersionNumber` 可以省略，此时 Bridge 按真实尺寸识别版本；如果声明了版本或 `spritesheetSha256`，文件必须匹配。图集最大 16 MiB。新 Pet 继续在电脑端制作，设备端只同步、缓存和播放成品。
 
 ## 验证
 
@@ -81,7 +83,7 @@ npm run check
 npm run smoke:codex
 ```
 
-- `npm test`：运行 19 项领域、协议、审批、Pet 路径与 HTTP 安全测试。
+- `npm test`：运行 27 项领域、协议、审批、Pet 资源与 HTTP 安全测试。
 - `npm run check`：先检查全部 JavaScript 语法，再运行测试。
 - `npm run smoke:codex`：真实启动 App Server 并读取最近线程，然后立即关闭。
 

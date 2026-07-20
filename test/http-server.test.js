@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { CodexBridge } from "../src/server/codex-bridge.js";
@@ -9,9 +9,31 @@ import { DeskHttpServer } from "../src/server/http-server.js";
 import { PetCatalog } from "../src/server/pet-catalog.js";
 import { SettingsRepository } from "../src/server/settings-repository.js";
 
+function makeV1Webp() {
+  const file = Buffer.alloc(30);
+  file.write("RIFF", 0, "ascii");
+  file.writeUInt32LE(file.length - 8, 4);
+  file.write("WEBP", 8, "ascii");
+  file.write("VP8X", 12, "ascii");
+  file.writeUInt32LE(10, 16);
+  file.writeUIntLE(1536 - 1, 24, 3);
+  file.writeUIntLE(1872 - 1, 27, 3);
+  return file;
+}
+
 test("HTTP API requires a same-origin session for state changes", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "codex-desk-http-"));
-  const catalog = new PetCatalog(path.join(root, "pets"));
+  const petsRoot = path.join(root, "pets");
+  const customPetDir = path.join(petsRoot, "http-pet");
+  await mkdir(customPetDir, { recursive: true });
+  await writeFile(path.join(customPetDir, "pet.json"), JSON.stringify({
+    id: "http-pet",
+    displayName: "HTTP Pet",
+    spritesheetPath: "spritesheet.webp",
+  }));
+  const spritesheet = makeV1Webp();
+  await writeFile(path.join(customPetDir, "spritesheet.webp"), spritesheet);
+  const catalog = new PetCatalog(petsRoot);
   await catalog.refresh();
   const settings = new SettingsRepository(path.join(root, "settings.json"));
   const store = new DeskStore();
@@ -34,6 +56,21 @@ test("HTTP API requires a same-origin session for state changes", async (t) => {
   const sharedModule = await fetch(`${base}/shared/pet-spec.js`);
   assert.equal(sharedModule.status, 200);
   assert.match(await sharedModule.text(), /STANDARD_ANIMATIONS/);
+
+  const petList = await fetch(`${base}/api/pets`);
+  const { pets } = await petList.json();
+  const customPet = pets.find((pet) => pet.id === "http-pet");
+  assert.equal(customPet.spriteVersionNumber, 1);
+  assert.equal(customPet.atlasHeight, 1872);
+
+  const petAsset = await fetch(`${base}${customPet.assetUrl}`);
+  assert.equal(petAsset.status, 200);
+  assert.equal(petAsset.headers.get("content-type"), "image/webp");
+  assert.deepEqual(Buffer.from(await petAsset.arrayBuffer()), spritesheet);
+  const notModified = await fetch(`${base}${customPet.assetUrl}`, {
+    headers: { "If-None-Match": petAsset.headers.get("etag") },
+  });
+  assert.equal(notModified.status, 304);
 
   const denied = await fetch(`${base}/api/pet/select`, {
     method: "POST",

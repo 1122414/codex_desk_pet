@@ -263,7 +263,9 @@ function updateClock() {
 
 async function render(nextSnapshot) {
   const oldState = snapshot?.presentation.state;
+  const oldPetId = snapshot?.pet.selectedId;
   snapshot = nextSnapshot;
+  if (oldPetId && oldPetId !== snapshot.pet.selectedId) resetLocalLookState();
   const connected = snapshot.connection.status === "connected";
   const connectionLabels = {
     connected: `${snapshot.connection.mode.toUpperCase()} · 已连接`,
@@ -401,13 +403,17 @@ function previewLook(degree) {
 }
 
 function clearLocalLook() {
-  localLookDegree = null;
-  clearTimeout(localLookTimer);
-  document.querySelectorAll(".look-button").forEach((button) => button.classList.remove("active"));
+  resetLocalLookState();
   if (snapshot) {
     animator.setAnimation(snapshot.presentation.animation, null);
     elements["screen-state"].textContent = STATE_LABELS[snapshot.presentation.state] || snapshot.presentation.state;
   }
+}
+
+function resetLocalLookState() {
+  localLookDegree = null;
+  clearTimeout(localLookTimer);
+  document.querySelectorAll(".look-button").forEach((button) => button.classList.remove("active"));
 }
 
 async function decideApproval(decision) {

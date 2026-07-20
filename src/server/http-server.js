@@ -1,5 +1,4 @@
-import { createReadStream } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -185,15 +184,26 @@ export class DeskHttpServer {
 
     const assetMatch = route.match(/^\/api\/pets\/([a-z0-9][a-z0-9-]{0,63})\/spritesheet$/);
     if (req.method === "GET" && assetMatch) {
-      const assetPath = this.catalog.getAssetPath(assetMatch[1]);
-      if (!assetPath) throw new HttpError(404, "Pet spritesheet was not found");
-      const info = await stat(assetPath);
+      let asset;
+      try {
+        asset = await this.catalog.readAsset(assetMatch[1]);
+      } catch (error) {
+        throw new HttpError(409, error.message);
+      }
+      if (!asset) throw new HttpError(404, "Pet spritesheet was not found");
+      const etag = `"sha256-${asset.sha256}"`;
+      if (req.headers["if-none-match"] === etag) {
+        res.writeHead(304, { ETag: etag, "Cache-Control": "private, max-age=300" });
+        res.end();
+        return;
+      }
       res.writeHead(200, {
         "Content-Type": "image/webp",
-        "Content-Length": info.size,
-        "Cache-Control": "private, max-age=60",
+        "Content-Length": asset.bytes,
+        "Cache-Control": "private, max-age=300",
+        ETag: etag,
       });
-      createReadStream(assetPath).pipe(res);
+      res.end(asset.data);
       return;
     }
 
