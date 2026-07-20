@@ -9,6 +9,14 @@
 3. 安装 Codex，并确认终端可以执行 `codex --version`。
 4. 在项目目录运行 `npm install`。
 
+准备完成后运行：
+
+```bash
+npm run doctor
+```
+
+只有 `ok` 为 `true` 时，Node、Codex App Server、当前实验性 Schema、PlatformIO 和完整发布包才同时就绪。若发布包尚未生成，先执行下一节，再重新运行诊断。
+
 第一次构建需要联网下载固定版本的 ESP32 工具链和 Espressif ESP-SR v1.2.0 中文 TTS 资源。依赖版本、来源、文件大小和 SHA‑256 都由仓库配置或脚本固定；下载内容不提交到 Git。
 
 ## 生成可烧录发布包

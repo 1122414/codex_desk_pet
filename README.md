@@ -27,6 +27,12 @@ Codex Desk Buddy 是面向 M5Stack CoreS3 完整版（SKU `K128`）的桌面宠�
 
 需要 Node.js 22 或更高版本。本机还需要可用的 `codex` 命令才能连接真实 Codex。
 
+先检查电脑环境、Codex App Server Schema、PlatformIO 和固件发布包：
+
+```bash
+npm run doctor
+```
+
 先运行不依赖真实 Codex 的完整演示：
 
 ```bash
@@ -125,12 +131,14 @@ npm run flash:firmware -- --port /dev/cu.usbmodemXXXX
 
 ```bash
 npm test
+npm run doctor
 npm run check
 npm run test:stability
 npm run smoke:codex
 ```
 
 - `npm test`：运行领域、协议、审批、配对、传输、Pet 资源与 HTTP 安全测试。
+- `npm run doctor`：检查 Node、Codex 实际连接与必要 Schema 方法、PlatformIO 和完整固件包；输出不包含线程标题或凭据。
 - `npm run check`：先检查全部 JavaScript 语法，再运行测试。
 - `npm run test:firmware`：使用本机 C++17 编译器运行不依赖硬件的固件状态机、动画、输入、重连、序号与资源恢复测试。
 - `npm run setup:firmware-tts`：下载并校验 Espressif 官方离线中文 TTS 库、许可与语音数据。
@@ -148,4 +156,4 @@ npm run smoke:codex
 - 设备固件已链接 Espressif ESP-SR v1.2.0 离线中文 TTS；六种状态、Pet 安装/切换和配对都在独立音频任务中播报，缺失或损坏的 `voice_data` 会安全降级为不同音型。当前只能证明库成功链接、语音数据哈希和调度逻辑，音质与音量仍需真机试听。
 - 控制面板固定监听 `127.0.0.1`；真机只连接独立的 `4318` 设备端口。设备 payload 已做应用层加密，但公网部署仍需额外的防火墙、WSS/反向代理和产品运维方案。
 
-详细链路约束见 [设备协议](docs/device-protocol.md)，音频实现与许可边界见 [固件音频](docs/firmware-audio.md)，故障注入边界见 [稳定性验证](docs/stability.md)，首次使用见 [安装与恢复](docs/install-and-recovery.md)，完整路线和逐项证据见 [2026-07-20_001.md](2026-07-20_001.md)。
+详细链路约束见 [设备协议](docs/device-protocol.md)，音频实现与许可边界见 [固件音频](docs/firmware-audio.md)，故障注入边界见 [稳定性验证](docs/stability.md)，首次使用见 [安装与恢复](docs/install-and-recovery.md)，逐项结论见 [真机前验收矩阵](docs/acceptance.md)，完整路线见 [2026-07-20_001.md](2026-07-20_001.md)。
