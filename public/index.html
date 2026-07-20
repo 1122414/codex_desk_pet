@@ -169,6 +169,19 @@
       </section>
     </main>
 
+    <dialog id="approval-dialog" class="approval-dialog">
+      <form method="dialog">
+        <span class="section-label">完整审批详情</span>
+        <h2 id="approval-dialog-title">需要确认</h2>
+        <pre id="approval-dialog-detail"></pre>
+        <p id="approval-dialog-reason"></p>
+        <div class="approval-dialog-actions">
+          <button id="approval-dialog-cancel" class="dialog-cancel" value="cancel" type="submit">返回检查</button>
+          <button id="approval-dialog-accept" class="primary-button" value="accept" type="button">确认允许一次</button>
+        </div>
+      </form>
+    </dialog>
+
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script type="module" src="/app.js"></script>
   </body>

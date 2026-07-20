@@ -6,6 +6,7 @@ import path from "node:path";
 import { CodexBridge } from "../src/server/codex-bridge.js";
 import { DeskStore } from "../src/server/desk-store.js";
 import { DeskHttpServer } from "../src/server/http-server.js";
+import { HookApprovalBroker } from "../src/server/hook-approval-broker.js";
 import { PetCatalog } from "../src/server/pet-catalog.js";
 import { SettingsRepository } from "../src/server/settings-repository.js";
 
@@ -19,6 +20,16 @@ function makeV1Webp() {
   file.writeUIntLE(1536 - 1, 24, 3);
   file.writeUIntLE(1872 - 1, 27, 3);
   return file;
+}
+
+async function waitFor(check, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const value = check();
+    if (value) return value;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Timed out waiting for HTTP state");
 }
 
 test("HTTP API requires a same-origin session for state changes", async (t) => {
@@ -37,14 +48,24 @@ test("HTTP API requires a same-origin session for state changes", async (t) => {
   await catalog.refresh();
   const settings = new SettingsRepository(path.join(root, "settings.json"));
   const store = new DeskStore();
-  const bridge = new CodexBridge({ store, mode: "mock" });
+  const hookApprovalBroker = new HookApprovalBroker({ store });
+  const bridge = new CodexBridge({ store, mode: "mock", hookApprovalBroker });
   await bridge.start();
   const deviceHub = {
     listDevices: () => [{ deviceId: "core-s3-1", displayName: "Desk Unit", connected: false, transports: [] }],
     createPairingOffer: () => ({ code: "123456", expiresAt: 123_000 }),
     revokeDevice: async (deviceId) => deviceId === "core-s3-1",
   };
-  const server = new DeskHttpServer({ store, bridge, catalog, settings, deviceHub });
+  const hookToken = "9".repeat(64);
+  const server = new DeskHttpServer({
+    store,
+    bridge,
+    catalog,
+    settings,
+    deviceHub,
+    hookToken,
+    hookApprovalBroker,
+  });
   const address = await server.listen({ port: 0 });
   t.after(async () => server.close());
   const base = `http://127.0.0.1:${address.port}`;
@@ -84,6 +105,91 @@ test("HTTP API requires a same-origin session for state changes", async (t) => {
   assert.equal(diagnosticBody.target.boardId, "m5stack-cores3-k128");
   assert.equal(diagnosticBody.target.protocolVersion, 3);
   assert.equal(diagnosticBody.codex.appServerUserAgent, "codex-desk-mock");
+  assert.equal(diagnosticBody.hooks.endpointReady, true);
+  assert.equal(diagnosticBody.hooks.approvalReady, true);
+
+  const deniedHook = await fetch(`${base}/api/hooks/codex`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      version: 1,
+      event: "UserPromptSubmit",
+      sessionId: "hook-http-session",
+      title: "跨客户端任务",
+      occurredAt: Date.now(),
+    }),
+  });
+  assert.equal(deniedHook.status, 403);
+  const acceptedHook = await fetch(`${base}/api/hooks/codex`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Codex-Desk-Hook-Token": hookToken,
+    },
+    body: JSON.stringify({
+      version: 1,
+      event: "UserPromptSubmit",
+      sessionId: "hook-http-session",
+      title: "跨客户端任务",
+      occurredAt: Date.now(),
+    }),
+  });
+  assert.equal(acceptedHook.status, 202);
+  const hookSnapshot = await (await fetch(`${base}/api/snapshot`)).json();
+  assert.equal(hookSnapshot.task.title, "跨客户端任务");
+  assert.equal(hookSnapshot.presentation.state, "running");
+
+  const hookApprovalResponse = fetch(`${base}/api/hooks/codex/permission`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Codex-Desk-Hook-Token": hookToken,
+    },
+    body: JSON.stringify({
+      version: 1,
+      event: "PermissionRequest",
+      requestId: "hook-http-request-1",
+      sessionId: "hook-http-session",
+      turnId: "hook-http-turn",
+      toolName: "Bash",
+      detail: "npm test",
+      detailComplete: true,
+      reason: "运行测试",
+      occurredAt: Date.now(),
+    }),
+  });
+  const hookApproval = await waitFor(() => store.snapshot().approval);
+  assert.equal(hookApproval.source, "codex-hook");
+  await bridge.decideApproval(hookApproval.id, "accept");
+  assert.deepEqual(await (await hookApprovalResponse).json(), {
+    decision: "allow",
+  });
+  const hookDenialResponse = fetch(`${base}/api/hooks/codex/permission`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Codex-Desk-Hook-Token": hookToken,
+    },
+    body: JSON.stringify({
+      version: 1,
+      event: "PermissionRequest",
+      requestId: "hook-http-request-2",
+      sessionId: "hook-http-session",
+      turnId: "hook-http-turn",
+      toolName: "apply_patch",
+      detail: "*** Begin Patch\n*** End Patch",
+      detailComplete: true,
+      occurredAt: Date.now(),
+    }),
+  });
+  const hookDenial = await waitFor(() => {
+    const approval = store.snapshot().approval;
+    return approval?.hookRequestId === "hook-http-request-2" ? approval : null;
+  });
+  await bridge.decideApproval(hookDenial.id, "decline");
+  assert.deepEqual(await (await hookDenialResponse).json(), {
+    decision: "deny",
+  });
 
   const denied = await fetch(`${base}/api/pet/select`, {
     method: "POST",

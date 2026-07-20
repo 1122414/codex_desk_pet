@@ -5,8 +5,9 @@ Codex Desk Buddy 是面向 M5Stack CoreS3 完整版（SKU `K128`）的桌面宠�
 ## 当前已经实现
 
 - 真实 Codex App Server 初始化、线程列表轮询和事件归一化。
+- 官方 Codex Hooks 跨客户端状态同步：Codex Desktop、CLI 和 IDE 中的 Session、Turn、工具、等待审批与完成事件可由本机 Bridge 感知；乱序和陈旧事件会被丢弃。
 - `running`、`needs-input`、`reviewing`、`completed`、`blocked` 等状态映射。
-- 命令执行、文件修改与额外权限请求的单次允许/拒绝；只在持有原始 JSON-RPC 请求 ID 且审批详情完整时开放“允许”。屏幕放不下的请求只能拒绝或回电脑处理。
+- 命令执行、文件修改与额外权限请求的单次允许/拒绝；Bridge 会话使用原始 JSON-RPC 请求 ID，Desktop/CLI/IDE 会话使用官方 `PermissionRequest` Hook 返回值。只有审批详情完整时开放“允许”，屏幕放不下的请求只能拒绝或回本项目电脑控制面板处理。
 - Codex Pet v1（8×9）和 v2（8×11）图集播放。
 - 自定义 Pet 会校验 WebP 格式、实际尺寸、16 MiB 大小上限和 SHA‑256；声明了清单哈希时必须完全匹配。
 - 9 个标准动画；v2 Pet 和内置 Pet 支持 16 个看向方向。
@@ -61,6 +62,16 @@ CODEX_DESK_USB_AUTO=1 npm start
 ```bash
 npm start
 ```
+
+让设备同时感知 Codex Desktop、CLI 和 IDE 中运行的任务，需要启动一次 Bridge 生成本机 Token，然后安装用户级 Hooks：
+
+```bash
+npm start # 首次启动成功后按 Ctrl+C
+npm run install:codex-hooks
+npm start
+```
+
+安装后在 Codex 中打开 `/hooks` 检查并信任命令，再新建任务。Hooks 只发送有限生命周期元数据；详细隐私字段、卸载方式与审批边界见 [Codex 跨客户端状态同步](docs/codex-hooks.md)。
 
 连接已经启动的托管 App Server daemon：
 
@@ -151,9 +162,10 @@ npm run smoke:codex
 ## 重要边界
 
 - 当前 Codex App Server 没有公开 Pet 列表或 Pet 选择事件。MVP 由 Desk Bridge 同步触屏和电脑控制面板，但不会写入 Codex 原生客户端的私有设置。
+- Hooks 能让设备看到其他 Codex 客户端的 Running、Needs input 和 Completed 生命周期，并把设备对 `PermissionRequest` 的明确允许/拒绝返回原客户端。详情不完整、超过设备显示上限、Bridge 不可用或 115 秒超时时不代替用户决定，Codex 回到原生审批流程。
 - 当前等级根据“正在展示的线程”的累计 Token 计算，每 50,000 Token 一级；它不是 Codex 官方等级。
 - 完整 CoreS3 固件已经通过真实 ESP32-S3 工具链编译，但 USB CDC、Wi‑Fi、BLE、microSD、触摸、扬声器与电量读取仍需设备到手后做物理验证。
 - 设备固件已链接 Espressif ESP-SR v1.2.0 离线中文 TTS；六种状态、Pet 安装/切换和配对都在独立音频任务中播报，缺失或损坏的 `voice_data` 会安全降级为不同音型。当前只能证明库成功链接、语音数据哈希和调度逻辑，音质与音量仍需真机试听。
 - 控制面板固定监听 `127.0.0.1`；真机只连接独立的 `4318` 设备端口。设备 payload 已做应用层加密，但公网部署仍需额外的防火墙、WSS/反向代理和产品运维方案。
 
-详细链路约束见 [设备协议](docs/device-protocol.md)，音频实现与许可边界见 [固件音频](docs/firmware-audio.md)，故障注入边界见 [稳定性验证](docs/stability.md)，首次使用见 [安装与恢复](docs/install-and-recovery.md)，逐项结论见 [真机前验收矩阵](docs/acceptance.md)，完整路线见 [2026-07-20_001.md](2026-07-20_001.md)。
+详细链路约束见 [设备协议](docs/device-protocol.md)，跨客户端状态见 [Codex Hooks](docs/codex-hooks.md)，音频实现与许可边界见 [固件音频](docs/firmware-audio.md)，故障注入边界见 [稳定性验证](docs/stability.md)，首次使用见 [安装与恢复](docs/install-and-recovery.md)，逐项结论见 [真机前验收矩阵](docs/acceptance.md)，完整路线见 [2026-07-20_001.md](2026-07-20_001.md)。

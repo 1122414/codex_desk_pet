@@ -11,11 +11,11 @@
 | 原始需求 | 实现与证据 | 结论 |
 | --- | --- | --- |
 | 触摸屏 | `firmware/src/cores3_ui.cpp` 读取 CoreS3 电容触摸；`firmware/lib/codex_core/src/input.cpp` 处理滑动、点击、看向和审批防误触；原生 C++ 测试验证手势与审批冷却 | 代码完成，待真机校准坐标与手感 |
-| 展示 PC 端全部状态和动画 | `src/shared/codex-state.js` 归一化 Codex 生命周期；`src/shared/pet-spec.js` 定义 9 个图集动画和 16 个看向方向；Bridge、浏览器和固件共用相同状态语义 | 已完成 |
-| 设备允许/拒绝审批 | `src/server/codex-bridge.js` 关联原始 RPC ID，覆盖命令、文件与额外权限审批；`firmware/src/cores3_ui.cpp` 显示一次允许/拒绝；详情不完整时禁止允许 | 已完成 |
+| 展示 PC 端全部状态和动画 | `src/shared/codex-state.js` 归一化 Codex 生命周期；官方 Hooks 接收 Desktop、CLI、IDE 的 Session、Turn、工具、等待审批和完成事件；`src/shared/pet-spec.js` 定义 9 个图集动画和 16 个看向方向 | 已完成；用户需审查并信任 Hooks |
+| 设备允许/拒绝审批 | Bridge 会话关联原始 RPC ID；Desktop、CLI、IDE 使用官方 `PermissionRequest` Hook 的 `allow`/`deny` 输出；Hook 最长等待 115 秒，详情不完整或小屏放不下时禁止设备允许 | 已完成 |
 | 内置与自定义 Pet，自由切换；新 Pet 在 PC 制作 | `src/server/pet-catalog.js` 校验 v1/v2；`src/server/device-pet-asset.js` 转换设备帧；`firmware/src/pet_store.cpp` 缓存和回退；浏览器、触摸、滑动和 Port B 双键都可切换 | 已完成 |
 | 按键切换、电脑切换、Codex 同步 | 固件按键和触摸向 Bridge 发 `pet.select`，电脑控制面板写同一 Bridge 选择状态并广播所有设备 | 设备与本项目电脑端同步已完成；Codex 官方客户端没有公开 Pet 选择事件，不能宣称原生双向同步 |
-| 显示最近运行任务 | Bridge 调用 `thread/list`，按 `recency_at` 降序读取；状态模型在审批、活动和最近完成任务之间按明确优先级选取显示线程 | 已完成 |
+| 显示最近运行任务 | Bridge 调用 `thread/list`，官方 Hooks 补充其他 Codex 客户端的实时生命周期；状态模型在审批、活动和最近完成任务之间按明确优先级选取显示线程 | 已完成 |
 | 声音、中文语音、时钟、电量、Token、等级 | `firmware/src/device_audio.cpp` 使用独立任务播放 ESP-SR 离线中文 TTS并安全降级提示音；UI 读取 RTC、电池并显示 Token/等级 | 逻辑和真实固件链接完成；音质、音量、电量曲线待真机 |
 | USB 常联和稳定无线 | USB CDC 与 Wi‑Fi WebSocket 使用协议 v3、双向 HMAC、AES‑256‑GCM、ACK、快照重同步和指数退避；501 个会话形成 500 次 USB/Wi‑Fi 切换并注入四类故障 | 代码与故障模型完成；真实驱动、天线和路由器环境待真机 |
 | 蓝牙或其他无线方式 | Web Bluetooth 通过 Secure Connections + MITM 写入 2.4 GHz Wi‑Fi 和 Bridge 地址；日常无线走 Wi‑Fi | BLE 配网代码完成，待真机；当前不提供电脑端原生 BLE 日常状态链路 |

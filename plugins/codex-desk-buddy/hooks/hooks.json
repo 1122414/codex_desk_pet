@@ -1,0 +1,81 @@
+{
+  "description": "Forward bounded Codex lifecycle metadata to the local Codex Desk Buddy bridge.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/scripts/forward-hook.mjs\"",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\scripts\\forward-hook.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/scripts/forward-hook.mjs\"",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\scripts\\forward-hook.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/scripts/forward-hook.mjs\"",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\scripts\\forward-hook.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/scripts/forward-hook.mjs\"",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\scripts\\forward-hook.mjs\"",
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/scripts/forward-hook.mjs\"",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\scripts\\forward-hook.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/scripts/forward-hook.mjs\"",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\scripts\\forward-hook.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}

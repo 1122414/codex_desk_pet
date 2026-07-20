@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -10,6 +10,10 @@ import {
   DEVICE_PROTOCOL_VERSION,
   MINIMUM_DEVICE_FIRMWARE_VERSION,
 } from "../shared/device-protocol.js";
+import {
+  normalizeCodexHookApproval,
+  normalizeCodexHookEvent,
+} from "./codex-hook.js";
 
 const MAX_BODY_BYTES = 16 * 1024;
 const BRIDGE_VERSION = "0.1.0";
@@ -71,6 +75,18 @@ function requireCommandId(body) {
   }
 }
 
+function validHookToken(expected, supplied) {
+  if (
+    typeof expected !== "string" ||
+    typeof supplied !== "string" ||
+    !/^[a-f0-9]{64}$/.test(expected) ||
+    !/^[a-f0-9]{64}$/.test(supplied)
+  ) {
+    return false;
+  }
+  return timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(supplied, "hex"));
+}
+
 export class DeskHttpServer {
   #server;
   #sseClients = new Set();
@@ -85,6 +101,8 @@ export class DeskHttpServer {
     catalog,
     settings,
     deviceHub = null,
+    hookToken = null,
+    hookApprovalBroker = null,
     publicDirectory = path.join(PROJECT_ROOT, "public"),
   }) {
     this.store = store;
@@ -92,6 +110,8 @@ export class DeskHttpServer {
     this.catalog = catalog;
     this.settings = settings;
     this.deviceHub = deviceHub;
+    this.hookToken = hookToken;
+    this.hookApprovalBroker = hookApprovalBroker;
     this.publicDirectory = path.resolve(publicDirectory);
     this.#server = createServer((req, res) => {
       this.#handle(req, res).catch((error) => {
@@ -185,8 +205,53 @@ export class DeskHttpServer {
           minimumFirmwareVersion: MINIMUM_DEVICE_FIRMWARE_VERSION,
         },
         codex: this.bridge.diagnostics?.() ?? null,
+        hooks: {
+          endpointReady: Boolean(this.hookToken),
+          approvalReady: Boolean(this.hookToken && this.hookApprovalBroker),
+        },
         devices: this.deviceHub?.listDevices() ?? [],
       });
+      return;
+    }
+
+    if (req.method === "POST" && route === "/api/hooks/codex/permission") {
+      if (!this.hookToken || !this.hookApprovalBroker) {
+        throw new HttpError(503, "Codex hook approval receiver is unavailable");
+      }
+      if (!validHookToken(this.hookToken, req.headers["x-codex-desk-hook-token"])) {
+        throw new HttpError(403, "Valid Codex hook token is required");
+      }
+      const body = await readJson(req);
+      if (!normalizeCodexHookApproval(body)) {
+        throw new HttpError(400, "Codex hook approval is invalid");
+      }
+      const controller = new AbortController();
+      req.once("aborted", () => controller.abort());
+      res.once("close", () => controller.abort());
+      const decision = await this.hookApprovalBroker.request(body, {
+        signal: controller.signal,
+      });
+      if (!decision) {
+        res.writeHead(204, { "Cache-Control": "no-store" });
+        res.end();
+        return;
+      }
+      json(res, 200, {
+        decision: decision === "accept" ? "allow" : "deny",
+      });
+      return;
+    }
+
+    if (req.method === "POST" && route === "/api/hooks/codex") {
+      if (!this.hookToken) throw new HttpError(503, "Codex hook receiver is unavailable");
+      if (!validHookToken(this.hookToken, req.headers["x-codex-desk-hook-token"])) {
+        throw new HttpError(403, "Valid Codex hook token is required");
+      }
+      const body = await readJson(req);
+      const event = normalizeCodexHookEvent(body);
+      if (!event) throw new HttpError(400, "Codex hook event is invalid");
+      this.store.handleCodexHook(event);
+      json(res, 202, { ok: true });
       return;
     }
 

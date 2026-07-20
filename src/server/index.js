@@ -4,6 +4,8 @@ import { DeviceHub } from "./device-hub.js";
 import { DeviceWebSocketServer } from "./device-websocket-server.js";
 import { DeskStore } from "./desk-store.js";
 import { DeskHttpServer } from "./http-server.js";
+import { HookApprovalBroker } from "./hook-approval-broker.js";
+import { HookTokenRepository } from "./hook-token-repository.js";
 import { PetCatalog } from "./pet-catalog.js";
 import { SettingsRepository } from "./settings-repository.js";
 import { UsbDeviceManager } from "./transports/usb-cdc-transport.js";
@@ -19,7 +21,8 @@ const settings = new SettingsRepository();
 const saved = await settings.load();
 const selectedPetId = catalog.has(saved.selectedPetId) ? saved.selectedPetId : "codex-core";
 const store = new DeskStore({ selectedPetId });
-const bridge = new CodexBridge({ store, mode });
+const hookApprovalBroker = new HookApprovalBroker({ store });
+const bridge = new CodexBridge({ store, mode, hookApprovalBroker });
 bridge.on("diagnostic", (message) => {
   if (process.env.CODEX_DESK_DEBUG === "1") console.warn(`[codex] ${message}`);
 });
@@ -31,6 +34,7 @@ try {
 }
 
 const credentials = new DeviceCredentialRepository();
+const hookToken = await new HookTokenRepository().loadOrCreate();
 const deviceHub = new DeviceHub({ store, bridge, catalog, settings, credentials });
 deviceHub.on("diagnostic", (message) => {
   if (process.env.CODEX_DESK_DEBUG === "1") console.warn(`[device] ${message}`);
@@ -52,7 +56,15 @@ usbManager.on("diagnostic", (message) => {
 });
 await usbManager.start();
 
-const server = new DeskHttpServer({ store, bridge, catalog, settings, deviceHub });
+const server = new DeskHttpServer({
+  store,
+  bridge,
+  catalog,
+  settings,
+  deviceHub,
+  hookToken,
+  hookApprovalBroker,
+});
 server.onError = (error) => console.error(error);
 const address = await server.listen({ port: Number(process.env.PORT ?? 4317) });
 console.log(`Codex Desk Buddy is running at http://127.0.0.1:${address.port}`);
@@ -62,6 +74,7 @@ let stopping = false;
 async function shutdown() {
   if (stopping) return;
   stopping = true;
+  hookApprovalBroker.close();
   await server.close();
   await deviceServer.close();
   await usbManager.close();

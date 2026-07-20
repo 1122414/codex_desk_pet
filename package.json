@@ -10,6 +10,8 @@
   "scripts": {
     "start": "node src/server/index.js",
     "start:mock": "CODEX_DESK_MODE=mock node src/server/index.js",
+    "install:codex-hooks": "node scripts/install-codex-hooks.mjs",
+    "remove:codex-hooks": "node scripts/install-codex-hooks.mjs --remove",
     "doctor": "node scripts/doctor.mjs",
     "test": "node --test",
     "test:stability": "node scripts/run-stability.mjs && node scripts/check-firmware.mjs",

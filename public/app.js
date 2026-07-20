@@ -32,6 +32,8 @@ const elements = Object.fromEntries([
   "device-screen", "screen-connection", "screen-time", "screen-battery", "pet-stage", "pet-canvas",
   "device-prev", "device-next", "screen-pet-name", "screen-state", "approval-card", "approval-title",
   "approval-detail", "approval-reason", "approval-decline", "approval-accept", "screen-task", "screen-tokens",
+  "approval-dialog", "approval-dialog-title", "approval-dialog-detail", "approval-dialog-reason",
+  "approval-dialog-cancel", "approval-dialog-accept",
   "level-progress", "screen-level", "screen-transport", "bridge-status", "pet-select", "pet-version",
   "pet-description", "animation-grid", "restore-sync", "look-grid", "look-support", "sound-toggle",
   "voice-toggle", "battery-slider", "battery-value", "mock-tools", "mock-approval", "toast",
@@ -48,6 +50,7 @@ let pets = [];
 let localLookDegree = null;
 let localLookTimer = null;
 let toastTimer = null;
+let dialogApprovalId = null;
 let soundEnabled = localStorage.getItem("codex-desk-sound") === "true";
 let voiceEnabled = localStorage.getItem("codex-desk-voice") === "true";
 let audioContext = null;
@@ -328,7 +331,15 @@ async function render(nextSnapshot) {
 
 function renderApproval(approval) {
   elements["approval-card"].hidden = !approval;
-  if (!approval) return;
+  if (!approval) {
+    if (elements["approval-dialog"].open) elements["approval-dialog"].close();
+    dialogApprovalId = null;
+    return;
+  }
+  if (elements["approval-dialog"].open && dialogApprovalId !== approval.id) {
+    elements["approval-dialog"].close();
+    dialogApprovalId = null;
+  }
   elements["approval-title"].textContent = approval.title;
   const detail = approval.displayDetail ||
     (approval.kind === "command"
@@ -535,8 +546,24 @@ function resetLocalLookState() {
   document.querySelectorAll(".look-button").forEach((button) => button.classList.remove("active"));
 }
 
-async function decideApproval(decision) {
+async function decideApproval(decision, detailConfirmed = false) {
   if (!snapshot?.approval) return;
+  if (
+    decision === "accept" &&
+    !snapshot.approval.deviceSafeToApprove &&
+    !detailConfirmed
+  ) {
+    dialogApprovalId = snapshot.approval.id;
+    elements["approval-dialog-title"].textContent = snapshot.approval.title;
+    elements["approval-dialog-detail"].textContent =
+      snapshot.approval.displayDetail || "审批详情不完整";
+    elements["approval-dialog-reason"].textContent =
+      [snapshot.approval.reason, snapshot.approval.cwd, snapshot.approval.networkHost]
+        .filter(Boolean)
+        .join(" · ") || "请完整检查上方内容后再允许";
+    elements["approval-dialog"].showModal();
+    return;
+  }
   try {
     await mutate("/api/approval/decide", { requestId: snapshot.approval.id, decision });
     showToast(decision === "accept" ? "已允许本次操作" : "已拒绝本次操作");
@@ -615,6 +642,14 @@ function bindInteractions() {
   });
   elements["approval-accept"].addEventListener("click", () => decideApproval("accept"));
   elements["approval-decline"].addEventListener("click", () => decideApproval("decline"));
+  elements["approval-dialog-accept"].addEventListener("click", () => {
+    if (dialogApprovalId !== snapshot?.approval?.id) return;
+    elements["approval-dialog"].close();
+    decideApproval("accept", true);
+  });
+  elements["approval-dialog"].addEventListener("close", () => {
+    dialogApprovalId = null;
+  });
   elements["mock-approval"].addEventListener("click", async () => {
     try { await mutate("/api/mock/approval", {}); } catch (error) { showToast(error.message); }
   });

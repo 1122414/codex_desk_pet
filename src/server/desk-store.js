@@ -5,8 +5,13 @@ import {
   mapThreadToPresentation,
   selectDisplayThread,
   summarizeThread,
+  toEpochMs,
 } from "../shared/codex-state.js";
 import { getAnimation } from "../shared/pet-spec.js";
+import {
+  hookPresentation,
+  normalizeCodexHookEvent,
+} from "./codex-hook.js";
 
 const DEFAULT_TELEMETRY = Object.freeze({
   batteryPercent: 100,
@@ -141,6 +146,40 @@ export class DeskStore extends EventEmitter {
     }
   }
 
+  handleCodexHook(value, now = Date.now()) {
+    const event = normalizeCodexHookEvent(value, { now });
+    if (!event) throw new Error("Codex hook event is invalid");
+    const presentation = hookPresentation(event.event);
+    const existing = this.#threads.get(event.sessionId) ?? {
+      id: event.sessionId,
+      preview: event.title ?? event.workspaceName ?? "Codex 任务",
+      status: { type: "notLoaded" },
+      turns: [],
+    };
+    const existingAt = toEpochMs(existing.hookUpdatedAt);
+    const existingPriority = Number(existing.hookPriority ?? 0);
+    if (
+      event.occurredAt < existingAt ||
+      (event.occurredAt === existingAt && presentation.priority < existingPriority)
+    ) {
+      return false;
+    }
+    this.#threads.set(event.sessionId, {
+      ...existing,
+      ...(event.title && !existing.name ? { preview: event.title } : {}),
+      hookState: presentation.state,
+      hookPriority: presentation.priority,
+      hookEvent: event.event,
+      hookTurnId: event.turnId,
+      hookToolName: event.toolName,
+      hookUpdatedAt: event.occurredAt,
+      ...(event.event === "Stop" ? { hookCompletedAt: event.occurredAt } : {}),
+      lastEventAt: event.occurredAt,
+    });
+    this.#changed("codex-hook");
+    return true;
+  }
+
   addApproval(approval) {
     this.#approvals.set(approval.id, { ...approval, status: "pending", receivedAt: Date.now() });
     this.patchThread(approval.threadId, { pendingApproval: true });
@@ -174,11 +213,14 @@ export class DeskStore extends EventEmitter {
     return { ...approval, decision };
   }
 
-  clearApprovals(decision = "connection-lost") {
-    const approvals = [...this.#approvals.values()];
-    this.#approvals.clear();
+  clearApprovals(decision = "connection-lost", predicate = () => true) {
+    const approvals = [...this.#approvals.values()].filter(predicate);
+    for (const approval of approvals) this.#approvals.delete(approval.id);
     for (const threadId of new Set(approvals.map((approval) => approval.threadId))) {
-      this.patchThread(threadId, { pendingApproval: false });
+      const stillPending = [...this.#approvals.values()].some(
+        (candidate) => candidate.threadId === threadId,
+      );
+      this.patchThread(threadId, { pendingApproval: stillPending });
     }
     if (approvals.length) this.#changed("approval");
     return approvals.map((approval) => ({ ...approval, decision }));

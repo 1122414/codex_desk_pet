@@ -19,6 +19,24 @@ npm run doctor
 
 第一次构建需要联网下载固定版本的 ESP32 工具链和 Espressif ESP-SR v1.2.0 中文 TTS 资源。依赖版本、来源、文件大小和 SHA‑256 都由仓库配置或脚本固定；下载内容不提交到 Git。
 
+## 启用 Codex Desktop、CLI 与 IDE 状态
+
+先运行一次 Bridge 生成本机 Hook Token：
+
+```bash
+npm start
+```
+
+看到 Bridge 启动成功后按 `Ctrl+C` 停止，再安装用户级 Hooks：
+
+```bash
+npm run install:codex-hooks
+```
+
+重新运行并保持 `npm start`，然后在 Codex 中打开 `/hooks`，检查并信任“同步 Codex Desk Buddy 状态”命令，再新建任务。再次运行 `npm run doctor`，`hooks.configured` 应为 `true`。完整状态映射、隐私字段、卸载方法和外部审批限制见 [Codex 跨客户端状态同步](codex-hooks.md)。
+
+这一步会合并修改用户的 `${CODEX_HOME:-$HOME/.codex}/hooks.json`，不会覆盖其他 Hook。项目不会在无人确认时自动替用户信任 Hook。
+
 ## 生成可烧录发布包
 
 在干净的 Git 工作区运行：

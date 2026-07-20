@@ -1,4 +1,5 @@
 const DEFAULT_COMPLETION_WINDOW_MS = 4_000;
+const DEFAULT_HOOK_ACTIVITY_WINDOW_MS = 30 * 60_000;
 
 export const DEVICE_STATES = Object.freeze({
   READY: "ready",
@@ -32,15 +33,28 @@ export function getLastTurn(thread) {
 export function mapThreadToPresentation(thread, options = {}) {
   const now = options.now ?? Date.now();
   const completionWindowMs = options.completionWindowMs ?? DEFAULT_COMPLETION_WINDOW_MS;
+  const hookActivityWindowMs = options.hookActivityWindowMs ?? DEFAULT_HOOK_ACTIVITY_WINDOW_MS;
   const status = thread?.status ?? { type: "notLoaded" };
   const flags = new Set(status.activeFlags ?? []);
   const lastTurn = getLastTurn(thread ?? {});
+  const hookAge = Math.max(0, now - toEpochMs(thread?.hookUpdatedAt));
+  const freshHook = Boolean(
+    thread?.hookState &&
+    Number.isFinite(hookAge) &&
+    hookAge <= hookActivityWindowMs,
+  );
 
   if (status.type === "systemError" || lastTurn?.status === "failed") {
     return { state: DEVICE_STATES.BLOCKED, animation: "failed" };
   }
 
-  if (thread?.pendingApproval || thread?.pendingUserInput || flags.has("waitingOnApproval") || flags.has("waitingOnUserInput")) {
+  if (
+    thread?.pendingApproval ||
+    thread?.pendingUserInput ||
+    flags.has("waitingOnApproval") ||
+    flags.has("waitingOnUserInput") ||
+    (freshHook && thread.hookState === DEVICE_STATES.NEEDS_INPUT)
+  ) {
     return { state: DEVICE_STATES.NEEDS_INPUT, animation: "waiting" };
   }
 
@@ -48,13 +62,23 @@ export function mapThreadToPresentation(thread, options = {}) {
     return { state: DEVICE_STATES.REVIEWING, animation: "review" };
   }
 
-  if (status.type === "active" || lastTurn?.status === "inProgress") {
+  if (
+    status.type === "active" ||
+    lastTurn?.status === "inProgress" ||
+    (freshHook && thread.hookState === DEVICE_STATES.RUNNING)
+  ) {
     return { state: DEVICE_STATES.RUNNING, animation: "running" };
   }
 
-  const completedAt = toEpochMs(lastTurn?.completedAt);
+  const hookCompleted = freshHook && thread.hookState === DEVICE_STATES.COMPLETED;
+  const completedAt = Math.max(
+    toEpochMs(lastTurn?.completedAt),
+    hookCompleted
+      ? toEpochMs(thread.hookCompletedAt)
+      : 0,
+  );
   const elapsed = completedAt ? Math.max(0, now - completedAt) : Infinity;
-  if (lastTurn?.status === "completed" && elapsed <= completionWindowMs) {
+  if ((lastTurn?.status === "completed" || hookCompleted) && elapsed <= completionWindowMs) {
     return {
       state: DEVICE_STATES.COMPLETED,
       animation: elapsed <= Math.min(1_500, completionWindowMs) ? "jumping" : "waving",
@@ -113,4 +137,3 @@ export function summarizeThread(thread) {
   const text = thread.name || thread.preview || "未命名 Codex 任务";
   return String(text).replace(/\s+/g, " ").trim().slice(0, 120);
 }
-

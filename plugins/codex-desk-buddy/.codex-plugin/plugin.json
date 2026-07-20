@@ -1,0 +1,30 @@
+{
+  "name": "codex-desk-buddy",
+  "version": "0.1.0",
+  "description": "Send privacy-bounded Codex lifecycle state to a local Codex Desk Buddy bridge.",
+  "author": {
+    "name": "Codex Desk Buddy"
+  },
+  "license": "UNLICENSED",
+  "keywords": [
+    "codex",
+    "desk-buddy",
+    "hardware",
+    "hooks"
+  ],
+  "interface": {
+    "displayName": "Codex Desk Buddy",
+    "shortDescription": "Sync Codex lifecycle state to your desk companion.",
+    "longDescription": "Forwards bounded lifecycle metadata to a token-authenticated local bridge and relays explicit device decisions for permission requests. It never reads transcripts or tool results.",
+    "developerName": "Codex Desk Buddy",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Hooks",
+      "Local"
+    ],
+    "defaultPrompt": [
+      "Show the current Codex Desk Buddy connection status."
+    ],
+    "brandColor": "#56F59D"
+  }
+}

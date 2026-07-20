@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { JsonRpcClient } from "../src/server/json-rpc-client.js";
+import { inspectCodexHookInstallation } from "../src/server/codex-hook-installer.js";
 import { verifyFirmwareRelease } from "../src/server/firmware-release.js";
 import {
   DEVICE_BOARD_ID,
@@ -65,6 +66,14 @@ const report = {
     maturity: "experimental",
     error: null,
   },
+  hooks: {
+    configPath: null,
+    targetScript: null,
+    scriptPresent: false,
+    configured: false,
+    configuredEvents: [],
+    error: null,
+  },
   platformio: {
     version: null,
     available: false,
@@ -76,6 +85,19 @@ const report = {
     factoryImage: null,
     error: null,
   },
+};
+
+const codexHome = path.resolve(
+  process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex"),
+);
+const hookInstallation = await inspectCodexHookInstallation(codexHome);
+report.hooks = {
+  configPath: hookInstallation.configPath,
+  targetScript: hookInstallation.targetScript,
+  scriptPresent: hookInstallation.scriptPresent,
+  configured: hookInstallation.configured,
+  configuredEvents: hookInstallation.configuredEvents,
+  error: hookInstallation.error ?? null,
 };
 
 let schemaDirectory = null;

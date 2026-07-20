@@ -227,6 +227,7 @@ export class CodexBridge extends EventEmitter {
     reconnectDelaysMs = [1_000, 2_000, 5_000, 10_000, 30_000],
     reconnectJitterRatio = 0.2,
     random = Math.random,
+    hookApprovalBroker = null,
   } = {}) {
     super();
     if (!store) throw new TypeError("CodexBridge requires a DeskStore");
@@ -240,6 +241,7 @@ export class CodexBridge extends EventEmitter {
     this.reconnectDelaysMs = reconnectDelaysMs;
     this.reconnectJitterRatio = reconnectJitterRatio;
     this.random = random;
+    this.hookApprovalBroker = hookApprovalBroker;
     this.initialization = null;
   }
 
@@ -335,6 +337,10 @@ export class CodexBridge extends EventEmitter {
     if (!approval || approval.status !== "pending") throw new Error("Approval request is no longer pending");
     if (!approval.availableDecisions.includes(decision)) throw new Error("Approval decision is not offered by Codex");
     if (decision === "accept" && !approval.safeToApprove) throw new Error("Approval details are incomplete; accept is disabled");
+    if (approval.source === "codex-hook") {
+      if (!this.hookApprovalBroker) throw new Error("Codex hook approval broker is unavailable");
+      return this.hookApprovalBroker.decide(id, decision);
+    }
 
     if (!this.isMock) {
       const request = this.#requestMap.get(id);
@@ -374,6 +380,7 @@ export class CodexBridge extends EventEmitter {
       id: randomUUID(),
       rpcId: "mock-rpc",
       rpcMethod: "item/commandExecution/requestApproval",
+      source: "mock",
       threadId: "mock-thread",
       turnId: "mock-turn",
       itemId: "mock-item",
@@ -411,6 +418,7 @@ export class CodexBridge extends EventEmitter {
     if (APPROVAL_METHODS.has(message.method)) {
       const relatedItem = this.store.getThread(message.params?.threadId ?? message.params?.conversationId)?.lastItem;
       const approval = normalizeApproval(message, relatedItem);
+      approval.source = "app-server";
       this.#requestMap.set(approval.id, { rpcId: message.id, method: message.method });
       this.store.addApproval(approval);
       if (!approval.safeToApprove && !this.isMock && approval.threadId !== "unknown") {
@@ -500,7 +508,10 @@ export class CodexBridge extends EventEmitter {
 
   #expirePendingRequests() {
     this.#requestMap.clear();
-    this.store.clearApprovals("connection-lost");
+    this.store.clearApprovals(
+      "connection-lost",
+      (approval) => approval.source !== "codex-hook",
+    );
     this.store.clearPendingUserInput();
   }
 }
