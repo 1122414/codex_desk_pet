@@ -7,6 +7,7 @@ import {
   DeviceCredentialRepository,
   PairingCodeManager,
 } from "../src/server/device-credential-repository.js";
+import { createDeviceInfo } from "../src/shared/device-protocol.js";
 
 test("device credentials persist atomically without exposing secrets in listings", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "codex-desk-devices-"));
@@ -24,6 +25,14 @@ test("device credentials persist atomically without exposing secrets in listings
 
   const reloaded = new DeviceCredentialRepository(filePath);
   assert.equal(await reloaded.getSecret("core-s3-1"), "d".repeat(64));
+  await reloaded.touch(
+    "core-s3-1",
+    150,
+    createDeviceInfo({ health: { voiceDataReady: true, storageReady: false } }),
+  );
+  const withDiagnostics = new DeviceCredentialRepository(filePath);
+  await withDiagnostics.load();
+  assert.equal(withDiagnostics.list()[0].deviceInfo.health.storageReady, false);
   await reloaded.revoke("core-s3-1", 200);
   assert.equal(await reloaded.getSecret("core-s3-1"), null);
   assert.deepEqual(reloaded.list(), []);

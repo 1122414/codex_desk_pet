@@ -79,6 +79,11 @@ test("HTTP API requires a same-origin session for state changes", async (t) => {
 
   const devices = await fetch(`${base}/api/devices`);
   assert.equal((await devices.json()).devices[0].deviceId, "core-s3-1");
+  const diagnostics = await fetch(`${base}/api/diagnostics`);
+  const diagnosticBody = await diagnostics.json();
+  assert.equal(diagnosticBody.target.boardId, "m5stack-cores3-k128");
+  assert.equal(diagnosticBody.target.protocolVersion, 3);
+  assert.equal(diagnosticBody.codex.appServerUserAgent, "codex-desk-mock");
 
   const denied = await fetch(`${base}/api/pet/select`, {
     method: "POST",

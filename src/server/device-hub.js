@@ -1,5 +1,9 @@
 import { EventEmitter } from "node:events";
-import { CommandDeduplicator } from "../shared/device-protocol.js";
+import {
+  CommandDeduplicator,
+  DEVICE_PROTOCOL_VERSION,
+  evaluateDeviceCompatibility,
+} from "../shared/device-protocol.js";
 import { DeviceSession } from "./device-session.js";
 import { PairingCodeManager } from "./device-credential-repository.js";
 
@@ -52,11 +56,24 @@ export class DeviceHub extends EventEmitter {
       const connected = sessions
         .filter((session) => session.deviceId === device.deviceId)
         .sort((left, right) => (TRANSPORT_PRIORITY[right.transport.kind] ?? -1) - (TRANSPORT_PRIORITY[left.transport.kind] ?? -1));
+      const deviceInfo = connected[0]?.deviceInfo ?? device.deviceInfo ?? null;
+      const compatibility = evaluateDeviceCompatibility(deviceInfo);
+      const reportedHashes = new Set(
+        connected.map((session) => session.deviceInfoHash).filter(Boolean),
+      );
+      if (reportedHashes.size > 1) {
+        compatibility.status = "incompatible";
+        compatibility.compatible = false;
+        compatibility.issues.push("不同链路上报的设备信息不一致");
+      }
       return {
         ...device,
         connected: connected.length > 0,
         transports: connected.map((session) => session.transport.kind),
         primaryTransport: connected[0]?.transport.kind ?? null,
+        protocolVersion: connected.length ? DEVICE_PROTOCOL_VERSION : null,
+        deviceInfo,
+        compatibility,
       };
     });
   }
@@ -76,7 +93,7 @@ export class DeviceHub extends EventEmitter {
       commandHandler: (command) => this.#handleCommand(command, session),
     });
     this.#sessions.add(session);
-    session.on("ready", ({ deviceId }) => {
+    session.on("ready", ({ deviceId, deviceInfo }) => {
       for (const existing of [...this.#sessions]) {
         if (
           existing !== session &&
@@ -87,7 +104,8 @@ export class DeviceHub extends EventEmitter {
           existing.close();
         }
       }
-      this.credentials.touch(deviceId).catch((error) => this.emit("diagnostic", error.message));
+      this.credentials.touch(deviceId, Date.now(), deviceInfo)
+        .catch((error) => this.emit("diagnostic", error.message));
       this.emit("deviceConnected", { deviceId, transport: transport.kind });
     });
     session.on("paired", ({ deviceId }) => this.emit("devicePaired", { deviceId, transport: transport.kind }));

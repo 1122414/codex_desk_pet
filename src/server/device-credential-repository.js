@@ -2,7 +2,10 @@ import { randomInt, randomUUID } from "node:crypto";
 import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createPairingSecret } from "../shared/device-protocol.js";
+import {
+  createPairingSecret,
+  normalizeDeviceInfo,
+} from "../shared/device-protocol.js";
 
 const DEVICE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const SECRET_PATTERN = /^[a-f0-9]{64}$/;
@@ -22,6 +25,7 @@ function normalizeRecord(deviceId, record) {
     createdAt: Number.isFinite(record.createdAt) ? record.createdAt : Date.now(),
     lastSeenAt: Number.isFinite(record.lastSeenAt) ? record.lastSeenAt : null,
     revokedAt: Number.isFinite(record.revokedAt) ? record.revokedAt : null,
+    deviceInfo: normalizeDeviceInfo(record.deviceInfo),
   };
 }
 
@@ -73,6 +77,7 @@ export class DeviceCredentialRepository {
       createdAt: now,
       lastSeenAt: now,
       revokedAt: null,
+      deviceInfo: null,
     };
     this.#devices.set(deviceId, record);
     await this.#save();
@@ -85,11 +90,13 @@ export class DeviceCredentialRepository {
     return record && record.revokedAt === null ? record.secret : null;
   }
 
-  async touch(deviceId, now = Date.now()) {
+  async touch(deviceId, now = Date.now(), deviceInfo = null) {
     await this.load();
     const record = this.#devices.get(deviceId);
     if (!record || record.revokedAt !== null) return false;
     record.lastSeenAt = now;
+    const normalizedInfo = normalizeDeviceInfo(deviceInfo);
+    if (normalizedInfo) record.deviceInfo = normalizedInfo;
     await this.#save();
     return true;
   }

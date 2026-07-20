@@ -3,9 +3,16 @@ import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CommandDeduplicator } from "../shared/device-protocol.js";
+import {
+  CommandDeduplicator,
+  DEVICE_BOARD_ID,
+  DEVICE_FIRMWARE_VERSION,
+  DEVICE_PROTOCOL_VERSION,
+  MINIMUM_DEVICE_FIRMWARE_VERSION,
+} from "../shared/device-protocol.js";
 
 const MAX_BODY_BYTES = 16 * 1024;
+const BRIDGE_VERSION = "0.1.0";
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 class HttpError extends Error {
@@ -167,6 +174,19 @@ export class DeskHttpServer {
     if (req.method === "GET" && route === "/api/devices") {
       if (!this.deviceHub) throw new HttpError(503, "Device service is unavailable");
       json(res, 200, { devices: this.deviceHub.listDevices() });
+      return;
+    }
+    if (req.method === "GET" && route === "/api/diagnostics") {
+      json(res, 200, {
+        bridgeVersion: BRIDGE_VERSION,
+        target: {
+          boardId: DEVICE_BOARD_ID,
+          protocolVersion: DEVICE_PROTOCOL_VERSION,
+          minimumFirmwareVersion: MINIMUM_DEVICE_FIRMWARE_VERSION,
+        },
+        codex: this.bridge.diagnostics?.() ?? null,
+        devices: this.deviceHub?.listDevices() ?? [],
+      });
       return;
     }
 

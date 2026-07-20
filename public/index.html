@@ -129,7 +129,7 @@
             <div class="section-title-row">
               <div>
                 <span class="section-label">DEVICES</span>
-                <h2>设备配对</h2>
+                <h2>设备、配对与恢复</h2>
               </div>
               <button id="start-pairing" class="primary-button" type="button">生成配对码</button>
             </div>
@@ -144,6 +144,16 @@
                 <label>设备端口<input id="bridge-port" type="number" min="1" max="65535" value="4318"></label>
                 <button id="provision-wifi" class="primary-button" type="button">连接 CoreS3 并写入</button>
               </div>
+            </details>
+            <details class="provision-panel recovery-panel">
+              <summary>首次安装与故障恢复</summary>
+              <ol>
+                <li>运行 <code>npm run release:firmware</code> 生成并校验完整镜像。</li>
+                <li>用 USB 连接 CoreS3，运行 <code>npm run flash:firmware -- --port 设备串口</code>。</li>
+                <li>在这里通过蓝牙写入 Wi‑Fi；日常通信使用 Wi‑Fi，USB 是可靠备用。</li>
+                <li>生成配对码并在设备屏幕输入。当前首次账户配对需要 USB，蓝牙只负责安全配网。</li>
+                <li>异常时先撤销旧凭据并重新配对；固件无法启动时追加 <code>--erase</code> 完整恢复。</li>
+              </ol>
             </details>
             <div id="device-list" class="device-list"><span>暂无已配对设备</span></div>
           </section>

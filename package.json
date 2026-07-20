@@ -14,6 +14,8 @@
     "test:firmware": "node scripts/check-firmware.mjs",
     "setup:firmware-tts": "node scripts/setup-esp-tts.mjs",
     "build:firmware": "pio run -d firmware",
+    "release:firmware": "node scripts/build-firmware-release.mjs",
+    "flash:firmware": "node scripts/flash-firmware.mjs",
     "check": "node scripts/check.mjs",
     "smoke:codex": "node scripts/smoke-codex.mjs"
   },

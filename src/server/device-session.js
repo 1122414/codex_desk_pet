@@ -12,6 +12,8 @@ import {
   SequenceWindow,
   TRANSPORT_PROFILES,
   createEnvelope,
+  createDeviceInfo,
+  createDeviceInfoHash,
   createHandshakeNonce,
   createHandshakeProof,
   createPetResourceManifest,
@@ -20,6 +22,7 @@ import {
   deriveSessionId,
   encryptEnvelopePayload,
   isEncryptedEnvelope,
+  normalizeDeviceInfo,
   validateEnvelope,
   verifyHandshakeProof,
 } from "../shared/device-protocol.js";
@@ -50,6 +53,7 @@ export class DeviceSession extends EventEmitter {
     deviceId = null,
     secret = null,
     pairingCode = null,
+    deviceInfo = null,
     secretResolver = null,
     pairClaimHandler = null,
     snapshotProvider = null,
@@ -88,6 +92,10 @@ export class DeviceSession extends EventEmitter {
     this.deviceId = deviceId;
     this.secret = secret;
     this.pairingCode = pairingCode;
+    this.deviceInfo = role === "device"
+      ? normalizeDeviceInfo(deviceInfo) ?? createDeviceInfo()
+      : null;
+    this.deviceInfoHash = this.deviceInfo ? createDeviceInfoHash(this.deviceInfo) : null;
     this.secretResolver = secretResolver;
     this.pairClaimHandler = pairClaimHandler;
     this.snapshotProvider = snapshotProvider;
@@ -150,7 +158,12 @@ export class DeviceSession extends EventEmitter {
     }
     if (this.role === "device") {
       const deviceNonce = this.nonceFactory();
-      this.#handshake = { deviceId: this.deviceId, deviceNonce, bridgeNonce: null };
+      this.#handshake = {
+        deviceId: this.deviceId,
+        deviceNonce,
+        bridgeNonce: null,
+        deviceInfoHash: this.deviceInfoHash,
+      };
       if (this.secret) this.#sendHello();
       else {
         this.#send("pair.request", {
@@ -460,10 +473,13 @@ export class DeviceSession extends EventEmitter {
       this.#reliableQueue = [];
       this.deviceId = payload.deviceId;
       this.secret = secret;
+      this.deviceInfo = normalizeDeviceInfo(payload.deviceInfo);
+      this.deviceInfoHash = payload.deviceInfoHash;
       this.#handshake = {
         deviceId: payload.deviceId,
         deviceNonce: payload.deviceNonce,
         bridgeNonce,
+        deviceInfoHash: payload.deviceInfoHash,
       };
       this.#send("challenge", {
         ...this.#handshake,
@@ -475,7 +491,8 @@ export class DeviceSession extends EventEmitter {
     if (envelope.type === "challenge" && this.role === "device") {
       const matchesHello =
         payload.deviceId === this.#handshake?.deviceId &&
-        payload.deviceNonce === this.#handshake?.deviceNonce;
+        payload.deviceNonce === this.#handshake?.deviceNonce &&
+        payload.deviceInfoHash === this.#handshake?.deviceInfoHash;
       const valid = matchesHello && verifyHandshakeProof({
         secret: this.secret,
         ...payload,
@@ -498,7 +515,8 @@ export class DeviceSession extends EventEmitter {
       const matchesChallenge =
         payload.deviceId === this.#handshake?.deviceId &&
         payload.deviceNonce === this.#handshake?.deviceNonce &&
-        payload.bridgeNonce === this.#handshake?.bridgeNonce;
+        payload.bridgeNonce === this.#handshake?.bridgeNonce &&
+        payload.deviceInfoHash === this.#handshake?.deviceInfoHash;
       const valid = matchesChallenge && verifyHandshakeProof({
         secret: this.secret,
         ...payload,
@@ -517,7 +535,11 @@ export class DeviceSession extends EventEmitter {
         heartbeatIntervalMs: this.heartbeatIntervalMs,
         connectionTimeoutMs: this.connectionTimeoutMs,
       });
-      this.emit("ready", { deviceId: this.deviceId, sessionId: this.sessionId });
+      this.emit("ready", {
+        deviceId: this.deviceId,
+        sessionId: this.sessionId,
+        deviceInfo: this.deviceInfo,
+      });
       if (this.snapshotProvider) this.sendSnapshot();
       return;
     }
@@ -531,7 +553,11 @@ export class DeviceSession extends EventEmitter {
       }
       this.sessionId = expectedSessionId;
       this.state = "ready";
-      this.emit("ready", { deviceId: this.deviceId, sessionId: this.sessionId });
+      this.emit("ready", {
+        deviceId: this.deviceId,
+        sessionId: this.sessionId,
+        deviceInfo: this.deviceInfo,
+      });
     }
   }
 
@@ -577,6 +603,8 @@ export class DeviceSession extends EventEmitter {
       deviceId: this.deviceId,
       deviceNonce: this.#handshake.deviceNonce,
       transport: this.transport.kind,
+      deviceInfo: this.deviceInfo,
+      deviceInfoHash: this.deviceInfoHash,
     });
   }
 

@@ -393,7 +393,25 @@ async function loadDevices() {
       status.textContent = device.connected
         ? `${device.primaryTransport.toUpperCase()} · 已连接`
         : "离线";
-      info.append(name, status);
+      const diagnostics = document.createElement("small");
+      diagnostics.textContent = device.deviceInfo
+        ? `${device.deviceInfo.boardId} · 固件 ${device.deviceInfo.firmwareVersion}` +
+          `${device.protocolVersion ? ` · 协议 v${device.protocolVersion}` : ""}` +
+          ` · 语音${device.deviceInfo.health.voiceDataReady ? "正常" : "未就绪"}` +
+          ` · microSD ${device.deviceInfo.health.storageReady ? "正常" : "未就绪"}`
+        : "尚无设备版本信息，请连接一次设备";
+      const compatibility = document.createElement("span");
+      compatibility.className = `device-status ${device.compatibility?.status ?? "unknown"}`;
+      compatibility.textContent = {
+        compatible: "兼容",
+        degraded: "可用但需处理",
+        incompatible: "不兼容",
+        unknown: "等待诊断",
+      }[device.compatibility?.status] ?? "等待诊断";
+      if (device.compatibility?.issues?.length) {
+        compatibility.title = device.compatibility.issues.join("；");
+      }
+      info.append(name, status, diagnostics, compatibility);
       const revoke = document.createElement("button");
       revoke.type = "button";
       revoke.textContent = "撤销";
@@ -411,7 +429,7 @@ async function startPairing() {
     const offer = await mutate("/api/devices/pairing", {});
     elements["pairing-code"].hidden = false;
     elements["pairing-code"].textContent = offer.code;
-    showToast("请在 5 分钟内通过 USB 或 BLE 输入配对码");
+    showToast("请保持 USB 连接，并在 5 分钟内到设备屏幕输入配对码");
   } catch (error) {
     showToast(error.message);
   }

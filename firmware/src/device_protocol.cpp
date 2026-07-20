@@ -4,6 +4,7 @@
 #include <mbedtls/base64.h>
 #include <mbedtls/gcm.h>
 #include <mbedtls/md.h>
+#include <mbedtls/sha256.h>
 
 #include <algorithm>
 #include <array>
@@ -14,7 +15,7 @@
 namespace codex::firmware {
 namespace {
 
-constexpr std::uint8_t kProtocolVersion = 2;
+constexpr std::uint8_t kProtocolVersion = 3;
 constexpr std::size_t kAeadKeyBytes = 32;
 constexpr std::size_t kAeadNonceBytes = 12;
 constexpr std::size_t kAeadTagBytes = 16;
@@ -106,6 +107,25 @@ String hmacSha256(const String& secret, const String& material) {
   if (!result.reserve(digest.size() * 2U)) {
     return {};
   }
+  for (const auto value : digest) {
+    result += kHex[value >> 4U];
+    result += kHex[value & 0x0fU];
+  }
+  return result;
+}
+
+String sha256Hex(const String& material) {
+  std::array<std::uint8_t, 32> digest{};
+  if (mbedtls_sha256_ret(
+          reinterpret_cast<const std::uint8_t*>(material.c_str()),
+          material.length(),
+          digest.data(),
+          0) != 0) {
+    return {};
+  }
+  static constexpr char kHex[] = "0123456789abcdef";
+  String result;
+  if (!result.reserve(digest.size() * 2U)) return {};
   for (const auto value : digest) {
     result += kHex[value >> 4U];
     result += kHex[value & 0x0fU];
@@ -294,6 +314,18 @@ void DeviceProtocolClient::setPairingSecret(const String& pairing_secret) {
   if (transport_ != nullptr && transport_->connected()) {
     startHandshake(millis(), false);
   }
+}
+
+void DeviceProtocolClient::setDeviceInfo(
+    const String& firmware_version,
+    const String& board_id,
+    const bool voice_data_ready,
+    const bool storage_ready) {
+  firmware_version_ = firmware_version;
+  board_id_ = board_id;
+  voice_data_ready_ = voice_data_ready;
+  storage_ready_ = storage_ready;
+  device_info_hash_ = deviceInfoHash();
 }
 
 void DeviceProtocolClient::setSnapshotHandler(SnapshotHandler handler) {
@@ -503,6 +535,11 @@ void DeviceProtocolClient::startHandshake(
   last_sent_at_ = now_ms;
   device_nonce_ = randomNonce();
   if (secret_.length() == 64) {
+    if (device_info_hash_.length() != 64) {
+      state_ = State::Rejected;
+      notifyState(false, "device info unavailable");
+      return;
+    }
     state_ = State::Handshaking;
     sendEnvelope(
         "hello",
@@ -510,6 +547,8 @@ void DeviceProtocolClient::startHandshake(
           payload["deviceId"] = device_id_;
           payload["deviceNonce"] = device_nonce_;
           payload["transport"] = transport_->kind();
+          writeDeviceInfo(payload["deviceInfo"].to<JsonObject>());
+          payload["deviceInfoHash"] = device_info_hash_;
         });
     notifyState(false, "authenticating");
     return;
@@ -561,10 +600,12 @@ void DeviceProtocolClient::handleHandshake(
     const String challenge_device = payload["deviceId"] | "";
     const String challenge_nonce = payload["deviceNonce"] | "";
     bridge_nonce_ = payload["bridgeNonce"] | "";
+    const String challenge_device_info = payload["deviceInfoHash"] | "";
     const String proof = payload["proof"] | "";
     if (
         challenge_device != device_id_ ||
         challenge_nonce != device_nonce_ ||
+        challenge_device_info != device_info_hash_ ||
         bridge_nonce_.length() < 16 ||
         !verifyProof(proof, "bridge")) {
       state_ = State::Rejected;
@@ -577,6 +618,7 @@ void DeviceProtocolClient::handleHandshake(
           response["deviceId"] = device_id_;
           response["deviceNonce"] = device_nonce_;
           response["bridgeNonce"] = bridge_nonce_;
+          response["deviceInfoHash"] = device_info_hash_;
           response["proof"] = handshakeProof("device");
         });
     return;
@@ -962,7 +1004,7 @@ String DeviceProtocolClient::encryptionMaterial(const bool outgoing) const {
   material.reserve(
       device_id_.length() + device_nonce_.length() +
       bridge_nonce_.length() + strlen(direction) + 48U);
-  material = "[\"codex-desk-aead-v1\",2,\"";
+  material = "[\"codex-desk-aead-v1\",3,\"";
   material += device_id_;
   material += "\",\"";
   material += device_nonce_;
@@ -983,7 +1025,7 @@ String DeviceProtocolClient::envelopeAdditionalData(
   String aad;
   aad.reserve(
       id.length() + type.length() + session_id.length() + 64U);
-  aad = "[2,\"";
+  aad = "[3,\"";
   aad += id;
   aad += "\",";
   aad += String(static_cast<unsigned long long>(sequence));
@@ -1086,17 +1128,65 @@ String DeviceProtocolClient::randomNonce() const {
   return result;
 }
 
+String DeviceProtocolClient::deviceInfoMaterial() const {
+  if (
+      firmware_version_.isEmpty() ||
+      board_id_.isEmpty() ||
+      firmware_version_.length() > 32 ||
+      board_id_.length() > 64) {
+    return {};
+  }
+  String material;
+  if (!material.reserve(firmware_version_.length() + board_id_.length() + 96U)) {
+    return {};
+  }
+  material = "[1,\"";
+  material += firmware_version_;
+  material += "\",\"";
+  material += board_id_;
+  material += "\",true,true,true,true,true,true,true,true,";
+  material += voice_data_ready_ ? "true" : "false";
+  material += ",";
+  material += storage_ready_ ? "true]" : "false]";
+  return material;
+}
+
+String DeviceProtocolClient::deviceInfoHash() const {
+  const auto material = deviceInfoMaterial();
+  return material.isEmpty() ? String{} : sha256Hex(material);
+}
+
+void DeviceProtocolClient::writeDeviceInfo(JsonObject payload) const {
+  payload["version"] = 1;
+  payload["firmwareVersion"] = firmware_version_;
+  payload["boardId"] = board_id_;
+  auto capabilities = payload["capabilities"].to<JsonObject>();
+  capabilities["touch"] = true;
+  capabilities["speaker"] = true;
+  capabilities["offlineChineseVoice"] = true;
+  capabilities["usb"] = true;
+  capabilities["wifi"] = true;
+  capabilities["ble"] = true;
+  capabilities["microSd"] = true;
+  capabilities["rtc"] = true;
+  auto health = payload["health"].to<JsonObject>();
+  health["voiceDataReady"] = voice_data_ready_;
+  health["storageReady"] = storage_ready_;
+}
+
 String DeviceProtocolClient::handshakeProof(const String& role) const {
   String material;
   material.reserve(
       device_id_.length() + device_nonce_.length() +
-      bridge_nonce_.length() + role.length() + 20);
-  material = "[2,\"";
+      bridge_nonce_.length() + device_info_hash_.length() + role.length() + 24);
+  material = "[3,\"";
   material += device_id_;
   material += "\",\"";
   material += device_nonce_;
   material += "\",\"";
   material += bridge_nonce_;
+  material += "\",\"";
+  material += device_info_hash_;
   material += "\",\"";
   material += role;
   material += "\"]";

@@ -27,6 +27,11 @@ class DeviceProtocolClient {
   void poll(std::uint64_t now_ms);
   void setPairingCode(const String& pairing_code);
   void setPairingSecret(const String& pairing_secret);
+  void setDeviceInfo(
+      const String& firmware_version,
+      const String& board_id,
+      bool voice_data_ready,
+      bool storage_ready);
   void setSnapshotHandler(SnapshotHandler handler);
   void setSecretHandler(SecretHandler handler);
   void setEventHandler(EventHandler handler);
@@ -113,6 +118,9 @@ class DeviceProtocolClient {
   void clearSession(bool reset_sequences);
   String randomId(std::size_t bytes = 16) const;
   String randomNonce() const;
+  String deviceInfoMaterial() const;
+  String deviceInfoHash() const;
+  void writeDeviceInfo(JsonObject payload) const;
   String handshakeProof(const String& role) const;
   bool verifyProof(const String& proof, const String& role) const;
   String derivedSessionId() const;
@@ -125,6 +133,11 @@ class DeviceProtocolClient {
   String device_nonce_;
   String bridge_nonce_;
   String session_id_;
+  String firmware_version_;
+  String board_id_;
+  String device_info_hash_;
+  bool voice_data_ready_ = false;
+  bool storage_ready_ = false;
   State state_ = State::Disconnected;
   SequenceWindow receive_window_;
   std::uint64_t next_sequence_ = 1;

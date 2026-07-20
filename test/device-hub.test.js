@@ -113,6 +113,8 @@ test("USB pairing provisions a secret and authenticated device commands update t
   await waitFor(() => store.snapshot().telemetry.batteryPercent === 63);
   assert.equal(store.snapshot().telemetry.transport, "usb");
   assert.equal(hub.listDevices()[0].primaryTransport, "usb");
+  assert.equal(hub.listDevices()[0].deviceInfo.boardId, "m5stack-cores3-k128");
+  assert.equal(hub.listDevices()[0].compatibility.status, "compatible");
   assert.equal(await credentials.getSecret("core-s3-1"), provisionedSecret);
 });
 

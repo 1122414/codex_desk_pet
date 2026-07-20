@@ -9,6 +9,8 @@ import {
   SequenceWindow,
   TRANSPORT_PROFILES,
   createAck,
+  createDeviceInfo,
+  createDeviceInfoHash,
   createEnvelope,
   createHandshakeProof,
   createPetResourceManifest,
@@ -16,6 +18,7 @@ import {
   decryptEnvelopePayload,
   deriveSessionId,
   encryptEnvelopePayload,
+  evaluateDeviceCompatibility,
   isEncryptedEnvelope,
   parseEnvelope,
   serializeEnvelope,
@@ -103,16 +106,52 @@ test("transport profiles enforce serialized envelope limits", () => {
 });
 
 test("mutual authentication proofs bind both nonces, device, and role", () => {
+  const deviceInfo = createDeviceInfo({
+    health: { voiceDataReady: true, storageReady: false },
+  });
   const context = {
     secret: "a".repeat(64),
     deviceId: "desk-unit-1",
     deviceNonce: "device_nonce_1234567890",
     bridgeNonce: "bridge_nonce_1234567890",
+    deviceInfoHash: createDeviceInfoHash(deviceInfo),
   };
   const proof = createHandshakeProof({ ...context, role: "bridge" });
   assert.equal(verifyHandshakeProof({ ...context, role: "bridge", proof }), true);
   assert.equal(verifyHandshakeProof({ ...context, role: "device", proof }), false);
   assert.equal(deriveSessionId(context).length, 32);
+  assert.equal(verifyHandshakeProof({
+    ...context,
+    deviceInfoHash: "0".repeat(64),
+    role: "bridge",
+    proof,
+  }), false);
+});
+
+test("device diagnostics are canonical, authenticated, and compatibility checked", () => {
+  const deviceInfo = createDeviceInfo({
+    health: { voiceDataReady: true, storageReady: false },
+  });
+  const hello = createEnvelope({
+    sequence: 1,
+    type: "hello",
+    payload: {
+      deviceId: "desk-unit-1",
+      deviceNonce: "device_nonce_1234567890",
+      transport: "usb",
+      deviceInfo,
+      deviceInfoHash: createDeviceInfoHash(deviceInfo),
+    },
+  });
+  assert.equal(validateEnvelope(hello), hello);
+  assert.deepEqual(evaluateDeviceCompatibility(deviceInfo), {
+    compatible: true,
+    status: "degraded",
+    issues: ["microSD 未就绪"],
+  });
+  const tampered = structuredClone(hello);
+  tampered.payload.deviceInfo.health.voiceDataReady = false;
+  assert.throws(() => validateEnvelope(tampered), /device info/i);
 });
 
 test("authenticated payloads use deterministic per-direction AES-256-GCM envelopes", () => {

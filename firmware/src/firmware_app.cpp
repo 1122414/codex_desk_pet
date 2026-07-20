@@ -59,6 +59,23 @@ void FirmwareApp::setup() {
   usb_client_.begin(usb_transport_, stored.device_id, pairing_secret_);
   wifi_client_.begin(wifi_transport_, stored.device_id, pairing_secret_);
   ble_client_.begin(ble_transport_, stored.device_id, pairing_secret_);
+  const auto voice_ready = audio_.voiceAvailable();
+  const auto storage_ready = pet_store_.available();
+  usb_client_.setDeviceInfo(
+      CODEX_DESK_FIRMWARE_VERSION,
+      "m5stack-cores3-k128",
+      voice_ready,
+      storage_ready);
+  wifi_client_.setDeviceInfo(
+      CODEX_DESK_FIRMWARE_VERSION,
+      "m5stack-cores3-k128",
+      voice_ready,
+      storage_ready);
+  ble_client_.setDeviceInfo(
+      CODEX_DESK_FIRMWARE_VERSION,
+      "m5stack-cores3-k128",
+      voice_ready,
+      storage_ready);
   configureProtocol(usb_client_);
   configureProtocol(wifi_client_);
   configureProtocol(ble_client_);

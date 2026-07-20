@@ -240,6 +240,7 @@ export class CodexBridge extends EventEmitter {
     this.reconnectDelaysMs = reconnectDelaysMs;
     this.reconnectJitterRatio = reconnectJitterRatio;
     this.random = random;
+    this.initialization = null;
   }
 
   get isMock() {
@@ -251,6 +252,7 @@ export class CodexBridge extends EventEmitter {
     this.#started = true;
     this.#stopping = false;
     if (this.isMock) {
+      this.initialization = { userAgent: "codex-desk-mock" };
       this.store.setConnection({ status: "connected", mode: "mock", error: null });
       this.store.replaceThreads([{
         id: "mock-thread",
@@ -293,7 +295,7 @@ export class CodexBridge extends EventEmitter {
       mode: this.mode,
       error: null,
     });
-    await this.client.start();
+    this.initialization = await this.client.start();
     if (this.#stopping || !this.#started) return;
     await this.refreshThreads();
     if (this.#stopping || !this.#started) return;
@@ -357,6 +359,15 @@ export class CodexBridge extends EventEmitter {
     return this.store.resolveApproval(id, decision);
   }
 
+  diagnostics() {
+    return {
+      mode: this.mode,
+      connected: this.store.snapshot().connection.status === "connected",
+      appServerUserAgent: this.initialization?.userAgent ?? null,
+      approvalMethods: [...APPROVAL_METHODS],
+    };
+  }
+
   createMockApproval() {
     if (!this.isMock) throw new Error("Mock approvals are only available in mock mode");
     const approval = {
@@ -392,6 +403,7 @@ export class CodexBridge extends EventEmitter {
     this.#reconnectTimer = null;
     this.#expirePendingRequests();
     await this.client?.stop();
+    this.initialization = null;
     this.store.setConnection({ status: "disconnected", mode: this.mode, error: null });
   }
 

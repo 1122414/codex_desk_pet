@@ -12,7 +12,7 @@
 namespace codex::firmware {
 namespace {
 
-constexpr std::uint8_t kProtocolVersion = 2;
+constexpr std::uint8_t kProtocolVersion = 3;
 
 std::uint16_t readU16(const std::uint8_t* value) {
   return static_cast<std::uint16_t>(

@@ -3,6 +3,7 @@ __pycache__/
 .DS_Store
 .codex-desk/
 coverage/
+dist/
 .playwright-cli/
 output/
 firmware/.pio/

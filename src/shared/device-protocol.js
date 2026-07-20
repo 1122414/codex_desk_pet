@@ -9,7 +9,11 @@ import {
 } from "node:crypto";
 import { PET_ATLAS, STANDARD_ANIMATIONS } from "./pet-spec.js";
 
-export const DEVICE_PROTOCOL_VERSION = 2;
+export const DEVICE_PROTOCOL_VERSION = 3;
+export const DEVICE_INFO_VERSION = 1;
+export const DEVICE_BOARD_ID = "m5stack-cores3-k128";
+export const DEVICE_FIRMWARE_VERSION = "0.1.0";
+export const MINIMUM_DEVICE_FIRMWARE_VERSION = "0.1.0";
 export const HEARTBEAT_INTERVAL_MS = 5_000;
 export const CONNECTION_TIMEOUT_MS = 15_000;
 export const MAX_RESOURCE_BYTES = 16 * 1024 * 1024;
@@ -80,6 +84,119 @@ export class ProtocolError extends Error {
 
 function isPlainObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+const DEVICE_CAPABILITY_KEYS = Object.freeze([
+  "touch",
+  "speaker",
+  "offlineChineseVoice",
+  "usb",
+  "wifi",
+  "ble",
+  "microSd",
+  "rtc",
+]);
+const DEVICE_HEALTH_KEYS = Object.freeze([
+  "voiceDataReady",
+  "storageReady",
+]);
+
+function exactBooleanRecord(value, keys) {
+  if (!isPlainObject(value) || Object.keys(value).some((key) => !keys.includes(key))) {
+    return null;
+  }
+  const result = {};
+  for (const key of keys) {
+    if (typeof value[key] !== "boolean") return null;
+    result[key] = value[key];
+  }
+  return result;
+}
+
+export function normalizeDeviceInfo(value) {
+  if (
+    !isPlainObject(value) ||
+    Object.keys(value).some((key) =>
+      !["version", "firmwareVersion", "boardId", "capabilities", "health"].includes(key)) ||
+    value.version !== DEVICE_INFO_VERSION ||
+    typeof value.firmwareVersion !== "string" ||
+    !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(value.firmwareVersion) ||
+    typeof value.boardId !== "string" ||
+    !/^[a-z0-9][a-z0-9-]{0,63}$/.test(value.boardId)
+  ) {
+    return null;
+  }
+  const capabilities = exactBooleanRecord(value.capabilities, DEVICE_CAPABILITY_KEYS);
+  const health = exactBooleanRecord(value.health, DEVICE_HEALTH_KEYS);
+  if (!capabilities || !health) return null;
+  return {
+    version: DEVICE_INFO_VERSION,
+    firmwareVersion: value.firmwareVersion,
+    boardId: value.boardId,
+    capabilities,
+    health,
+  };
+}
+
+export function createDeviceInfo({
+  firmwareVersion = DEVICE_FIRMWARE_VERSION,
+  boardId = DEVICE_BOARD_ID,
+  capabilities = {},
+  health = {},
+} = {}) {
+  return normalizeDeviceInfo({
+    version: DEVICE_INFO_VERSION,
+    firmwareVersion,
+    boardId,
+    capabilities: Object.fromEntries(DEVICE_CAPABILITY_KEYS.map((key) => [key, capabilities[key] ?? true])),
+    health: Object.fromEntries(DEVICE_HEALTH_KEYS.map((key) => [key, health[key] ?? true])),
+  });
+}
+
+function deviceInfoMaterial(deviceInfo) {
+  const normalized = normalizeDeviceInfo(deviceInfo);
+  if (!normalized) throw new ProtocolError("Device info is invalid");
+  return JSON.stringify([
+    normalized.version,
+    normalized.firmwareVersion,
+    normalized.boardId,
+    ...DEVICE_CAPABILITY_KEYS.map((key) => normalized.capabilities[key]),
+    ...DEVICE_HEALTH_KEYS.map((key) => normalized.health[key]),
+  ]);
+}
+
+export function createDeviceInfoHash(deviceInfo) {
+  return createHash("sha256").update(deviceInfoMaterial(deviceInfo)).digest("hex");
+}
+
+function compareVersions(left, right) {
+  const leftParts = left.split(/[+-]/, 1)[0].split(".").map(Number);
+  const rightParts = right.split(/[+-]/, 1)[0].split(".").map(Number);
+  for (let index = 0; index < 3; index += 1) {
+    if (leftParts[index] !== rightParts[index]) return leftParts[index] - rightParts[index];
+  }
+  return 0;
+}
+
+export function evaluateDeviceCompatibility(deviceInfo) {
+  const normalized = normalizeDeviceInfo(deviceInfo);
+  if (!normalized) {
+    return { compatible: false, status: "unknown", issues: ["设备尚未上报版本信息"] };
+  }
+  const issues = [];
+  if (normalized.boardId !== DEVICE_BOARD_ID) issues.push("板型不受支持");
+  if (compareVersions(normalized.firmwareVersion, MINIMUM_DEVICE_FIRMWARE_VERSION) < 0) {
+    issues.push(`固件低于 ${MINIMUM_DEVICE_FIRMWARE_VERSION}`);
+  }
+  if (!normalized.health.voiceDataReady) issues.push("中文语音数据未就绪");
+  if (!normalized.health.storageReady) issues.push("microSD 未就绪");
+  const compatible = normalized.boardId === DEVICE_BOARD_ID &&
+    compareVersions(normalized.firmwareVersion, MINIMUM_DEVICE_FIRMWARE_VERSION) >= 0;
+  return {
+    compatible,
+    status: compatible ? (issues.length ? "degraded" : "compatible") : "incompatible",
+    issues,
+  };
 }
 
 export function isEncryptedEnvelope(envelope) {
@@ -183,6 +300,11 @@ function validatePayload(type, payload) {
   if (type === "hello") {
     requireString(payload.deviceId, "deviceId", /^[a-z0-9][a-z0-9-]{0,63}$/);
     requireString(payload.deviceNonce, "deviceNonce", /^[A-Za-z0-9_-]{16,128}$/);
+    const deviceInfo = normalizeDeviceInfo(payload.deviceInfo);
+    requireString(payload.deviceInfoHash, "deviceInfoHash", /^[a-f0-9]{64}$/);
+    if (!deviceInfo || createDeviceInfoHash(deviceInfo) !== payload.deviceInfoHash) {
+      throw new ProtocolError("hello device info is invalid");
+    }
   }
   if (type === "pair.request") {
     requireString(payload.deviceId, "deviceId", /^[a-z0-9][a-z0-9-]{0,63}$/);
@@ -198,6 +320,7 @@ function validatePayload(type, payload) {
     requireString(payload.deviceId, "deviceId", /^[a-z0-9][a-z0-9-]{0,63}$/);
     requireString(payload.deviceNonce, "deviceNonce", /^[A-Za-z0-9_-]{16,128}$/);
     requireString(payload.bridgeNonce, "bridgeNonce", /^[A-Za-z0-9_-]{16,128}$/);
+    requireString(payload.deviceInfoHash, "deviceInfoHash", /^[a-f0-9]{64}$/);
     requireString(payload.proof, "proof", /^[a-f0-9]{64}$/);
   }
   if (type === "ready") {
@@ -522,12 +645,20 @@ export function decryptEnvelopePayload(envelope, context) {
   }
 }
 
-function handshakeMaterial({ deviceId, deviceNonce, bridgeNonce, role }) {
+function handshakeMaterial({ deviceId, deviceNonce, bridgeNonce, deviceInfoHash, role }) {
   requireString(deviceId, "deviceId", /^[a-z0-9][a-z0-9-]{0,63}$/);
   requireString(deviceNonce, "deviceNonce", /^[A-Za-z0-9_-]{16,128}$/);
   requireString(bridgeNonce, "bridgeNonce", /^[A-Za-z0-9_-]{16,128}$/);
+  requireString(deviceInfoHash, "deviceInfoHash", /^[a-f0-9]{64}$/);
   if (!["bridge", "device", "session"].includes(role)) throw new ProtocolError("Handshake role is invalid");
-  return JSON.stringify([DEVICE_PROTOCOL_VERSION, deviceId, deviceNonce, bridgeNonce, role]);
+  return JSON.stringify([
+    DEVICE_PROTOCOL_VERSION,
+    deviceId,
+    deviceNonce,
+    bridgeNonce,
+    deviceInfoHash,
+    role,
+  ]);
 }
 
 export function createPairingSecret() {
