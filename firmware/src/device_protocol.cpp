@@ -347,6 +347,10 @@ void DeviceProtocolClient::setStateHandler(StateHandler handler) {
   state_handler_ = std::move(handler);
 }
 
+void DeviceProtocolClient::setCommandHandler(CommandHandler handler) {
+  command_handler_ = std::move(handler);
+}
+
 bool DeviceProtocolClient::ready() const {
   return state_ == State::Ready;
 }
@@ -558,8 +562,7 @@ void DeviceProtocolClient::startHandshake(
   }
   if (
       pairing_code_.length() == 6 &&
-      (strcmp(transport_->kind(), "usb") == 0 ||
-       strcmp(transport_->kind(), "ble") == 0)) {
+      strcmp(transport_->kind(), "usb") == 0) {
     state_ = State::Handshaking;
     sendEnvelope(
         "pair.request",
@@ -649,6 +652,29 @@ void DeviceProtocolClient::handleReadyMessage(
   }
   if (type == "event" && event_handler_) {
     event_handler_(payload["event"] | "", payload);
+    return;
+  }
+  if (type == "command") {
+    const String command = payload["command"] | "";
+    const String command_id = payload["commandId"] | "";
+    if (
+        command.isEmpty() || command.length() > 64 ||
+        command_id.length() < 8 || command_id.length() > 128) {
+      sendError("INVALID_COMMAND");
+      return;
+    }
+    String error;
+    const bool accepted = command_handler_ && command_handler_(command, payload, error);
+    sendEnvelope(
+        "event",
+        [&command_id, accepted, &error](JsonObject response) {
+          response["event"] = "command.result";
+          response["commandId"] = command_id;
+          response["ok"] = accepted;
+          if (!accepted) {
+            response["error"] = error.isEmpty() ? "COMMAND_REJECTED" : error;
+          }
+        });
     return;
   }
   if (type.startsWith("resource.") && event_handler_) {

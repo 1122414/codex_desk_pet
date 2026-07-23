@@ -1,6 +1,6 @@
 # Codex Desk Buddy 安装与恢复
 
-这份说明面向第一次接触嵌入式开发的使用者。设备固定为 M5Stack CoreS3 完整版 `K128`；不要为当前固件购买 CoreS3 Lite、Core2、Cardputer 或 StickC。
+这份说明面向第一次接触嵌入式开发的使用者。设备固定为 M5Stack Tab5 Kit `K145`（ESP32-P4 + ESP32-C6）；当前固件不适用于 CoreS3、Core2、Cardputer 或 StickC。
 
 ## 电脑准备
 
@@ -47,7 +47,7 @@ npm run release:firmware
 
 输出目录为 `dist/firmware/v0.1.0/`，其中包括：
 
-- `codex-desk-buddy-cores3-factory.bin`：首次安装或完整恢复使用的整机镜像。
+- `codex-desk-buddy-tab5-factory.bin`：首次安装或完整恢复使用的整机镜像。
 - `bootloader.bin`、`partitions.bin`、`boot_app0.bin`、`firmware.bin`、`voice_data.bin`：按固定偏移拆分的组件。
 - `manifest.json`：板型、协议、Flash 容量、偏移、大小和逐文件 SHA‑256。
 - `THIRD_PARTY_ESP_SR_LICENSE.txt`：随中文语音数据交付的上游许可。
@@ -56,8 +56,8 @@ npm run release:firmware
 
 ## 首次烧录
 
-1. 用支持数据传输的 USB‑C 线连接 CoreS3 和电脑。
-2. 运行 `pio device list`，找到 CoreS3 对应的串口。
+1. 用支持数据传输的 USB‑C 线连接 Tab5 和电脑。
+2. 运行 `pio device list`，找到 Tab5 对应的串口。
 3. 明确指定这个串口：
 
 ```bash
@@ -77,13 +77,13 @@ npm run flash:firmware -- --port /dev/cu.usbmodemXXXX --erase
 ## 配网与账户配对
 
 1. 在电脑运行 `CODEX_DESK_DEVICE_HOST=0.0.0.0 npm start`。
-2. 用 Chrome 或 Edge 打开 `http://127.0.0.1:4317`。
-3. 展开“通过蓝牙配置 Wi‑Fi”，输入设备屏幕显示的配网码、2.4 GHz Wi‑Fi、电脑局域网地址和设备端口 `4318`。
-4. 浏览器会发起系统蓝牙安全配对。写入成功后设备轮换配网码并重启。
-5. 首次账户配对仍保持 USB 连接：在控制面板生成一次性账户配对码，再在设备屏幕输入。
-6. 配对成功后可以拔掉数据线；设备通过 Wi‑Fi 连接仍在运行的电脑 Bridge。USB 与 Wi‑Fi 同时存在时，USB 自动成为首选，Wi‑Fi 保持备用。
+2. 用浏览器打开 `http://127.0.0.1:4317`。
+3. 保持 USB 数据线连接，在控制面板生成一次性账户配对码，再在 Tab5 屏幕输入。
+4. 配对成功后，展开“通过已配对的 USB 连接配置 Wi‑Fi”，选择这台 Tab5，输入 2.4 GHz Wi‑Fi、电脑局域网 IPv4 地址和设备端口 `4318`。
+5. 浏览器把配置作为一次加密认证的 USB 协议命令发给设备；密码不写进浏览器存储或日志。设备保存后自动重启。
+6. 拔掉数据线后，设备通过 Wi‑Fi 连接仍在运行的电脑 Bridge。USB 与 Wi‑Fi 同时存在时，USB 自动成为首选，Wi‑Fi 保持备用。
 
-Web Bluetooth 只写入 Wi‑Fi 和 Bridge 地址，不接触账户配对密钥。当前没有电脑端原生 BLE 日常通信适配器，因此蓝牙不能替代 Wi‑Fi 或 USB 获取 Codex 状态。
+Tab5 MVP 不启用 BLE，因此蓝牙不能替代 Wi‑Fi 或 USB 获取 Codex 状态，也不参与首次配网。
 
 ## 故障恢复顺序
 
@@ -104,7 +104,7 @@ Pet 资源更新失败不会替换正在使用的版本。设备保留双槽 act
 - USB 枚举、首次烧录和启动日志。
 - 屏幕色彩、撕裂、帧率、触摸坐标和外接按键手感。
 - 中文语音音质、扬声器音量、RTC、电池读数、充电和温升。
-- 2.4 GHz Wi‑Fi、BLE 配网、电脑睡眠与路由器重启后的恢复。
+- USB 加密配网、2.4 GHz Wi‑Fi、电脑睡眠与路由器重启后的恢复。
 - 不同 microSD 的兼容性、真实断电恢复和连续 72 小时运行。
 
 Secure Boot、Flash Encryption 和签名升级需要正式生产密钥与真机 eFuse 流程；eFuse 操作不可逆，因此不在无硬件、无量产密钥阶段假装完成。

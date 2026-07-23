@@ -5,6 +5,7 @@
 #include <esp_task_wdt.h>
 
 #include <algorithm>
+#include <cstring>
 #include <ctime>
 
 namespace codex::firmware {
@@ -12,6 +13,7 @@ namespace {
 
 constexpr std::uint64_t kTelemetryIntervalMs = 30'000;
 constexpr std::uint64_t kResourceRetryMs = 30'000;
+constexpr std::uint64_t kWifiProvisioningRestartDelayMs = 750;
 constexpr DeviceCapabilities kTab5Capabilities{
     true, true, true, true, true, false, true, true, true};
 
@@ -94,6 +96,9 @@ void FirmwareApp::loop() {
 
   ui_.render(
       model_.snapshot(), now_ms, paired(), connection_detail_, pet_store_.transferProgress());
+  if (wifi_reboot_at_ != 0 && now_ms >= wifi_reboot_at_) {
+    ESP.restart();
+  }
   esp_task_wdt_reset();
   delay(2);
 }
@@ -109,6 +114,74 @@ void FirmwareApp::configureProtocol(DeviceProtocolClient& client) {
       [this](const bool connected, const String& detail) {
         if (connected || primaryClient() == nullptr) connection_detail_ = detail;
       });
+  client.setCommandHandler(
+      [this, &client](
+          const String& command,
+          const JsonObjectConst payload,
+          String& error) {
+        return handleDeviceCommand(client, command, payload, error);
+      });
+}
+
+bool FirmwareApp::handleDeviceCommand(
+    DeviceProtocolClient& client,
+    const String& command,
+    const JsonObjectConst payload,
+    String& error) {
+  if (command != "wifi.provision") {
+    error = "UNSUPPORTED_COMMAND";
+    return false;
+  }
+  if (strcmp(client.transportKind(), "usb") != 0) {
+    error = "USB_REQUIRED";
+    return false;
+  }
+  if (
+      !payload["ssid"].is<const char*>() ||
+      !payload["password"].is<const char*>() ||
+      !payload["bridgeHost"].is<const char*>() ||
+      !payload["bridgePort"].is<std::uint16_t>()) {
+    error = "INVALID_WIFI_CONFIGURATION";
+    return false;
+  }
+  const String ssid = payload["ssid"].as<const char*>();
+  const String password = payload["password"].as<const char*>();
+  const String bridge_host = payload["bridgeHost"].as<const char*>();
+  const auto bridge_port = payload["bridgePort"].as<std::uint16_t>();
+  const auto has_control_character = [](const String& value) {
+    for (std::size_t index = 0; index < value.length(); ++index) {
+      const auto character = static_cast<std::uint8_t>(value[index]);
+      if (character < 0x20U || character == 0x7fU) return true;
+    }
+    return false;
+  };
+  if (
+      ssid.isEmpty() || ssid.length() > 32 || password.length() > 64 ||
+      bridge_host.isEmpty() || bridge_host.length() > 253 || bridge_port == 0 ||
+      has_control_character(ssid) || has_control_character(password) ||
+      bridge_host[0] == '.' || bridge_host[0] == '-' ||
+      bridge_host[bridge_host.length() - 1] == '.' ||
+      bridge_host[bridge_host.length() - 1] == '-') {
+    error = "INVALID_WIFI_CONFIGURATION";
+    return false;
+  }
+  for (std::size_t index = 0; index < bridge_host.length(); ++index) {
+    const auto character = bridge_host[index];
+    if (!(
+            isAlphaNumeric(character) || character == '.' ||
+            character == '-')) {
+      error = "INVALID_WIFI_CONFIGURATION";
+      return false;
+    }
+  }
+  if (!config_store_.saveNetwork(ssid, password, bridge_host, bridge_port)) {
+    error = "CONFIGURATION_SAVE_FAILED";
+    return false;
+  }
+  connection_detail_ = "Wi-Fi配置已保存，正在重启";
+  wifi_reboot_at_ = static_cast<std::uint64_t>(millis()) +
+      kWifiProvisioningRestartDelayMs;
+  return true;
 }
 
 void FirmwareApp::handleSnapshot(const Snapshot& snapshot) {

@@ -1,17 +1,17 @@
-# CoreS3 固件音频
+# Tab5 固件音频
 
 ## 实现
 
-设备使用 Espressif ESP-SR v1.2.0 的离线中文 TTS。该版本明确支持 ESP-IDF 4.4 和 ESP32-S3，能与当前固定的 Arduino 2.0.17 / IDF 4.4 工具链共存，不需要为语音升级整套固件框架。
+设备使用 Espressif ESP-SR 的 ESP32-P4 离线中文 TTS 静态库，配合 PioArduino / ESP-IDF 5.4 工具链。
 
-`npm run setup:firmware-tts` 从 Espressif 官方仓库的固定 commit `018ed410245179225886859b33e9989218b3ec5e` 下载：
+`npm run setup:firmware-tts` 从 Espressif 官方仓库的固定 commit `2f8c4b0459db5bbb39abd77adae27962d6d94bcb` 下载：
 
-- ESP32-S3 TTS 静态库；
+- ESP32-P4 TTS 静态库；
 - 声音模板静态库；
 - `xiaoxin_small` 中文语音数据；
 - 原始头文件和 Espressif 许可。
 
-每个文件都必须通过仓库脚本内固定的 SHA‑256，损坏、替换或下载失败都会中止安装。依赖缓存位于 `firmware/.pio/esp-tts/v1.2.0/`，不会提交进 Git。
+每个文件都必须通过仓库脚本内固定的 SHA‑256，损坏、替换或下载失败都会中止安装。依赖缓存位于 `firmware/.pio/esp-tts/p4-2f8c4b04/`，不会提交进 Git。
 
 ## 设备行为
 
@@ -30,12 +30,12 @@
 | `app0` | 4.5 MiB | 当前/候选应用 |
 | `app1` | 4.5 MiB | OTA 回退应用 |
 | `voice_data` | 2.8125 MiB | 固定中文语音数据 |
-| `littlefs` | 4.0625 MiB | 本地文件系统 |
+| `spiffs` | 4.0625 MiB | 本地文件系统 |
 
-自定义 Pet 的大资源继续存放在 microSD，不占用 `littlefs`。语音数据独立于应用 OTA，升级应用时不会重复搬运 2.8 MiB 语音包。
+自定义 Pet 的大资源继续存放在 microSD，不占用 `spiffs`。语音数据独立于应用 OTA，升级应用时不会重复搬运 2.8 MiB 语音包。
 
 ## 许可与产品边界
 
-ESP-SR 使用 Espressif MIT License，许可范围限定在 Espressif Systems 产品上；CoreS3 的 ESP32-S3 符合该限制，许可文本也明确允许复制、修改、分发和销售。发布包必须保留原始许可文本。这里没有使用操作系统自带语音、在线 TTS 抓取或来源不明的录音。
+ESP-SR 使用 Espressif MIT License，许可范围限定在 Espressif Systems 产品上；Tab5 的 ESP32-P4 符合该限制，许可文本也明确允许复制、修改、分发和销售。发布包必须保留原始许可文本。这里没有使用操作系统自带语音、在线 TTS 抓取或来源不明的录音。
 
-真机前已验证：官方文件哈希、C++ ABI 兼容层、静态库链接、Flash 分区尺寸、纯 C++ 音频计划测试和完整 ESP32-S3 固件构建。仍需真机验证：扬声器音量、破音、连续状态打断效果和实际中文听感。
+真机前已验证：官方文件哈希、C++ ABI 兼容层、静态库链接、Flash 分区尺寸、纯 C++ 音频计划测试和完整 ESP32-P4 固件构建。仍需真机验证：扬声器音量、破音、连续状态打断效果和实际中文听感。

@@ -118,6 +118,60 @@ test("USB pairing provisions a secret and authenticated device commands update t
   assert.equal(await credentials.getSecret("core-s3-1"), provisionedSecret);
 });
 
+test("Wi-Fi provisioning is sent only through an authenticated USB session", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codex-desk-hub-wifi-"));
+  const credentials = new DeviceCredentialRepository(path.join(root, "devices.json"));
+  await credentials.pair({ deviceId: "tab5-wifi-1", secret: "f".repeat(64) });
+  const hub = new DeviceHub({
+    store: new DeskStore(),
+    bridge: { decideApproval: async () => null },
+    catalog: new PetCatalog(path.join(root, "pets"), { deviceAssetConverter: passthroughDeviceConverter }),
+    settings: new SettingsRepository(path.join(root, "settings.json")),
+    credentials,
+  });
+  await hub.start();
+  t.after(() => hub.close());
+
+  const transports = createMemoryTransportPair({ kind: "usb" });
+  const bridgeSession = hub.attachTransport(transports.left);
+  const receivedCommands = [];
+  const device = new DeviceSession({
+    role: "device",
+    transport: transports.right,
+    deviceId: "tab5-wifi-1",
+    secret: "f".repeat(64),
+    commandHandler: async (command) => {
+      receivedCommands.push(command);
+      return { accepted: true };
+    },
+  });
+  t.after(() => device.close());
+  device.start();
+  await waitFor(() => bridgeSession.ready && device.ready);
+
+  assert.deepEqual(hub.provisionWifi("tab5-wifi-1", {
+    ssid: "Desk Wi-Fi",
+    password: "secret",
+    bridgeHost: "192.168.1.20",
+    bridgePort: 4318,
+  }), { deviceId: "tab5-wifi-1", transport: "usb" });
+  await waitFor(() => receivedCommands.length === 1);
+  assert.deepEqual(receivedCommands[0], {
+    command: "wifi.provision",
+    commandId: receivedCommands[0].commandId,
+    ssid: "Desk Wi-Fi",
+    password: "secret",
+    bridgeHost: "192.168.1.20",
+    bridgePort: 4318,
+  });
+  assert.throws(() => hub.provisionWifi("tab5-wifi-1", {
+    ssid: "Desk Wi-Fi",
+    password: "secret",
+    bridgeHost: "invalid host",
+    bridgePort: 4318,
+  }), /Wi-Fi 配置无效/);
+});
+
 test("global command deduplication prevents dual-link duplicate approval execution", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "codex-desk-hub-dedupe-"));
   const credentials = new DeviceCredentialRepository(path.join(root, "devices.json"));

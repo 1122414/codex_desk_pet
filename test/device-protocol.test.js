@@ -20,6 +20,7 @@ import {
   encryptEnvelopePayload,
   evaluateDeviceCompatibility,
   isEncryptedEnvelope,
+  normalizeWifiProvisioning,
   parseEnvelope,
   serializeEnvelope,
   validateEnvelope,
@@ -67,6 +68,38 @@ test("protocol rejects malformed command payloads before they reach the Bridge",
       animation: "unknown",
     },
   }), /animation/);
+  assert.throws(() => createEnvelope({
+    sequence: 3,
+    type: "command",
+    payload: {
+      command: "wifi.provision",
+      commandId: "command-wifi-0001",
+      ssid: "Desk Wi-Fi",
+      password: "secret",
+      bridgeHost: "127.0.0.1",
+      bridgePort: 0,
+    },
+  }), /Wi-Fi/);
+});
+
+test("Wi-Fi provisioning accepts only bounded device-safe network settings", () => {
+  assert.deepEqual(normalizeWifiProvisioning({
+    ssid: "Desk Wi-Fi",
+    password: "correct-horse-battery-staple",
+    bridgeHost: "192.168.1.20",
+    bridgePort: 4318,
+  }), {
+    ssid: "Desk Wi-Fi",
+    password: "correct-horse-battery-staple",
+    bridgeHost: "192.168.1.20",
+    bridgePort: 4318,
+  });
+  assert.equal(normalizeWifiProvisioning({
+    ssid: "Desk Wi-Fi",
+    password: "secret",
+    bridgeHost: "desk host",
+    bridgePort: 4318,
+  }), null);
 });
 
 test("sequence window detects duplicates and gaps and accepts snapshot resync", () => {

@@ -63,16 +63,16 @@ function runEsptool(args) {
   if (result.status !== 0) throw new Error("Tab5 烧录失败");
 }
 
-if (erase) runEsptool(["erase_flash"]);
+if (erase) runEsptool(["erase-flash"]);
 runEsptool([
   "--baud",
   "921600",
-  "write_flash",
-  "--flash_mode",
+  "write-flash",
+  "--flash-mode",
   "qio",
-  "--flash_freq",
+  "--flash-freq",
   "80m",
-  "--flash_size",
+  "--flash-size",
   "16MB",
   "0x0",
   path.join(releaseRoot, manifest.factoryImage.file),

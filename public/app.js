@@ -38,11 +38,8 @@ const elements = Object.fromEntries([
   "pet-description", "animation-grid", "restore-sync", "look-grid", "look-support", "sound-toggle",
   "voice-toggle", "battery-slider", "battery-value", "mock-tools", "mock-approval", "toast",
   "start-pairing", "pairing-code", "device-list",
-  "setup-code", "wifi-ssid", "wifi-password", "bridge-host", "bridge-port", "provision-wifi",
+  "wifi-device-id", "wifi-ssid", "wifi-password", "bridge-host", "bridge-port", "provision-wifi",
 ].map((id) => [id, document.getElementById(id)]));
-
-const BLE_SERVICE_UUID = "7a5c0001-1f4b-4e29-a9a0-4e0f0c0d0001";
-const BLE_PROVISION_UUID = "7a5c0004-1f4b-4e29-a9a0-4e0f0c0d0001";
 
 let csrfToken = "";
 let snapshot = null;
@@ -390,6 +387,18 @@ async function loadPets() {
 async function loadDevices() {
   try {
     const { devices } = await fetchJson("/api/devices");
+    const usbDevices = devices.filter((device) => device.connected && device.transports.includes("usb"));
+    elements["wifi-device-id"].replaceChildren(...(usbDevices.length
+      ? usbDevices.map((device) => Object.assign(document.createElement("option"), {
+        value: device.deviceId,
+        textContent: `${device.displayName} · USB 已连接`,
+      }))
+      : [Object.assign(document.createElement("option"), {
+        value: "",
+        textContent: "请先通过 USB 配对并保持连接",
+      })]));
+    elements["wifi-device-id"].disabled = usbDevices.length === 0;
+    elements["provision-wifi"].disabled = usbDevices.length === 0;
     if (!devices.length) {
       elements["device-list"].replaceChildren(Object.assign(document.createElement("span"), { textContent: "暂无已配对设备" }));
       return;
@@ -447,44 +456,31 @@ async function startPairing() {
 }
 
 async function provisionWifi() {
-  const setupCode = elements["setup-code"].value.trim();
+  const deviceId = elements["wifi-device-id"].value;
   const ssid = elements["wifi-ssid"].value.trim();
   const password = elements["wifi-password"].value;
   const bridgeHost = elements["bridge-host"].value.trim();
   const bridgePort = Number(elements["bridge-port"].value);
-  if (!/^\d{6}$/.test(setupCode) || !ssid || !bridgeHost ||
+  if (!deviceId || !ssid || !bridgeHost ||
       !Number.isInteger(bridgePort) || bridgePort < 1 || bridgePort > 65535) {
-    showToast("请完整填写设备上的6位配网码、Wi‑Fi和电脑局域网地址");
-    return;
-  }
-  if (!navigator.bluetooth) {
-    showToast("当前浏览器不支持 Web Bluetooth，请使用 Chrome/Edge 或先通过 USB 配置");
+    showToast("请保持已配对 Tab5 的 USB 连接，并完整填写 Wi‑Fi 与电脑局域网 IPv4");
     return;
   }
   elements["provision-wifi"].disabled = true;
   try {
-    const device = await navigator.bluetooth.requestDevice({
-      filters: [{ services: [BLE_SERVICE_UUID] }],
-    });
-    const server = await device.gatt.connect();
-    const service = await server.getPrimaryService(BLE_SERVICE_UUID);
-    const characteristic = await service.getCharacteristic(BLE_PROVISION_UUID);
-    const bytes = new TextEncoder().encode(JSON.stringify({
-      setupCode,
+    await mutate("/api/devices/wifi", {
+      deviceId,
       ssid,
       password,
       bridgeHost,
       bridgePort,
-    }));
-    if (bytes.byteLength > 512) throw new Error("配网数据过长");
-    await characteristic.writeValue(bytes);
+    });
     elements["wifi-password"].value = "";
-    server.disconnect();
-    showToast("Wi‑Fi 配置已写入，CoreS3 正在连接电脑");
+    showToast("Wi‑Fi 配置已加密写入，Tab5 正在重启；拔掉 USB 后会尝试连接电脑");
   } catch (error) {
-    showToast(`蓝牙配网失败：${error.message}`);
+    showToast(`Wi‑Fi 配置失败：${error.message}`);
   } finally {
-    elements["provision-wifi"].disabled = false;
+    await loadDevices();
   }
 }
 

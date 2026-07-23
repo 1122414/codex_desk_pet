@@ -55,6 +55,10 @@ test("HTTP API requires a same-origin session for state changes", async (t) => {
     listDevices: () => [{ deviceId: "core-s3-1", displayName: "Desk Unit", connected: false, transports: [] }],
     createPairingOffer: () => ({ code: "123456", expiresAt: 123_000 }),
     revokeDevice: async (deviceId) => deviceId === "core-s3-1",
+    provisionWifi: (deviceId, provisioning) => ({
+      deviceId,
+      transport: provisioning.ssid === "Desk Wi-Fi" ? "usb" : "invalid",
+    }),
   };
   const hookToken = "9".repeat(64);
   const server = new DeskHttpServer({
@@ -225,6 +229,30 @@ test("HTTP API requires a same-origin session for state changes", async (t) => {
     body: JSON.stringify({ commandId: "command-0003" }),
   });
   assert.deepEqual(await pairing.json(), { ok: true, code: "123456", expiresAt: 123_000 });
+
+  const wifiProvisioning = await fetch(`${base}/api/devices/wifi`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: cookie,
+      "X-Codex-Desk-CSRF": csrfToken,
+      Origin: base,
+    },
+    body: JSON.stringify({
+      commandId: "command-wifi-0001",
+      deviceId: "core-s3-1",
+      ssid: "Desk Wi-Fi",
+      password: "secret",
+      bridgeHost: "192.168.1.20",
+      bridgePort: 4318,
+    }),
+  });
+  assert.equal(wifiProvisioning.status, 202);
+  assert.deepEqual(await wifiProvisioning.json(), {
+    ok: true,
+    deviceId: "core-s3-1",
+    transport: "usb",
+  });
 
   const revoked = await fetch(`${base}/api/devices/revoke`, {
     method: "POST",

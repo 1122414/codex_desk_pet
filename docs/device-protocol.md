@@ -1,13 +1,13 @@
 # Codex Desk 设备协议
 
-这份协议是电脑 Bridge 和 CoreS3 K128 固件之间的稳定边界。当前仓库已经实现协议、Bridge 会话、USB CDC、Wi‑Fi WebSocket、BLE GATT 分片抽象、配对凭据、Pet 资源传输和故障测试；浏览器模拟器使用同一个 Bridge 状态，但不伪装成硬件链路。
+这份协议是电脑 Bridge 和 M5Stack Tab5 K145 固件之间的稳定边界。当前仓库已经实现协议、Bridge 会话、USB CDC、Wi‑Fi WebSocket、配对凭据、Pet 资源传输和故障测试；浏览器模拟器使用同一个 Bridge 状态，但不伪装成硬件链路。
 
 ## 传输
 
-- USB：ESP32-S3 USB CDC，使用换行分隔的 UTF-8 JSON 消息。
+- USB：ESP32-P4 USB CDC，使用换行分隔的 UTF-8 JSON 消息。
 - Wi‑Fi：独立设备 WebSocket 服务，默认 `ws://127.0.0.1:4318/device/ws`；每个文本消息包含一条完整 JSON 消息。真机接入时显式设置 `CODEX_DESK_DEVICE_HOST=0.0.0.0`，不能暴露电脑控制面板的 `4317` 端口。
-- BLE：固件具备按协商 MTU 分片、校验和重组的协议能力；当前产品主机只通过 Web Bluetooth 写入 Wi‑Fi 与 Bridge 地址，尚未提供原生 BLE 中央设备适配器，不把 BLE 描述为账户配对或日常数据链路。
-- 三条链路使用完全相同的消息结构和命令语义。
+- Tab5 MVP 不实例化 BLE 传输。Tab5 的 ESP32-P4 不带原生无线电，板载 ESP32-C6 通过 ESP-Hosted/SDIO 提供 Wi‑Fi；因此“其他无线方式”在本产品中指 Wi‑Fi。
+- USB 和 Wi‑Fi 使用完全相同的消息结构和命令语义。
 - USB 和 Wi‑Fi 同时在线时，USB 是首选控制链路，Wi‑Fi 保持热备；同一个 `commandId` 只能执行一次。
 - 每条链路都有可靠消息在途上限；大 Pet 不会一次性灌满串口或 WebSocket 发送缓冲区。
 
@@ -54,17 +54,18 @@
 - `approval.decide`
 - `telemetry.update`
 - `state.preview`
+- `wifi.provision`：只允许 Bridge 经已认证的 USB 会话发送，保存网络和 Bridge 地址后设备重启。
 
 ## 配对和双向认证
 
 1. 电脑控制面板生成 6 位、单次使用、5 分钟过期的配对码；同时存在的配对码数量有上限。
-2. 当前电脑端首次配对只开放 USB。协议层保留受保护 BLE 配对类型，但在原生 BLE 主机适配器完成并通过真机安全验收前，不能作为用户可用能力；Wi‑Fi 配对始终被拒绝。
+2. 首次账户配对只开放 USB；Wi‑Fi 配对始终被拒绝。
 3. Bridge 为每台设备生成独立 256 位随机密钥，凭据文件以 `0600` 权限原子写入；损坏的凭据文件会报错，绝不静默覆盖。
 4. 后续连接使用设备 nonce、Bridge nonce、设备 ID、设备信息哈希和方向角色生成 HMAC-SHA256 证明，双方都验证成功后派生新的 `sessionId`。
 5. 同一设备、同一传输的新认证会话会替换旧会话；撤销凭据会立即关闭该设备的所有链路。
 6. 未完成认证的空连接 10 秒后关闭；Bridge 同时接收的设备会话有硬上限。
 
-当前配对密钥只通过 USB 本地链路下发，不会进入浏览器 API、设备列表或日志。BLE 配网特征要求 Secure Connections + MITM；设备屏幕上的 6 位配网码同时是蓝牙 passkey，成功写入 Wi‑Fi 后立即轮换并重启生效。浏览器只接触网络配置，不接触设备账户密钥。
+当前配对密钥只通过 USB 本地链路下发，不会进入浏览器 API、设备列表或日志。网络配置同样只允许在已完成配对的 USB 加密会话中写入：浏览器将 Wi‑Fi 名称、密码、电脑局域网地址和端口交给本机 Bridge，Bridge 不记录密码，只经对应 USB 会话发送 `wifi.provision`。固件拒绝任何 Wi‑Fi 链路发来的配网命令，保存成功后自动重启。
 
 ## 会话加密
 
@@ -122,11 +123,11 @@
 
 - Bridge 发送 manifest、文件大小和 SHA-256；设备按 hash 判断是否已有缓存。
 - 图集分块传输，每块带偏移、长度和校验；全部完成后再原子替换当前文件。
-- USB/Wi‑Fi 资源分块受 ACK 窗口流控；BLE 会返回 `resource.requires-high-bandwidth`，不尝试低速传完整图集。
+- USB/Wi‑Fi 资源分块受 ACK 窗口流控；Tab5 MVP 不提供 BLE Pet 传输。
 - 断点续传只接受与 manifest hash 一致的临时文件。
 - v1/v2 尺寸或 manifest 不匹配时拒绝安装，并保留上一个可用 Pet。
 - microSD 是多 Pet 缓存的默认位置；内部 Flash 只保留固件和最小回退 Pet。
-- Bridge 不会把原始 WebP 直接交给微控制器解码。它先将 192×208 单格按 3/4 缩放为 144×156，再转换为小端 RGB565；透明像素使用保留色 `0x0001`，原本会量化为该颜色的不透明像素改为 `0x0000`。
+- Bridge 不会把原始 WebP 直接交给微控制器解码。它将每个 192×208 单格放大为 384×416，再转换为小端 RGB565；透明像素使用保留色 `0x0001`，原本会量化为该颜色的不透明像素改为 `0x0000`。
 - `resource.manifest` 固定声明 `format=rgb565-key-v1`、单帧尺寸、帧数和透明色。v1 是 72 帧，v2 是 88 帧；设备会据此验证精确字节数，不能只相信 Bridge 声明。
 - 固件先写 `<pet>.part` 和可恢复区间清单；重复区间必须与已写字节逐字节一致，否则拒绝。
 - 整包 SHA‑256 通过后才重命名为以完整 hash 命名的不可变资源。active 指针使用两个带 generation 的槽位交替发布；更新任一槽位时另一个已验证槽位保持不动，断电后选择最高的可用 generation，损坏则回退上一槽或内置 Pet。

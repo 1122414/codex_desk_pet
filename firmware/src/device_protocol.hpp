@@ -31,6 +31,10 @@ class DeviceProtocolClient {
   using SecretHandler = std::function<void(const String&)>;
   using EventHandler = std::function<void(const String&, JsonObjectConst)>;
   using StateHandler = std::function<void(bool, const String&)>;
+  using CommandHandler = std::function<bool(
+      const String& command,
+      JsonObjectConst payload,
+      String& error)>;
 
   void begin(
       TextTransport& transport,
@@ -49,6 +53,7 @@ class DeviceProtocolClient {
   void setSecretHandler(SecretHandler handler);
   void setEventHandler(EventHandler handler);
   void setStateHandler(StateHandler handler);
+  void setCommandHandler(CommandHandler handler);
 
   bool ready() const;
   const char* transportKind() const;
@@ -164,6 +169,7 @@ class DeviceProtocolClient {
   SecretHandler secret_handler_;
   EventHandler event_handler_;
   StateHandler state_handler_;
+  CommandHandler command_handler_;
 };
 
 }  // namespace codex::firmware

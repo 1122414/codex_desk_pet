@@ -356,6 +356,16 @@ export class DeskHttpServer {
         json(res, 200, { ok: true, deviceId: body.deviceId });
         return;
       }
+      if (route === "/api/devices/wifi") {
+        if (!this.deviceHub) throw new HttpError(503, "Device service is unavailable");
+        try {
+          const result = this.deviceHub.provisionWifi(body.deviceId, body);
+          json(res, 202, { ok: true, ...result });
+        } catch (error) {
+          throw new HttpError(409, error.message);
+        }
+        return;
+      }
       if (route === "/api/state/preview") {
         const animation = body.animation === null ? null : body.animation;
         try {

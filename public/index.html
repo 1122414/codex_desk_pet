@@ -12,12 +12,12 @@
       <section class="hero" aria-labelledby="page-title">
         <p class="eyebrow">CODEX · DESK COMPANION</p>
         <h1 id="page-title">Codex Desk Buddy</h1>
-        <p class="subtitle">CoreS3 K128 的电脑端 MVP 与 320×240 触摸屏模拟器</p>
+        <p class="subtitle">M5Stack Tab5 K145 的电脑端 MVP 与触摸交互模拟器</p>
       </section>
 
       <section class="workspace">
         <div class="device-column">
-          <div class="device-shell" aria-label="320×240 触摸屏模拟器">
+          <div class="device-shell" aria-label="Tab5 1280×720 触摸屏交互模拟器">
             <div class="device-camera" aria-hidden="true"></div>
             <div id="device-screen" class="device-screen" tabindex="0">
               <header class="screen-statusbar">
@@ -60,7 +60,7 @@
                 <span id="screen-transport">SIM</span>
               </footer>
             </div>
-            <div class="device-labels"><span>CORE S3 K128 · 320×240</span><span>CODEX DESK</span></div>
+            <div class="device-labels"><span>TAB5 K145 · 1280×720</span><span>CODEX DESK</span></div>
           </div>
           <p class="touch-hint">触摸 Pet 看向指尖 · 左右滑动或按 ← → 换 Pet</p>
         </div>
@@ -121,7 +121,6 @@
               <button type="button" data-transport="simulator" class="active">模拟</button>
               <button type="button" data-transport="usb">USB</button>
               <button type="button" data-transport="wifi">Wi‑Fi</button>
-              <button type="button" data-transport="ble">BLE</button>
             </div>
           </section>
 
@@ -135,23 +134,23 @@
             </div>
             <p id="pairing-code" class="pairing-code" hidden></p>
             <details class="provision-panel">
-              <summary>通过蓝牙配置 Wi‑Fi</summary>
+              <summary>通过已配对的 USB 连接配置 Wi‑Fi</summary>
               <div class="provision-grid">
-                <label>设备配网码<input id="setup-code" inputmode="numeric" maxlength="6" autocomplete="one-time-code"></label>
+                <label>目标 Tab5<select id="wifi-device-id" aria-label="目标 Tab5"><option value="">请先通过 USB 配对</option></select></label>
                 <label>Wi‑Fi 名称<input id="wifi-ssid" maxlength="32" autocomplete="off"></label>
                 <label>Wi‑Fi 密码<input id="wifi-password" type="password" maxlength="64" autocomplete="new-password"></label>
-                <label>电脑局域网地址<input id="bridge-host" maxlength="253" autocomplete="off"></label>
+                <label>电脑局域网 IPv4<input id="bridge-host" maxlength="253" inputmode="decimal" placeholder="例如 192.168.1.20" autocomplete="off"></label>
                 <label>设备端口<input id="bridge-port" type="number" min="1" max="65535" value="4318"></label>
-                <button id="provision-wifi" class="primary-button" type="button">连接 CoreS3 并写入</button>
+                <button id="provision-wifi" class="primary-button" type="button">通过 USB 写入并重启</button>
               </div>
             </details>
             <details class="provision-panel recovery-panel">
               <summary>首次安装与故障恢复</summary>
               <ol>
                 <li>运行 <code>npm run release:firmware</code> 生成并校验完整镜像。</li>
-                <li>用 USB 连接 CoreS3，运行 <code>npm run flash:firmware -- --port 设备串口</code>。</li>
-                <li>在这里通过蓝牙写入 Wi‑Fi；日常通信使用 Wi‑Fi，USB 是可靠备用。</li>
-                <li>生成配对码并在设备屏幕输入。当前首次账户配对需要 USB，蓝牙只负责安全配网。</li>
+                <li>用 USB 连接 Tab5，运行 <code>npm run flash:firmware -- --port 设备串口</code>。</li>
+                <li>生成配对码并在设备屏幕输入；保持 USB 连接，在这里写入 Wi‑Fi 与电脑局域网 IPv4。</li>
+                <li>设备会重启并改用 Wi‑Fi；USB 始终是可靠备用和重新配网通道。</li>
                 <li>异常时先撤销旧凭据并重新配对；固件无法启动时追加 <code>--erase</code> 完整恢复。</li>
               </ol>
             </details>

@@ -1,8 +1,10 @@
 import { EventEmitter } from "node:events";
+import { randomUUID } from "node:crypto";
 import {
   CommandDeduplicator,
   DEVICE_PROTOCOL_VERSION,
   evaluateDeviceCompatibility,
+  normalizeWifiProvisioning,
 } from "../shared/device-protocol.js";
 import { DeviceSession } from "./device-session.js";
 import { PairingCodeManager } from "./device-credential-repository.js";
@@ -130,6 +132,25 @@ export class DeviceHub extends EventEmitter {
       if (session.deviceId === deviceId) session.close();
     }
     return true;
+  }
+
+  provisionWifi(deviceId, provisioning) {
+    if (typeof deviceId !== "string" || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(deviceId)) {
+      throw new Error("设备 ID 无效");
+    }
+    const normalized = normalizeWifiProvisioning(provisioning);
+    if (!normalized) throw new Error("Wi-Fi 配置无效");
+    const session = [...this.#sessions].find((candidate) =>
+      candidate.ready &&
+      candidate.deviceId === deviceId &&
+      candidate.transport.kind === "usb",
+    );
+    if (!session) throw new Error("请保持已配对 Tab5 的 USB 数据线连接");
+    if (session.deviceInfo?.capabilities?.wifi !== true) {
+      throw new Error("此设备未声明 Wi-Fi 能力");
+    }
+    session.sendCommand("wifi.provision", normalized, randomUUID());
+    return { deviceId, transport: "usb" };
   }
 
   async close() {

@@ -20,6 +20,11 @@ class FirmwareApp {
 
  private:
   void configureProtocol(DeviceProtocolClient& client);
+  bool handleDeviceCommand(
+      DeviceProtocolClient& client,
+      const String& command,
+      JsonObjectConst payload,
+      String& error);
   void handleSnapshot(const Snapshot& snapshot);
   void handleProtocolEvent(const String& type, JsonObjectConst payload);
   void handleUiAction(const UiAction& action);
@@ -52,6 +57,7 @@ class FirmwareApp {
   bool have_cued_state_ = false;
   bool ntp_started_ = false;
   bool rtc_synced_ = false;
+  std::uint64_t wifi_reboot_at_ = 0;
 };
 
 }  // namespace codex::firmware

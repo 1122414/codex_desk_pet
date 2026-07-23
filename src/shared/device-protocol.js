@@ -51,6 +51,7 @@ export const DEVICE_COMMANDS = Object.freeze([
   "approval.decide",
   "telemetry.update",
   "state.preview",
+  "wifi.provision",
 ]);
 
 export const TRANSPORT_PROFILES = Object.freeze({
@@ -210,6 +211,34 @@ function requireString(value, field, pattern = null) {
   }
 }
 
+function hasControlCharacter(value) {
+  return /[\u0000-\u001f\u007f]/.test(value);
+}
+
+export function normalizeWifiProvisioning(value) {
+  if (!isPlainObject(value)) return null;
+  const { ssid, password, bridgeHost, bridgePort } = value;
+  if (
+    typeof ssid !== "string" ||
+    ssid.length < 1 ||
+    ssid.length > 32 ||
+    hasControlCharacter(ssid) ||
+    typeof password !== "string" ||
+    password.length > 64 ||
+    hasControlCharacter(password) ||
+    typeof bridgeHost !== "string" ||
+    bridgeHost.length < 1 ||
+    bridgeHost.length > 253 ||
+    !/^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(bridgeHost) ||
+    !Number.isSafeInteger(bridgePort) ||
+    bridgePort < 1 ||
+    bridgePort > 65_535
+  ) {
+    return null;
+  }
+  return { ssid, password, bridgeHost, bridgePort };
+}
+
 function validateResourceManifest(payload) {
   requireString(payload.petId, "resource petId", /^[a-z0-9][a-z0-9-]{0,63}$/);
   requireString(payload.displayName, "resource displayName");
@@ -290,6 +319,9 @@ function validatePayload(type, payload) {
       !Object.hasOwn(STANDARD_ANIMATIONS, payload.animation)
     )) {
       throw new ProtocolError("preview animation is invalid");
+    }
+    if (payload.command === "wifi.provision" && !normalizeWifiProvisioning(payload)) {
+      throw new ProtocolError("Wi-Fi provisioning data is invalid");
     }
   }
   if (type === "ack") {

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Codex Desk Buddy desktop bridge and 320x240 device simulator",
+  "description": "Codex Desk Buddy desktop bridge and Tab5 device simulator",
   "engines": {
     "node": ">=22"
   },
