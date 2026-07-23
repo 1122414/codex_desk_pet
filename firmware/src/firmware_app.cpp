@@ -1,8 +1,7 @@
 #include "firmware_app.hpp"
 
-#include <ArduinoJson.h>
 #include <M5Unified.h>
-#include <esp_system.h>
+#include <esp_idf_version.h>
 #include <esp_task_wdt.h>
 
 #include <algorithm>
@@ -13,7 +12,8 @@ namespace {
 
 constexpr std::uint64_t kTelemetryIntervalMs = 30'000;
 constexpr std::uint64_t kResourceRetryMs = 30'000;
-constexpr std::uint64_t kFactoryResetHoldMs = 8'000;
+constexpr DeviceCapabilities kTab5Capabilities{
+    true, true, true, true, true, false, true, true, true};
 
 }  // namespace
 
@@ -29,7 +29,15 @@ void FirmwareApp::setup() {
   tzset();
   if (M5.Rtc.isEnabled()) M5.Rtc.setSystemTimeFromRtc();
   Serial.begin(115200);
+#if ESP_IDF_VERSION_MAJOR >= 5
+  esp_task_wdt_config_t watchdog_config{};
+  watchdog_config.timeout_ms = 10'000;
+  watchdog_config.idle_core_mask = 0;
+  watchdog_config.trigger_panic = true;
+  esp_task_wdt_init(&watchdog_config);
+#else
   esp_task_wdt_init(10, true);
+#endif
   esp_task_wdt_add(nullptr);
 
   if (!config_store_.begin()) connection_detail_ = "配置存储初始化失败";
@@ -48,64 +56,41 @@ void FirmwareApp::setup() {
 
   usb_transport_.begin();
   const auto& stored = config_store_.config();
-  const auto suffix_at = std::max<int>(0, static_cast<int>(stored.device_id.length()) - 8);
-  ble_transport_.begin(
-      "CodexDesk-" + stored.device_id.substring(suffix_at),
-      stored.setup_code);
   if (!stored.wifi_ssid.isEmpty() && !stored.bridge_host.isEmpty()) {
     wifi_transport_.begin(
         stored.wifi_ssid, stored.wifi_password, stored.bridge_host, stored.bridge_port);
   }
   usb_client_.begin(usb_transport_, stored.device_id, pairing_secret_);
   wifi_client_.begin(wifi_transport_, stored.device_id, pairing_secret_);
-  ble_client_.begin(ble_transport_, stored.device_id, pairing_secret_);
   const auto voice_ready = audio_.voiceAvailable();
   const auto storage_ready = pet_store_.available();
   usb_client_.setDeviceInfo(
       CODEX_DESK_FIRMWARE_VERSION,
       "m5stack-tab5-k145",
+      kTab5Capabilities,
       voice_ready,
       storage_ready);
   wifi_client_.setDeviceInfo(
       CODEX_DESK_FIRMWARE_VERSION,
       "m5stack-tab5-k145",
-      voice_ready,
-      storage_ready);
-  ble_client_.setDeviceInfo(
-      CODEX_DESK_FIRMWARE_VERSION,
-      "m5stack-tab5-k145",
+      kTab5Capabilities,
       voice_ready,
       storage_ready);
   configureProtocol(usb_client_);
   configureProtocol(wifi_client_);
-  configureProtocol(ble_client_);
-  connection_detail_ = paired() ? "等待电脑 Bridge" : "请先配网并输入配对码";
+  connection_detail_ = paired() ? "等待电脑 Bridge" : "请通过USB连接电脑并输入配对码";
 }
 
 void FirmwareApp::loop() {
   const auto now_ms = static_cast<std::uint64_t>(millis());
   M5.update();
-  handleProvisioning();
   usb_client_.poll(now_ms);
   wifi_client_.poll(now_ms);
-  ble_client_.poll(now_ms);
   updateConnectionState();
   syncClock(now_ms);
   updateTelemetry(now_ms);
   requestSelectedPet(now_ms);
   handleUiAction(ui_.poll(model_.snapshot(), now_ms, paired()));
-
-  const auto both_buttons = digitalRead(9) == LOW && digitalRead(8) == LOW;
-  if (both_buttons && reset_pressed_at_ == 0) reset_pressed_at_ = now_ms;
-  if (!both_buttons) reset_pressed_at_ = 0;
-  if (reset_pressed_at_ != 0 && now_ms - reset_pressed_at_ >= kFactoryResetHoldMs) {
-    pet_store_.checkpoint();
-    config_store_.clearNetwork();
-    config_store_.clearPairing();
-    config_store_.rotateSetupCode();
-    delay(100);
-    ESP.restart();
-  }
 
   ui_.render(
       model_.snapshot(), now_ms, paired(), connection_detail_, pet_store_.transferProgress());
@@ -189,7 +174,6 @@ void FirmwareApp::handleUiAction(const UiAction& action) {
       break;
     case UiActionType::SubmitPairingCode:
       usb_client_.setPairingCode(action.value);
-      ble_client_.setPairingCode(action.value);
       connection_detail_ = "正在验证配对码";
       break;
     case UiActionType::None:
@@ -197,40 +181,12 @@ void FirmwareApp::handleUiAction(const UiAction& action) {
   }
 }
 
-void FirmwareApp::handleProvisioning() {
-  String message;
-  if (!ble_transport_.takeProvisioningMessage(message)) return;
-  JsonDocument document;
-  if (deserializeJson(document, message) || !document.is<JsonObject>()) {
-    connection_detail_ = "蓝牙配网数据无效";
-    return;
-  }
-  const String setup_code = document["setupCode"] | "";
-  const String ssid = document["ssid"] | "";
-  const String password = document["password"] | "";
-  const String host = document["bridgeHost"] | "";
-  const std::uint16_t port = document["bridgePort"] | 4318;
-  if (setup_code != config_store_.config().setup_code ||
-      !config_store_.saveNetwork(ssid, password, host, port)) {
-    connection_detail_ = "蓝牙配网验证失败";
-    return;
-  }
-  if (!config_store_.rotateSetupCode()) {
-    connection_detail_ = "配网码轮换失败";
-    return;
-  }
-  connection_detail_ = "Wi-Fi配置已保存，正在重启";
-  pet_store_.checkpoint();
-  delay(100);
-  ESP.restart();
-}
-
 void FirmwareApp::updateTelemetry(const std::uint64_t now_ms) {
   if (last_telemetry_at_ != 0 && now_ms - last_telemetry_at_ < kTelemetryIntervalMs) return;
   last_telemetry_at_ = now_ms;
   const auto raw_level = M5.Power.getBatteryLevel();
   Telemetry telemetry;
-  telemetry.battery_percent = static_cast<std::uint8_t>(std::clamp(raw_level, 0, 100));
+  telemetry.battery_percent = static_cast<std::uint8_t>(std::clamp(raw_level, 0L, 100L));
   telemetry.charging = M5.Power.isCharging();
   telemetry.wifi_rssi = wifi_transport_.rssi();
   telemetry.transport = primaryTransport();
@@ -259,7 +215,7 @@ void FirmwareApp::requestSelectedPet(const std::uint64_t now_ms) {
   const String pet_id(model_.snapshot().selected_pet_id.c_str());
   if (pet_id.isEmpty() || pet_id == "codex-core" || !pet_store_.available()) return;
   auto* client = primaryClient();
-  if (client == nullptr || strcmp(client->transportKind(), "ble") == 0) return;
+  if (client == nullptr) return;
   if (requested_pet_ == pet_id && now_ms - requested_at_ < kResourceRetryMs) return;
   const auto installed = pet_store_.installedSha(pet_id);
   const auto resume = pet_store_.resumeFor(pet_id);
@@ -299,7 +255,6 @@ void FirmwareApp::applyPairingSecret(const String& secret) {
   pairing_secret_ = secret;
   usb_client_.setPairingSecret(secret);
   wifi_client_.setPairingSecret(secret);
-  ble_client_.setPairingSecret(secret);
   connection_detail_ = "配对成功";
   audio_.enqueue(AudioCue::PairingSucceeded);
 }
@@ -311,14 +266,12 @@ void FirmwareApp::updateConnectionState() {
 DeviceProtocolClient* FirmwareApp::primaryClient() {
   if (usb_client_.ready()) return &usb_client_;
   if (wifi_client_.ready()) return &wifi_client_;
-  if (ble_client_.ready()) return &ble_client_;
   return nullptr;
 }
 
 TransportKind FirmwareApp::primaryTransport() const {
   if (usb_client_.ready()) return TransportKind::Usb;
   if (wifi_client_.ready()) return TransportKind::Wifi;
-  if (ble_client_.ready()) return TransportKind::Ble;
   return TransportKind::Offline;
 }
 

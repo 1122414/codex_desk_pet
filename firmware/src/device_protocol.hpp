@@ -13,6 +13,18 @@
 
 namespace codex::firmware {
 
+struct DeviceCapabilities {
+  bool touch = true;
+  bool speaker = true;
+  bool offline_chinese_voice = true;
+  bool usb = true;
+  bool wifi = true;
+  bool ble = false;
+  bool micro_sd = true;
+  bool rtc = true;
+  bool camera = true;
+};
+
 class DeviceProtocolClient {
  public:
   using SnapshotHandler = std::function<void(const Snapshot&)>;
@@ -30,6 +42,7 @@ class DeviceProtocolClient {
   void setDeviceInfo(
       const String& firmware_version,
       const String& board_id,
+      const DeviceCapabilities& capabilities,
       bool voice_data_ready,
       bool storage_ready);
   void setSnapshotHandler(SnapshotHandler handler);
@@ -136,6 +149,7 @@ class DeviceProtocolClient {
   String firmware_version_;
   String board_id_;
   String device_info_hash_;
+  DeviceCapabilities capabilities_;
   bool voice_data_ready_ = false;
   bool storage_ready_ = false;
   State state_ = State::Disconnected;

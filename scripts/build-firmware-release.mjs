@@ -20,8 +20,8 @@ import { DEVICE_FIRMWARE_VERSION } from "../src/shared/device-protocol.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const firmwareRoot = path.join(root, "firmware");
-const buildRoot = path.join(firmwareRoot, ".pio", "build", "m5stack-cores3");
-const ttsRoot = path.join(firmwareRoot, ".pio", "esp-tts", "v1.2.0");
+const buildRoot = path.join(firmwareRoot, ".pio", "build", "m5stack-tab5");
+const ttsRoot = path.join(firmwareRoot, ".pio", "esp-tts", "p4-2f8c4b04");
 const platformioRoot = process.env.PLATFORMIO_CORE_DIR ??
   path.join(os.homedir(), ".platformio");
 const esptoolPackage = path.join(platformioRoot, "packages", "tool-esptoolpy");
@@ -87,7 +87,7 @@ for (const layout of FIRMWARE_FLASH_LAYOUT) {
 }
 await copyFile(path.join(ttsRoot, "LICENSE"), path.join(releaseRoot, "THIRD_PARTY_ESP_SR_LICENSE.txt"));
 
-const factoryFile = path.join(releaseRoot, "codex-desk-buddy-cores3-factory.bin");
+const factoryFile = path.join(releaseRoot, "codex-desk-buddy-tab5-factory.bin");
 const mergeArgs = [
   "pkg",
   "exec",
@@ -96,7 +96,7 @@ const mergeArgs = [
   "--",
   "esptool.py",
   "--chip",
-  "esp32s3",
+  "esp32p4",
   "merge_bin",
   "-o",
   factoryFile,

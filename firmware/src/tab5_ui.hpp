@@ -26,7 +26,7 @@ struct UiAction {
   String value;
 };
 
-class CoreS3Ui {
+class Tab5Ui {
  public:
   bool begin(PetStore& pet_store, const String& device_id, const String& setup_code);
   UiAction poll(const Snapshot& snapshot, std::uint64_t now_ms, bool paired);
@@ -39,17 +39,8 @@ class CoreS3Ui {
   bool approvalCanAccept(const Approval& approval) const;
 
  private:
-  struct DebouncedButton {
-    std::uint8_t pin = 0;
-    bool stable = true;
-    bool observed = true;
-    std::uint64_t changed_at = 0;
-  };
-
   UiAction pollTouch(const Snapshot& snapshot, std::uint64_t now_ms, bool paired);
-  UiAction pollButtons(const Snapshot& snapshot, std::uint64_t now_ms, bool paired);
   UiAction mapInputAction(const InputAction& action);
-  bool buttonPressed(DebouncedButton& button, std::uint64_t now_ms);
   UiAction pairingTouch(Point point, TouchPhase phase);
   void drawNormal(
       const Snapshot& snapshot,
@@ -62,19 +53,35 @@ class CoreS3Ui {
   void drawApproval(const Approval& approval);
   void drawStatus(const Snapshot& snapshot, const String& connection_detail);
   void drawTruncated(const String& text, std::int16_t x, std::int16_t y, std::int16_t width);
+  void drawWrapped(
+      const String& text,
+      std::int16_t x,
+      std::int16_t y,
+      std::int16_t width,
+      std::uint8_t maximum_lines,
+      std::int16_t line_height);
   std::uint8_t frameIndex(const Snapshot& snapshot, std::uint64_t now_ms);
 
-  static constexpr std::uint8_t kLeftButtonPin = 9;
-  static constexpr std::uint8_t kRightButtonPin = 8;
-  static constexpr std::uint64_t kDebounceMs = 35;
+  static constexpr std::int16_t kScreenWidth = 1280;
+  static constexpr std::int16_t kScreenHeight = 720;
+  static constexpr Rect kPetArea{48, 104, 448, 496};
+  static constexpr Rect kPreviousPetButton{48, 616, 208, 72};
+  static constexpr Rect kNextPetButton{288, 616, 208, 72};
+  static constexpr Rect kDeclineButton{540, 554, 292, 104};
+  static constexpr Rect kAcceptButton{864, 554, 356, 104};
+  static constexpr InputLayout kInputLayout{
+      kPetArea,
+      kDeclineButton,
+      kAcceptButton,
+      {272, 352},
+      96,
+  };
 
   PetStore* pet_store_ = nullptr;
   M5Canvas canvas_{&M5.Display};
   std::uint16_t* frame_pixels_ = nullptr;
   AnimationPlayer animation_player_;
-  InputController input_;
-  DebouncedButton left_button_{kLeftButtonPin};
-  DebouncedButton right_button_{kRightButtonPin};
+  InputController input_{kInputLayout};
   Point last_touch_{};
   bool touch_active_ = false;
   String pairing_code_;

@@ -16,6 +16,7 @@ namespace codex::firmware {
 namespace {
 
 constexpr std::uint8_t kProtocolVersion = 3;
+constexpr std::uint8_t kDeviceInfoVersion = 2;
 constexpr std::size_t kAeadKeyBytes = 32;
 constexpr std::size_t kAeadNonceBytes = 12;
 constexpr std::size_t kAeadTagBytes = 16;
@@ -116,7 +117,7 @@ String hmacSha256(const String& secret, const String& material) {
 
 String sha256Hex(const String& material) {
   std::array<std::uint8_t, 32> digest{};
-  if (mbedtls_sha256_ret(
+  if (mbedtls_sha256(
           reinterpret_cast<const std::uint8_t*>(material.c_str()),
           material.length(),
           digest.data(),
@@ -319,10 +320,12 @@ void DeviceProtocolClient::setPairingSecret(const String& pairing_secret) {
 void DeviceProtocolClient::setDeviceInfo(
     const String& firmware_version,
     const String& board_id,
+    const DeviceCapabilities& capabilities,
     const bool voice_data_ready,
     const bool storage_ready) {
   firmware_version_ = firmware_version;
   board_id_ = board_id;
+  capabilities_ = capabilities;
   voice_data_ready_ = voice_data_ready;
   storage_ready_ = storage_ready;
   device_info_hash_ = deviceInfoHash();
@@ -1137,16 +1140,24 @@ String DeviceProtocolClient::deviceInfoMaterial() const {
     return {};
   }
   String material;
-  if (!material.reserve(firmware_version_.length() + board_id_.length() + 96U)) {
+  if (!material.reserve(firmware_version_.length() + board_id_.length() + 128U)) {
     return {};
   }
-  material = "[1,\"";
+  material = "[2,\"";
   material += firmware_version_;
   material += "\",\"";
   material += board_id_;
-  material += "\",true,true,true,true,true,true,true,true,";
-  material += voice_data_ready_ ? "true" : "false";
-  material += ",";
+  material += "\",";
+  material += capabilities_.touch ? "true," : "false,";
+  material += capabilities_.speaker ? "true," : "false,";
+  material += capabilities_.offline_chinese_voice ? "true," : "false,";
+  material += capabilities_.usb ? "true," : "false,";
+  material += capabilities_.wifi ? "true," : "false,";
+  material += capabilities_.ble ? "true," : "false,";
+  material += capabilities_.micro_sd ? "true," : "false,";
+  material += capabilities_.rtc ? "true," : "false,";
+  material += capabilities_.camera ? "true," : "false,";
+  material += voice_data_ready_ ? "true," : "false,";
   material += storage_ready_ ? "true]" : "false]";
   return material;
 }
@@ -1157,18 +1168,19 @@ String DeviceProtocolClient::deviceInfoHash() const {
 }
 
 void DeviceProtocolClient::writeDeviceInfo(JsonObject payload) const {
-  payload["version"] = 1;
+  payload["version"] = kDeviceInfoVersion;
   payload["firmwareVersion"] = firmware_version_;
   payload["boardId"] = board_id_;
   auto capabilities = payload["capabilities"].to<JsonObject>();
-  capabilities["touch"] = true;
-  capabilities["speaker"] = true;
-  capabilities["offlineChineseVoice"] = true;
-  capabilities["usb"] = true;
-  capabilities["wifi"] = true;
-  capabilities["ble"] = true;
-  capabilities["microSd"] = true;
-  capabilities["rtc"] = true;
+  capabilities["touch"] = capabilities_.touch;
+  capabilities["speaker"] = capabilities_.speaker;
+  capabilities["offlineChineseVoice"] = capabilities_.offline_chinese_voice;
+  capabilities["usb"] = capabilities_.usb;
+  capabilities["wifi"] = capabilities_.wifi;
+  capabilities["ble"] = capabilities_.ble;
+  capabilities["microSd"] = capabilities_.micro_sd;
+  capabilities["rtc"] = capabilities_.rtc;
+  capabilities["camera"] = capabilities_.camera;
   auto health = payload["health"].to<JsonObject>();
   health["voiceDataReady"] = voice_data_ready_;
   health["storageReady"] = storage_ready_;

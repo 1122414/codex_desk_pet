@@ -47,7 +47,7 @@ function runEsptool(args) {
     "--",
     "esptool.py",
     "--chip",
-    "esp32s3",
+    "esp32p4",
     "--port",
     port,
     ...args,
@@ -60,7 +60,7 @@ function runEsptool(args) {
     },
   });
   if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error("CoreS3 烧录失败");
+  if (result.status !== 0) throw new Error("Tab5 烧录失败");
 }
 
 if (erase) runEsptool(["erase_flash"]);
@@ -78,5 +78,5 @@ runEsptool([
   path.join(releaseRoot, manifest.factoryImage.file),
 ]);
 process.stdout.write(
-  `CoreS3 已写入固件 ${manifest.firmwareVersion}；请等待设备重启并显示配网码。\n`,
+  `Tab5 已写入固件 ${manifest.firmwareVersion}；请等待设备重启并显示配对界面。\n`,
 );

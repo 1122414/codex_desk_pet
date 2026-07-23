@@ -14,6 +14,10 @@ void WifiTransport::begin(
   if (ssid_.isEmpty() || host_.isEmpty() || port_ == 0) {
     return;
   }
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+  // Tab5 的 Wi-Fi 由 ESP32-C6 通过 ESP-Hosted/SDIO 提供；必须在启动前固定连线。
+  WiFi.setPins(12, 13, 11, 10, 9, 8, 15);
+#endif
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
   WiFi.persistent(true);

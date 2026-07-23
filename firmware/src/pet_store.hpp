@@ -49,10 +49,12 @@ class PetStore {
     std::uint64_t generation = 0;
   };
 
-  static constexpr std::uint8_t kSdCs = 4;
-  static constexpr std::uint8_t kSdSck = 36;
-  static constexpr std::uint8_t kSdMiso = 35;
-  static constexpr std::uint8_t kSdMosi = 37;
+  static constexpr std::uint8_t kSdD0 = 39;
+  static constexpr std::uint8_t kSdD1 = 40;
+  static constexpr std::uint8_t kSdD2 = 41;
+  static constexpr std::uint8_t kSdD3 = 42;
+  static constexpr std::uint8_t kSdClock = 43;
+  static constexpr std::uint8_t kSdCommand = 44;
   static constexpr std::uint32_t kSdFrequency = 25'000'000;
   static constexpr const char* kRoot = "/codex-desk";
   static constexpr const char* kPetRoot = "/codex-desk/pets";

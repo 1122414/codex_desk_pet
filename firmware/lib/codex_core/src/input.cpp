@@ -11,6 +11,13 @@ bool Rect::contains(const Point point) const {
          point.y < y + height;
 }
 
+InputController::InputController(const InputLayout layout) : layout_(layout) {}
+
+void InputController::setLayout(const InputLayout layout) {
+  layout_ = layout;
+  cancel();
+}
+
 InputAction InputController::onTouch(
     const TouchPhase phase,
     const Point point,
@@ -25,12 +32,12 @@ InputAction InputController::onTouch(
   if (phase == TouchPhase::Pressed) {
     press_point_ = point;
     pressed_at_ = now_ms;
-    if (approval_visible && kDeclineButton.contains(point)) {
+    if (approval_visible && layout_.decline_button.contains(point)) {
       press_target_ = PressTarget::Decline;
     } else if (approval_visible && approval_safe &&
-               kAcceptButton.contains(point)) {
+               layout_.accept_button.contains(point)) {
       press_target_ = PressTarget::Accept;
-    } else if (!approval_visible && kPetArea.contains(point)) {
+    } else if (!approval_visible && layout_.pet_area.contains(point)) {
       press_target_ = PressTarget::Pet;
     } else {
       press_target_ = PressTarget::None;
@@ -48,8 +55,8 @@ InputAction InputController::onTouch(
 
   if (target == PressTarget::Accept || target == PressTarget::Decline) {
     const auto same_target =
-        target == PressTarget::Accept ? kAcceptButton.contains(point)
-                                      : kDeclineButton.contains(point);
+        target == PressTarget::Accept ? layout_.accept_button.contains(point)
+                                      : layout_.decline_button.contains(point);
     if (!same_target || elapsed < kMinimumApprovalPressMs ||
         elapsed > kMaximumApprovalPressMs ||
         now_ms < approval_cooldown_until_) {
@@ -65,14 +72,14 @@ InputAction InputController::onTouch(
 
   const auto dx = static_cast<std::int16_t>(point.x - press_point_.x);
   const auto dy = static_cast<std::int16_t>(point.y - press_point_.y);
-  if (std::abs(dx) >= kSwipeDistance && std::abs(dx) > std::abs(dy)) {
+  if (std::abs(dx) >= layout_.swipe_distance && std::abs(dx) > std::abs(dy)) {
     return {dx < 0 ? ActionType::NextPet : ActionType::PreviousPet, 0.0F};
   }
 
   constexpr float kPi = 3.14159265358979323846F;
   const auto radians = std::atan2(
-      static_cast<float>(point.y - 94),
-      static_cast<float>(point.x - 160));
+      static_cast<float>(point.y - layout_.pet_center.y),
+      static_cast<float>(point.x - layout_.pet_center.x));
   auto degrees = radians * 180.0F / kPi;
   if (degrees < 0.0F) {
     degrees += 360.0F;

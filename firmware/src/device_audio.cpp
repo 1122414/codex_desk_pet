@@ -75,7 +75,7 @@ bool DeviceAudio::initializeVoice() {
           partition,
           0,
           kVoiceDataSize,
-          SPI_FLASH_MMAP_DATA,
+          ESP_PARTITION_MMAP_DATA,
           &voice_data,
           &voice_map_handle_) != ESP_OK ||
       voice_data == nullptr) {
@@ -83,13 +83,13 @@ bool DeviceAudio::initializeVoice() {
   }
 
   std::array<std::uint8_t, 32> digest{};
-  if (mbedtls_sha256_ret(
+  if (mbedtls_sha256(
           static_cast<const std::uint8_t*>(voice_data),
           kVoiceDataSize,
           digest.data(),
           0) != 0 ||
       digest != kVoiceDataSha256) {
-    spi_flash_munmap(voice_map_handle_);
+    esp_partition_munmap(voice_map_handle_);
     voice_map_handle_ = 0;
     return false;
   }
@@ -98,7 +98,7 @@ bool DeviceAudio::initializeVoice() {
       &esp_tts_voice_template,
       const_cast<void*>(voice_data));
   if (voice_ == nullptr) {
-    spi_flash_munmap(voice_map_handle_);
+    esp_partition_munmap(voice_map_handle_);
     voice_map_handle_ = 0;
     return false;
   }
@@ -106,7 +106,7 @@ bool DeviceAudio::initializeVoice() {
   if (tts_ != nullptr) return true;
   esp_tts_voice_set_free(voice_);
   voice_ = nullptr;
-  spi_flash_munmap(voice_map_handle_);
+  esp_partition_munmap(voice_map_handle_);
   voice_map_handle_ = 0;
   return false;
 }

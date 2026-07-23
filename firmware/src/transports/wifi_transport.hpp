@@ -1,7 +1,6 @@
 #pragma once
 
 #include <WiFi.h>
-#include <WiFiClientSecure.h>
 #include <WebSocketsClient.h>
 
 #include "transports/text_transport.hpp"

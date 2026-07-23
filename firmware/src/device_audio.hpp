@@ -1,7 +1,7 @@
 #pragma once
 
 #include <M5Unified.h>
-#include <esp_spi_flash.h>
+#include <esp_partition.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
@@ -31,7 +31,7 @@ class DeviceAudio {
   TaskHandle_t task_ = nullptr;
   esp_tts_voice_t* voice_ = nullptr;
   esp_tts_handle_t tts_ = nullptr;
-  spi_flash_mmap_handle_t voice_map_handle_ = 0;
+  esp_partition_mmap_handle_t voice_map_handle_ = 0;
   bool voice_ready_ = false;
 };
 

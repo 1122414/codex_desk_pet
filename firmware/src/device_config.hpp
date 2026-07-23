@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include <Preferences.h>
 
+#include <cstdint>
+
 namespace codex::firmware {
 
 struct DeviceConfig {

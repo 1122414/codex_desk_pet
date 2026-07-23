@@ -130,6 +130,26 @@ void testInput() {
   expect(action.type == codex::ActionType::DeclineApproval, "left button declines");
   action = input.onButton(codex::ButtonId::Right, true, false);
   expect(action.type == codex::ActionType::None, "unsafe approval cannot be accepted");
+
+  codex::InputController tab5_input({
+      {48, 104, 448, 496},
+      {540, 554, 292, 104},
+      {864, 554, 356, 104},
+      {272, 352},
+      96,
+  });
+  tab5_input.onTouch(codex::TouchPhase::Pressed, {1'000, 600}, 4'000, true, true);
+  action = tab5_input.onTouch(
+      codex::TouchPhase::Released, {1'000, 600}, 4'120, true, true);
+  expect(
+      action.type == codex::ActionType::AcceptApproval,
+      "Tab5 approval layout keeps confirmation inside its large visible button");
+  tab5_input.onTouch(codex::TouchPhase::Pressed, {420, 350}, 5'000, false, false);
+  action = tab5_input.onTouch(
+      codex::TouchPhase::Released, {180, 350}, 5'300, false, false);
+  expect(
+      action.type == codex::ActionType::NextPet,
+      "Tab5 pet area preserves the wide swipe interaction");
 }
 
 void testReconnectAndSequence() {

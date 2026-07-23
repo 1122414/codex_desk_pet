@@ -1,7 +1,6 @@
 #include "pet_store.hpp"
 
-#include <SD.h>
-#include <SPI.h>
+#include <SD_MMC.h>
 #include <mbedtls/base64.h>
 #include <mbedtls/sha256.h>
 
@@ -16,7 +15,7 @@ constexpr const char* kFormat = "rgb565-key-v1";
 
 String digestHex(const std::uint8_t* data, const std::size_t length) {
   std::array<std::uint8_t, 32> digest{};
-  if (mbedtls_sha256_ret(data, length, digest.data(), 0) != 0) {
+  if (mbedtls_sha256(data, length, digest.data(), 0) != 0) {
     return {};
   }
   static constexpr char kHex[] = "0123456789abcdef";
@@ -54,11 +53,11 @@ bool readText(fs::FS& filesystem, const String& path, String& value, const std::
 }  // namespace
 
 bool PetStore::begin() {
-  SPI.begin(kSdSck, kSdMiso, kSdMosi, kSdCs);
-  mounted_ = SD.begin(kSdCs, SPI, kSdFrequency);
+  if (!SD_MMC.setPins(kSdClock, kSdCommand, kSdD0, kSdD1, kSdD2, kSdD3)) return false;
+  mounted_ = SD_MMC.begin("/sdcard", false, false, kSdFrequency, 5);
   if (!mounted_) return false;
-  if (!SD.exists(kRoot) && !SD.mkdir(kRoot)) return false;
-  if (!SD.exists(kPetRoot) && !SD.mkdir(kPetRoot)) return false;
+  if (!SD_MMC.exists(kRoot) && !SD_MMC.mkdir(kRoot)) return false;
+  if (!SD_MMC.exists(kPetRoot) && !SD_MMC.mkdir(kPetRoot)) return false;
   return true;
 }
 
@@ -114,7 +113,7 @@ bool PetStore::loadFrame(
     error = "frame index out of range";
     return false;
   }
-  auto file = SD.open(assetPath(pet_id, manifest.sha256), FILE_READ);
+  auto file = SD_MMC.open(assetPath(pet_id, manifest.sha256), FILE_READ);
   const auto offset = static_cast<std::uint32_t>(frame_index) * kPetFrameBytes;
   if (!file || file.isDirectory() || file.size() != manifest.bytes ||
       !file.seek(offset)) {
@@ -153,9 +152,9 @@ bool PetStore::beginTransfer(const JsonObjectConst payload, String& error) {
     return true;
   }
 
-  SD.remove(partPath(manifest.pet_id));
-  SD.remove(resumePath(manifest.pet_id));
-  auto part = SD.open(partPath(manifest.pet_id), FILE_WRITE);
+  SD_MMC.remove(partPath(manifest.pet_id));
+  SD_MMC.remove(resumePath(manifest.pet_id));
+  auto part = SD_MMC.open(partPath(manifest.pet_id), FILE_WRITE);
   if (!part) {
     error = "cannot create Pet staging file";
     return false;
@@ -202,7 +201,7 @@ bool PetStore::acceptChunk(const JsonObjectConst payload, String& error) {
     error = "resource chunk range overlaps or exceeds manifest";
     return false;
   }
-  auto part = SD.open(partPath(pet_id), "r+");
+  auto part = SD_MMC.open(partPath(pet_id), "r+");
   if (!part || !part.seek(offset) || part.write(decoded.data(), decoded_bytes) != decoded_bytes) {
     part.close();
     error = "resource chunk write failed";
@@ -231,20 +230,20 @@ bool PetStore::commitTransfer(const JsonObjectConst payload, String& error) {
     return false;
   }
   const auto asset = assetPath(pet_id, sha256);
-  if (SD.exists(asset)) SD.remove(asset);
-  if (!SD.rename(part, asset)) {
+  if (SD_MMC.exists(asset)) SD_MMC.remove(asset);
+  if (!SD_MMC.rename(part, asset)) {
     error = "cannot publish verified Pet asset";
     return false;
   }
   const auto manifest = manifestPath(pet_id, sha256);
   const auto manifest_temp = manifest + ".tmp";
-  SD.remove(manifest_temp);
+  SD_MMC.remove(manifest_temp);
   if (!writeManifest(transfer_, manifest_temp)) {
     error = "cannot write Pet manifest";
     return false;
   }
-  SD.remove(manifest);
-  if (!SD.rename(manifest_temp, manifest)) {
+  SD_MMC.remove(manifest);
+  if (!SD_MMC.rename(manifest_temp, manifest)) {
     error = "cannot publish Pet manifest";
     return false;
   }
@@ -257,7 +256,7 @@ bool PetStore::commitTransfer(const JsonObjectConst payload, String& error) {
     if (verified_assets_.size() >= 64) verified_assets_.erase(verified_assets_.begin());
     verified_assets_.push_back(verified_key);
   }
-  SD.remove(resumePath(pet_id));
+  SD_MMC.remove(resumePath(pet_id));
   tracker_.reset();
   transfer_ = {};
   uncheckpointed_chunks_ = 0;
@@ -284,7 +283,7 @@ bool PetStore::validateManifest(
       (payload["frameWidth"] | 0) != kPetFrameWidth ||
       (payload["frameHeight"] | 0) != kPetFrameHeight ||
       (payload["transparentColor"] | 0) != kPetTransparentColor) {
-    error = "invalid CoreS3 Pet manifest";
+    error = "invalid Tab5 Pet manifest";
     return false;
   }
   for (std::size_t index = 0; index < manifest.sha256.length(); ++index) {
@@ -317,7 +316,7 @@ bool PetStore::loadActiveManifest(const String& pet_id, ActiveManifest& manifest
   }
 
   String legacy_sha;
-  if (!readText(SD, legacyActivePath(pet_id), legacy_sha, 64)) return false;
+  if (!readText(SD_MMC, legacyActivePath(pet_id), legacy_sha, 64)) return false;
   legacy_sha.trim();
   return loadManifestBySha(pet_id, legacy_sha, manifest);
 }
@@ -328,7 +327,7 @@ bool PetStore::loadManifestBySha(
     ActiveManifest& manifest) {
   if (sha256.length() != 64) return false;
   String text;
-  if (!readText(SD, manifestPath(pet_id, sha256), text, 2'048)) return false;
+  if (!readText(SD_MMC, manifestPath(pet_id, sha256), text, 2'048)) return false;
   JsonDocument document;
   if (deserializeJson(document, text)) return false;
   String error;
@@ -357,7 +356,7 @@ bool PetStore::readActivePointer(
     const char slot,
     ActivePointer& pointer) {
   String text;
-  if (!readText(SD, activeSlotPath(pet_id, slot), text, 512)) return false;
+  if (!readText(SD_MMC, activeSlotPath(pet_id, slot), text, 512)) return false;
   JsonDocument document;
   if (deserializeJson(document, text) ||
       (document["version"] | 0) != 1 ||
@@ -399,8 +398,8 @@ bool PetStore::publishActivePointer(
   document["petId"] = pet_id;
   document["sha256"] = sha256;
   document["generation"] = highest_generation + 1U;
-  SD.remove(temporary);
-  auto pointer = SD.open(temporary, FILE_WRITE);
+  SD_MMC.remove(temporary);
+  auto pointer = SD_MMC.open(temporary, FILE_WRITE);
   if (!pointer || serializeJson(document, pointer) == 0) {
     pointer.close();
     error = "cannot write active Pet pointer";
@@ -408,8 +407,8 @@ bool PetStore::publishActivePointer(
   }
   pointer.flush();
   pointer.close();
-  SD.remove(path);
-  if (!SD.rename(temporary, path)) {
+  SD_MMC.remove(path);
+  if (!SD_MMC.rename(temporary, path)) {
     error = "cannot publish active Pet pointer";
     return false;
   }
@@ -429,7 +428,7 @@ bool PetStore::verifyExistingChunk(
     const std::uint8_t* data,
     const std::size_t length) {
   if (data == nullptr || length == 0) return false;
-  auto part = SD.open(partPath(pet_id), FILE_READ);
+  auto part = SD_MMC.open(partPath(pet_id), FILE_READ);
   if (!part || part.isDirectory() || !part.seek(offset)) {
     part.close();
     return false;
@@ -457,7 +456,7 @@ bool PetStore::verifyExistingChunk(
 bool PetStore::loadResume(const String& pet_id, const String& expected_sha) {
   if (!mounted_ || !safePetId(pet_id)) return false;
   String text;
-  if (!readText(SD, resumePath(pet_id), text, 64U * 1024U)) return false;
+  if (!readText(SD_MMC, resumePath(pet_id), text, 64U * 1024U)) return false;
   JsonDocument document;
   if (deserializeJson(document, text) || !document["manifest"].is<JsonObjectConst>()) return false;
   ActiveManifest manifest;
@@ -478,7 +477,7 @@ bool PetStore::loadResume(const String& pet_id, const String& expected_sha) {
           std::max(highest_received_end, offset + length);
     }
   }
-  auto part = SD.open(partPath(pet_id), FILE_READ);
+  auto part = SD_MMC.open(partPath(pet_id), FILE_READ);
   const auto valid_file =
       part && !part.isDirectory() &&
       part.size() <= manifest.bytes &&
@@ -521,16 +520,16 @@ bool PetStore::saveResume() {
   }
   const auto path = resumePath(transfer_.pet_id);
   const auto temporary = path + ".tmp";
-  SD.remove(temporary);
-  auto file = SD.open(temporary, FILE_WRITE);
+  SD_MMC.remove(temporary);
+  auto file = SD_MMC.open(temporary, FILE_WRITE);
   if (!file || serializeJson(document, file) == 0) {
     file.close();
     return false;
   }
   file.flush();
   file.close();
-  SD.remove(path);
-  if (!SD.rename(temporary, path)) return false;
+  SD_MMC.remove(path);
+  if (!SD_MMC.rename(temporary, path)) return false;
   uncheckpointed_chunks_ = 0;
   return true;
 }
@@ -547,7 +546,7 @@ bool PetStore::writeManifest(const ActiveManifest& value, const String& path) {
   document["frameHeight"] = kPetFrameHeight;
   document["frameCount"] = value.frame_count;
   document["transparentColor"] = kPetTransparentColor;
-  auto file = SD.open(path, FILE_WRITE);
+  auto file = SD_MMC.open(path, FILE_WRITE);
   if (!file || serializeJson(document, file) == 0) {
     file.close();
     return false;
@@ -561,14 +560,14 @@ bool PetStore::verifyFile(
     const String& path,
     const std::uint32_t bytes,
     const String& sha256) {
-  auto file = SD.open(path, FILE_READ);
+  auto file = SD_MMC.open(path, FILE_READ);
   if (!file || file.isDirectory() || file.size() != bytes) {
     file.close();
     return false;
   }
   mbedtls_sha256_context context;
   mbedtls_sha256_init(&context);
-  if (mbedtls_sha256_starts_ret(&context, 0) != 0) {
+  if (mbedtls_sha256_starts(&context, 0) != 0) {
     file.close();
     mbedtls_sha256_free(&context);
     return false;
@@ -576,7 +575,7 @@ bool PetStore::verifyFile(
   std::array<std::uint8_t, 4'096> buffer{};
   while (file.available()) {
     const auto read = file.read(buffer.data(), buffer.size());
-    if (read == 0 || mbedtls_sha256_update_ret(&context, buffer.data(), read) != 0) {
+    if (read == 0 || mbedtls_sha256_update(&context, buffer.data(), read) != 0) {
       file.close();
       mbedtls_sha256_free(&context);
       return false;
@@ -584,7 +583,7 @@ bool PetStore::verifyFile(
   }
   file.close();
   std::array<std::uint8_t, 32> digest{};
-  const auto valid = mbedtls_sha256_finish_ret(&context, digest.data()) == 0;
+  const auto valid = mbedtls_sha256_finish(&context, digest.data()) == 0;
   mbedtls_sha256_free(&context);
   return valid && bytesHex(digest.data(), digest.size()) == sha256;
 }
