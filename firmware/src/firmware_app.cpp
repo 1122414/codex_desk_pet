@@ -63,17 +63,17 @@ void FirmwareApp::setup() {
   const auto storage_ready = pet_store_.available();
   usb_client_.setDeviceInfo(
       CODEX_DESK_FIRMWARE_VERSION,
-      "m5stack-cores3-k128",
+      "m5stack-tab5-k145",
       voice_ready,
       storage_ready);
   wifi_client_.setDeviceInfo(
       CODEX_DESK_FIRMWARE_VERSION,
-      "m5stack-cores3-k128",
+      "m5stack-tab5-k145",
       voice_ready,
       storage_ready);
   ble_client_.setDeviceInfo(
       CODEX_DESK_FIRMWARE_VERSION,
-      "m5stack-cores3-k128",
+      "m5stack-tab5-k145",
       voice_ready,
       storage_ready);
   configureProtocol(usb_client_);

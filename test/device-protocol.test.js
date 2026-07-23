@@ -154,6 +154,13 @@ test("device diagnostics are canonical, authenticated, and compatibility checked
   assert.throws(() => validateEnvelope(tampered), /device info/i);
 });
 
+test("Tab5 Pet resource profile fits a complete v2 animation within its transfer limit", () => {
+  const frameBytes = 384 * 416 * 2;
+  const completeV2PetBytes = 88 * frameBytes;
+  assert.equal(completeV2PetBytes, 28_114_944);
+  assert.equal(completeV2PetBytes < 32 * 1024 * 1024, true);
+});
+
 test("authenticated payloads use deterministic per-direction AES-256-GCM envelopes", () => {
   const context = {
     secret: "d".repeat(64),

@@ -4,8 +4,8 @@ import { PET_ATLAS, PET_CELL } from "../shared/pet-spec.js";
 
 export const DEVICE_PET_FORMAT = "rgb565-key-v1";
 export const DEVICE_FRAME = Object.freeze({
-  width: 144,
-  height: 156,
+  width: 384,
+  height: 416,
   transparentColor: 0x0001,
 });
 

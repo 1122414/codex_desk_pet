@@ -10,18 +10,18 @@ import {
 import { PET_ATLAS, STANDARD_ANIMATIONS } from "./pet-spec.js";
 
 export const DEVICE_PROTOCOL_VERSION = 3;
-export const DEVICE_INFO_VERSION = 1;
-export const DEVICE_BOARD_ID = "m5stack-cores3-k128";
+export const DEVICE_INFO_VERSION = 2;
+export const DEVICE_BOARD_ID = "m5stack-tab5-k145";
 export const DEVICE_FIRMWARE_VERSION = "0.1.0";
 export const MINIMUM_DEVICE_FIRMWARE_VERSION = "0.1.0";
 export const HEARTBEAT_INTERVAL_MS = 5_000;
 export const CONNECTION_TIMEOUT_MS = 15_000;
-export const MAX_RESOURCE_BYTES = 16 * 1024 * 1024;
+export const MAX_RESOURCE_BYTES = 32 * 1024 * 1024;
 export const DEVICE_ENCRYPTION_ALGORITHM = "A256GCM";
 export const DEVICE_PET_RESOURCE = Object.freeze({
   format: "rgb565-key-v1",
-  frameWidth: 144,
-  frameHeight: 156,
+  frameWidth: 384,
+  frameHeight: 416,
   transparentColor: 0x0001,
 });
 const MAX_RESOURCE_RANGES = 1_024;
@@ -95,6 +95,7 @@ const DEVICE_CAPABILITY_KEYS = Object.freeze([
   "ble",
   "microSd",
   "rtc",
+  "camera",
 ]);
 const DEVICE_HEALTH_KEYS = Object.freeze([
   "voiceDataReady",

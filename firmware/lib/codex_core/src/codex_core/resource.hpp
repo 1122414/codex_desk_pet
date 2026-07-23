@@ -8,9 +8,9 @@
 
 namespace codex {
 
-constexpr std::uint32_t kMaximumResourceBytes = 16U * 1024U * 1024U;
-constexpr std::uint16_t kPetFrameWidth = 144;
-constexpr std::uint16_t kPetFrameHeight = 156;
+constexpr std::uint32_t kMaximumResourceBytes = 32U * 1024U * 1024U;
+constexpr std::uint16_t kPetFrameWidth = 384;
+constexpr std::uint16_t kPetFrameHeight = 416;
 constexpr std::uint16_t kPetTransparentColor = 0x0001;
 constexpr std::uint32_t kPetFrameBytes =
     static_cast<std::uint32_t>(kPetFrameWidth) * kPetFrameHeight * 2U;

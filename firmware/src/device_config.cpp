@@ -119,7 +119,7 @@ String DeviceConfigStore::makeDeviceId() const {
   snprintf(
       value,
       sizeof(value),
-      "core-s3-%08lx",
+      "tab5-%08lx",
       static_cast<unsigned long>(mac & 0xffffffffULL));
   return String(value);
 }

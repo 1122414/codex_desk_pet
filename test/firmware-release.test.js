@@ -27,7 +27,7 @@ test("firmware release manifest verifies every component and detects tampering",
   }
   const factory = Buffer.from("factory-image");
   const factoryImage = {
-    file: "codex-desk-buddy-cores3-factory.bin",
+    file: "codex-desk-buddy-tab5-factory.bin",
     bytes: factory.length,
     sha256: sha256(factory),
   };

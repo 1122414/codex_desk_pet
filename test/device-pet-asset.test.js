@@ -7,7 +7,7 @@ import {
   convertSpritesheetToDeviceAsset,
 } from "../src/server/device-pet-asset.js";
 
-test("WebP Pet conversion produces ordered transparent RGB565 frames for CoreS3", async () => {
+test("WebP Pet conversion produces ordered transparent RGB565 frames for Tab5", async () => {
   const svg = Buffer.from(`
     <svg xmlns="http://www.w3.org/2000/svg" width="1536" height="2288">
       <rect x="0" y="0" width="192" height="208" fill="#ff0000"/>
