@@ -4,14 +4,17 @@
 #include <esp_partition.h>
 #include <mbedtls/sha256.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 namespace codex::firmware {
 namespace {
 
 constexpr std::size_t kVoiceDataSize = 2'913'777;
+constexpr std::size_t kVoiceReadChunkSize = 4'096;
 constexpr std::array<std::uint8_t, 32> kVoiceDataSha256{{
     0xcc, 0x9a, 0x81, 0xfd, 0x71, 0x6b, 0x3c, 0x07,
     0xfa, 0xe3, 0xca, 0x2f, 0x80, 0x2d, 0xc0, 0x26,
@@ -89,23 +92,38 @@ bool DeviceAudio::initializeVoice() {
     Serial.println("语音初始化失败：PSRAM 分配失败");
     return false;
   }
-  const auto read_result = esp_partition_read(
-      partition,
-      0,
-      voice_data,
-      kVoiceDataSize);
-  if (read_result != ESP_OK) {
-    Serial.printf("语音初始化失败：分区读取错误 %d\n", static_cast<int>(read_result));
+  // Hash small internal-RAM blocks as we read them. The platform SHA routine
+  // cannot reliably consume one large PSRAM-backed buffer on this P4 setup.
+  mbedtls_sha256_context hash_context;
+  mbedtls_sha256_init(&hash_context);
+  if (mbedtls_sha256_starts(&hash_context, 0) != 0) {
+    Serial.println("语音初始化失败：SHA 初始化错误");
+    mbedtls_sha256_free(&hash_context);
     heap_caps_free(voice_data);
     return false;
   }
 
+  std::array<std::uint8_t, kVoiceReadChunkSize> chunk{};
+  for (std::size_t offset = 0; offset < kVoiceDataSize; offset += chunk.size()) {
+    const auto bytes = std::min(chunk.size(), kVoiceDataSize - offset);
+    const auto read_result = esp_partition_read(
+        partition,
+        offset,
+        chunk.data(),
+        bytes);
+    if (read_result != ESP_OK ||
+        mbedtls_sha256_update(&hash_context, chunk.data(), bytes) != 0) {
+      Serial.printf("语音初始化失败：分区读取或 SHA 更新错误 %d\n", static_cast<int>(read_result));
+      mbedtls_sha256_free(&hash_context);
+      heap_caps_free(voice_data);
+      return false;
+    }
+    std::memcpy(voice_data + offset, chunk.data(), bytes);
+  }
+
   std::array<std::uint8_t, 32> digest{};
-  const auto hash_result = mbedtls_sha256(
-      voice_data,
-      kVoiceDataSize,
-      digest.data(),
-      0);
+  const auto hash_result = mbedtls_sha256_finish(&hash_context, digest.data());
+  mbedtls_sha256_free(&hash_context);
   if (hash_result != 0 || digest != kVoiceDataSha256) {
     Serial.printf("语音初始化失败：语音数据校验错误 %d\n", hash_result);
     heap_caps_free(voice_data);
