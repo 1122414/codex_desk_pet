@@ -12,7 +12,9 @@ const FILE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const MAX_MANIFEST_BYTES = 256 * 1024;
 
 export const FIRMWARE_FLASH_LAYOUT = Object.freeze([
-  Object.freeze({ name: "bootloader", file: "bootloader.bin", offset: 0x000000, maximumBytes: 0x008000 }),
+  // ESP32-P4 reserves the first 8 KiB of flash for FE data. Its ROM loads the
+  // bootloader from 0x2000, unlike ESP32-S3 where the bootloader begins at 0x0.
+  Object.freeze({ name: "bootloader", file: "bootloader.bin", offset: 0x002000, maximumBytes: 0x006000 }),
   Object.freeze({ name: "partitions", file: "partitions.bin", offset: 0x008000, maximumBytes: 0x001000 }),
   Object.freeze({ name: "ota-initializer", file: "boot_app0.bin", offset: 0x00e000, maximumBytes: 0x002000 }),
   Object.freeze({ name: "application", file: "firmware.bin", offset: 0x010000, maximumBytes: 0x480000 }),
