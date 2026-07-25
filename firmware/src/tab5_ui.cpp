@@ -91,11 +91,26 @@ void Tab5Ui::render(
     const bool paired,
     const String& connection_detail,
     const std::uint8_t transfer_progress) {
-  if (now_ms - last_rendered_at_ < 50) return;
+  if (!paired) {
+    if (pairing_screen_rendered_ &&
+        rendered_pairing_code_ == pairing_code_ &&
+        rendered_connection_detail_ == connection_detail) {
+      return;
+    }
+  } else if (now_ms - last_rendered_at_ < 50) {
+    return;
+  }
   last_rendered_at_ = now_ms;
   canvas_.fillScreen(kBackground);
-  if (paired) drawNormal(snapshot, now_ms, connection_detail, transfer_progress);
-  else drawPairing(connection_detail);
+  if (paired) {
+    pairing_screen_rendered_ = false;
+    drawNormal(snapshot, now_ms, connection_detail, transfer_progress);
+  } else {
+    drawPairing(connection_detail);
+    pairing_screen_rendered_ = true;
+    rendered_pairing_code_ = pairing_code_;
+    rendered_connection_detail_ = connection_detail;
+  }
   canvas_.pushSprite(0, 0);
 }
 
@@ -179,7 +194,10 @@ UiAction Tab5Ui::mapInputAction(const InputAction& action) {
 }
 
 UiAction Tab5Ui::pairingTouch(const Point point, const TouchPhase phase) {
-  if (phase != TouchPhase::Released || point.y < kKeyY ||
+  // Pairing keys are harmless and should react at the initial contact point.
+  // Waiting for release makes short taps easy to lose during a full-screen
+  // update and allows finger drift to select a neighboring key.
+  if (phase != TouchPhase::Pressed || point.y < kKeyY ||
       point.y >= kKeyY + kKeyHeight * 4 || point.x < kKeyX ||
       point.x >= kKeyX + kKeyWidth * 3) {
     return {};
