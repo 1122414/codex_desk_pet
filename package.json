@@ -14,6 +14,7 @@
     "remove:codex-hooks": "node scripts/install-codex-hooks.mjs --remove",
     "doctor": "node scripts/doctor.mjs",
     "test": "node --test",
+    "test:virtual-tab5": "node scripts/verify-virtual-tab5.mjs",
     "test:stability": "node scripts/run-stability.mjs && node scripts/check-firmware.mjs",
     "test:firmware": "node scripts/check-firmware.mjs",
     "setup:firmware-tts": "node scripts/setup-esp-tts.mjs",
