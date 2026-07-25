@@ -117,10 +117,27 @@ UiAction Tab5Ui::pollTouch(
         static_cast<std::int16_t>(std::clamp<std::int32_t>(detail.y, 0, kScreenHeight - 1)),
     };
     last_touch_ = point;
-    const auto phase = touch_active_ ? TouchPhase::Moved : TouchPhase::Pressed;
-    touch_active_ = true;
+    // M5Unified keeps a released point in getCount() for one update with a
+    // touch_end state. Handle that release directly instead of waiting for a
+    // later zero-count update, which can lose short taps on Tab5.
+    const auto released = detail.wasReleased();
+    const auto phase = released
+                           ? TouchPhase::Released
+                           : (touch_active_ ? TouchPhase::Moved
+                                            : TouchPhase::Pressed);
+    touch_active_ = !released;
     if (!paired) return pairingTouch(point, phase);
     const auto safe = approvalCanAccept(snapshot.approval);
+    if (released && !snapshot.approval.present) {
+      if (kPreviousPetButton.contains(point)) {
+        input_.cancel();
+        return {UiActionType::PreviousPet, {}};
+      }
+      if (kNextPetButton.contains(point)) {
+        input_.cancel();
+        return {UiActionType::NextPet, {}};
+      }
+    }
     return mapInputAction(input_.onTouch(
         phase, point, now_ms, snapshot.approval.present, safe));
   }
