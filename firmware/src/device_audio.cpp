@@ -68,27 +68,36 @@ bool DeviceAudio::initializeVoice() {
       ESP_PARTITION_TYPE_DATA,
       ESP_PARTITION_SUBTYPE_ANY,
       "voice_data");
-  if (partition == nullptr || partition->size < kVoiceDataSize) return false;
+  if (partition == nullptr) {
+    Serial.println("语音初始化失败：voice_data 分区不存在");
+    return false;
+  }
+  if (partition->size < kVoiceDataSize) {
+    Serial.printf("语音初始化失败：voice_data 分区过小 (%u)\n", partition->size);
+    return false;
+  }
 
   const void* voice_data = nullptr;
-  if (esp_partition_mmap(
-          partition,
-          0,
-          kVoiceDataSize,
-          ESP_PARTITION_MMAP_DATA,
-          &voice_data,
-          &voice_map_handle_) != ESP_OK ||
-      voice_data == nullptr) {
+  const auto map_result = esp_partition_mmap(
+      partition,
+      0,
+      kVoiceDataSize,
+      ESP_PARTITION_MMAP_DATA,
+      &voice_data,
+      &voice_map_handle_);
+  if (map_result != ESP_OK || voice_data == nullptr) {
+    Serial.printf("语音初始化失败：分区映射错误 %d\n", static_cast<int>(map_result));
     return false;
   }
 
   std::array<std::uint8_t, 32> digest{};
-  if (mbedtls_sha256(
-          static_cast<const std::uint8_t*>(voice_data),
-          kVoiceDataSize,
-          digest.data(),
-          0) != 0 ||
-      digest != kVoiceDataSha256) {
+  const auto hash_result = mbedtls_sha256(
+      static_cast<const std::uint8_t*>(voice_data),
+      kVoiceDataSize,
+      digest.data(),
+      0);
+  if (hash_result != 0 || digest != kVoiceDataSha256) {
+    Serial.printf("语音初始化失败：语音数据校验错误 %d\n", hash_result);
     esp_partition_munmap(voice_map_handle_);
     voice_map_handle_ = 0;
     return false;
@@ -100,12 +109,14 @@ bool DeviceAudio::initializeVoice() {
       &esp_tts_voice_xiaoxin,
       const_cast<void*>(voice_data));
   if (voice_ == nullptr) {
+    Serial.println("语音初始化失败：xiaoxin 声音集创建失败");
     esp_partition_munmap(voice_map_handle_);
     voice_map_handle_ = 0;
     return false;
   }
   tts_ = esp_tts_create(voice_);
   if (tts_ != nullptr) return true;
+  Serial.println("语音初始化失败：TTS 引擎创建失败");
   esp_tts_voice_set_free(voice_);
   voice_ = nullptr;
   esp_partition_munmap(voice_map_handle_);
