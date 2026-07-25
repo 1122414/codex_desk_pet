@@ -31,7 +31,7 @@ class DeviceAudio {
   TaskHandle_t task_ = nullptr;
   esp_tts_voice_t* voice_ = nullptr;
   esp_tts_handle_t tts_ = nullptr;
-  esp_partition_mmap_handle_t voice_map_handle_ = 0;
+  void* voice_data_ = nullptr;
   bool voice_ready_ = false;
 };
 

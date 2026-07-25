@@ -1,5 +1,6 @@
 #include "device_audio.hpp"
 
+#include <esp_heap_caps.h>
 #include <esp_partition.h>
 #include <mbedtls/sha256.h>
 
@@ -77,29 +78,37 @@ bool DeviceAudio::initializeVoice() {
     return false;
   }
 
-  const void* voice_data = nullptr;
-  const auto map_result = esp_partition_mmap(
+  // ESP32-P4 cache mapping can expose stale data for a large FAT data
+  // partition. Keep the verified voice package in PSRAM instead. Tab5 has
+  // 32 MiB PSRAM, so this consumes less than 10% while avoiding that mapping
+  // path entirely.
+  auto* voice_data = static_cast<std::uint8_t*>(heap_caps_malloc(
+      kVoiceDataSize,
+      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (voice_data == nullptr) {
+    Serial.println("语音初始化失败：PSRAM 分配失败");
+    return false;
+  }
+  const auto read_result = esp_partition_read(
       partition,
       0,
-      kVoiceDataSize,
-      ESP_PARTITION_MMAP_DATA,
-      &voice_data,
-      &voice_map_handle_);
-  if (map_result != ESP_OK || voice_data == nullptr) {
-    Serial.printf("语音初始化失败：分区映射错误 %d\n", static_cast<int>(map_result));
+      voice_data,
+      kVoiceDataSize);
+  if (read_result != ESP_OK) {
+    Serial.printf("语音初始化失败：分区读取错误 %d\n", static_cast<int>(read_result));
+    heap_caps_free(voice_data);
     return false;
   }
 
   std::array<std::uint8_t, 32> digest{};
   const auto hash_result = mbedtls_sha256(
-      static_cast<const std::uint8_t*>(voice_data),
+      voice_data,
       kVoiceDataSize,
       digest.data(),
       0);
   if (hash_result != 0 || digest != kVoiceDataSha256) {
     Serial.printf("语音初始化失败：语音数据校验错误 %d\n", hash_result);
-    esp_partition_munmap(voice_map_handle_);
-    voice_map_handle_ = 0;
+    heap_caps_free(voice_data);
     return false;
   }
 
@@ -107,20 +116,21 @@ bool DeviceAudio::initializeVoice() {
   // paired with the matching xiaoxin voice set rather than the empty template.
   voice_ = esp_tts_voice_set_init(
       &esp_tts_voice_xiaoxin,
-      const_cast<void*>(voice_data));
+      voice_data);
   if (voice_ == nullptr) {
     Serial.println("语音初始化失败：xiaoxin 声音集创建失败");
-    esp_partition_munmap(voice_map_handle_);
-    voice_map_handle_ = 0;
+    heap_caps_free(voice_data);
     return false;
   }
   tts_ = esp_tts_create(voice_);
-  if (tts_ != nullptr) return true;
+  if (tts_ != nullptr) {
+    voice_data_ = voice_data;
+    return true;
+  }
   Serial.println("语音初始化失败：TTS 引擎创建失败");
   esp_tts_voice_set_free(voice_);
   voice_ = nullptr;
-  esp_partition_munmap(voice_map_handle_);
-  voice_map_handle_ = 0;
+  heap_caps_free(voice_data);
   return false;
 }
 
