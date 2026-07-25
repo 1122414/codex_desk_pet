@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import sharp from "sharp";
 import { DeviceCredentialRepository } from "../src/server/device-credential-repository.js";
 import { DeviceHub } from "../src/server/device-hub.js";
 import { DeviceSession } from "../src/server/device-session.js";
@@ -23,7 +24,26 @@ async function waitFor(predicate, message, timeoutMs = 1_500) {
 export async function verifyVirtualTab5() {
   const root = await mkdtemp(path.join(os.tmpdir(), "codex-desk-virtual-tab5-"));
   const petRoot = path.join(root, "pets");
-  await mkdir(petRoot);
+  const petDirectory = path.join(petRoot, "virtual-pet");
+  await mkdir(petDirectory, { recursive: true });
+  const spritesheet = await sharp({
+    create: {
+      width: 1536,
+      height: 2288,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    },
+  }).webp({ lossless: true }).toBuffer();
+  await Promise.all([
+    writeFile(path.join(petDirectory, "pet.json"), JSON.stringify({
+      id: "virtual-pet",
+      displayName: "Virtual Pet",
+      description: "离线验收使用的临时 V2 Pet",
+      spriteVersionNumber: 2,
+      spritesheetPath: "spritesheet.webp",
+    })),
+    writeFile(path.join(petDirectory, "spritesheet.webp"), spritesheet),
+  ]);
 
   const store = new DeskStore();
   const credentials = new DeviceCredentialRepository(path.join(root, "devices.json"));
@@ -70,17 +90,22 @@ export async function verifyVirtualTab5() {
     );
     assert.equal(await credentials.getSecret("virtual-tab5"), pairedSecret);
     assert.equal(latestSnapshot.pet.selectedId, "codex-core");
+    assert.equal(
+      latestSnapshot.pet.available.some((pet) => pet.id === "virtual-pet"),
+      true,
+    );
 
     deviceUsb.sendCommand("telemetry.update", {
       batteryPercent: 73,
       charging: true,
       wifiRssi: -55,
     }, randomUUID());
-    deviceUsb.sendCommand("pet.select", { petId: "codex-core" }, randomUUID());
+    deviceUsb.sendCommand("pet.select", { petId: "virtual-pet" }, randomUUID());
     deviceUsb.sendCommand("state.preview", { animation: "review" }, randomUUID());
     await waitFor(
       () =>
         store.snapshot().telemetry.batteryPercent === 73 &&
+        store.snapshot().pet.selectedId === "virtual-pet" &&
         store.snapshot().presentation.animation === "review",
       "虚拟 Tab5 遥测、Pet 或状态预览未同步到 Bridge",
     );
@@ -113,6 +138,21 @@ export async function verifyVirtualTab5() {
       "虚拟 Tab5 未能使用配对密钥建立 Wi-Fi 会话",
     );
     assert.deepEqual(hub.listDevices()[0].transports, ["usb", "wifi"]);
+
+    let installedResource = null;
+    deviceWifi.on("resourceInstalled", (manifest) => {
+      installedResource = manifest;
+    });
+    deviceWifi.requestResource("virtual-pet");
+    await waitFor(
+      () => installedResource !== null && deviceWifi.resourceCache.get("virtual-pet") !== null,
+      "最大规格 V2 Pet 未能通过加密 Wi-Fi 安装到虚拟 Tab5",
+      30_000,
+    );
+    const cachedResource = deviceWifi.resourceCache.get("virtual-pet");
+    assert.equal(installedResource.bytes, 28_114_944);
+    assert.equal(cachedResource.data.length, 28_114_944);
+    assert.match(installedResource.sha256, /^[a-f0-9]{64}$/);
 
     store.addApproval({
       id: "virtual-approval",
@@ -157,6 +197,11 @@ export async function verifyVirtualTab5() {
         charging: store.snapshot().telemetry.charging,
       },
       petSelection: store.snapshot().pet.selectedId,
+      customPetResource: {
+        bytes: installedResource.bytes,
+        sha256: installedResource.sha256,
+        installedOver: "wifi",
+      },
       previewAnimation: store.snapshot().presentation.animation,
       approvalDecision: decisions[0].decision,
       credentialsIsolated: root.startsWith(os.tmpdir()),

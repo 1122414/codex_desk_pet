@@ -35,7 +35,7 @@ PIO=/path/to/pio npm run release:firmware
 npm run smoke:codex
 ```
 
-- `test:virtual-tab5` 在临时目录中自动完成一次性 USB 配对、密钥保存、加密双链路、遥测、Pet、审批和 Wi-Fi 接管，不修改正式设备凭据。
+- `test:virtual-tab5` 在临时目录中自动完成一次性 USB 配对、密钥保存、加密双链路、遥测、28,114,944 Bytes V2 Pet 转换/安装、审批和 Wi-Fi 接管，不修改正式设备凭据。
 - `doctor` 检查 Node、Codex 版本、实际 App Server 连接、当前实验性 Schema 的四个必要方法、Hooks、PlatformIO 和完整固件包。
 - `check` 检查全部 JavaScript 语法，运行 94 项领域/协议/HTTP/虚拟设备测试，并用 C++17 重新编译固件核心测试。
 - `test:stability` 打印 500 次链路切换、各类故障和 250 次资源恢复的实际计数。
@@ -45,7 +45,7 @@ npm run smoke:codex
 ## 2026-07-26 离线复验结果
 
 - `npm run check`：94/94 项测试和固件核心检查通过。
-- `npm run test:virtual-tab5`：真实协议的一次性配对、AES 加密、USB/Wi-Fi 双链路、遥测、Pet、审批和 Wi-Fi 接管通过。
+- `npm run test:virtual-tab5`：真实协议的一次性配对、AES 加密、USB/Wi-Fi 双链路、遥测、28,114,944 Bytes V2 Pet 转换/安装、审批和 Wi-Fi 接管通过。
 - `npm run test:stability`：501 个认证会话、500 次链路切换、250 次资源中断恢复和全部故障注入通过。
 - 浏览器 Mock 验收：1280×720 布局、9/9 动画、16/16 V2 看向方向、V1 能力禁用、Pet 切换和审批均通过，浏览器控制台 0 错误。
 - `npm run smoke:codex`：Codex Desktop `0.146.0-alpha.3.1` 的 App Server 初始化和最近线程读取通过。

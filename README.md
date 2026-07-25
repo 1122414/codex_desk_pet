@@ -42,7 +42,7 @@ npm run start:mock
 
 然后打开 [http://127.0.0.1:4317](http://127.0.0.1:4317)。右下角的“生成一次审批请求”可以验证设备审批流程。
 
-没有实体板时，可以让临时虚拟 Tab5 自动完成一次性 USB 配对、加密会话、USB/Wi‑Fi 双链路、遥测、Pet 切换和审批闭环：
+没有实体板时，可以让临时虚拟 Tab5 自动完成一次性 USB 配对、加密会话、USB/Wi‑Fi 双链路、遥测、Pet 切换、最大规格 V2 Pet 安装和审批闭环：
 
 ```bash
 npm run test:virtual-tab5
@@ -158,7 +158,7 @@ npm run smoke:codex
 ```
 
 - `npm test`：运行领域、协议、审批、配对、传输、Pet 资源与 HTTP 安全测试。
-- `npm run test:virtual-tab5`：使用临时虚拟设备完成真实协议的一次性配对、加密 USB/Wi-Fi 双链路、Pet、遥测、审批和 USB 断开后的 Wi-Fi 接管。
+- `npm run test:virtual-tab5`：使用临时虚拟设备完成真实协议的一次性配对、加密 USB/Wi-Fi 双链路、28,114,944 Bytes V2 Pet 转换/安装、遥测、审批和 USB 断开后的 Wi-Fi 接管。
 - `npm run doctor`：检查 Node、Codex 实际连接与必要 Schema 方法、PlatformIO 和完整固件包；输出不包含线程标题或凭据。
 - `npm run check`：先检查全部 JavaScript 语法，再运行测试。
 - `npm run test:firmware`：使用本机 C++17 编译器运行不依赖硬件的固件状态机、动画、输入、重连、序号与资源恢复测试。
