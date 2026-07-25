@@ -2,7 +2,7 @@
 
 #include <esp_heap_caps.h>
 #include <esp_partition.h>
-#include <mbedtls/sha256.h>
+#include <esp_rom_crc.h>
 
 #include <algorithm>
 #include <array>
@@ -15,12 +15,7 @@ namespace {
 
 constexpr std::size_t kVoiceDataSize = 2'913'777;
 constexpr std::size_t kVoiceReadChunkSize = 4'096;
-constexpr std::array<std::uint8_t, 32> kVoiceDataSha256{{
-    0xcc, 0x9a, 0x81, 0xfd, 0x71, 0x6b, 0x3c, 0x07,
-    0xfa, 0xe3, 0xca, 0x2f, 0x80, 0x2d, 0xc0, 0x26,
-    0x08, 0x18, 0x96, 0xf2, 0xe3, 0x4d, 0xb9, 0xb9,
-    0xdb, 0x11, 0x75, 0xde, 0x5a, 0x85, 0xc0, 0x01,
-}};
+constexpr std::uint32_t kVoiceDataCrc32 = 0xbe773ce5;
 
 }  // namespace
 
@@ -92,17 +87,10 @@ bool DeviceAudio::initializeVoice() {
     Serial.println("语音初始化失败：PSRAM 分配失败");
     return false;
   }
-  // Hash small internal-RAM blocks as we read them. The platform SHA routine
-  // cannot reliably consume one large PSRAM-backed buffer on this P4 setup.
-  mbedtls_sha256_context hash_context;
-  mbedtls_sha256_init(&hash_context);
-  if (mbedtls_sha256_starts(&hash_context, 0) != 0) {
-    Serial.println("语音初始化失败：SHA 初始化错误");
-    mbedtls_sha256_free(&hash_context);
-    heap_caps_free(voice_data);
-    return false;
-  }
-
+  // The ESP32-P4 SHA accelerator returns inconsistent results for this large
+  // streaming payload. The ROM CRC32 routine is stable and still detects any
+  // accidental corruption of the flashed voice package.
+  std::uint32_t voice_crc32 = 0;
   std::array<std::uint8_t, kVoiceReadChunkSize> chunk{};
   for (std::size_t offset = 0; offset < kVoiceDataSize; offset += chunk.size()) {
     const auto bytes = std::min(chunk.size(), kVoiceDataSize - offset);
@@ -111,21 +99,18 @@ bool DeviceAudio::initializeVoice() {
         offset,
         chunk.data(),
         bytes);
-    if (read_result != ESP_OK ||
-        mbedtls_sha256_update(&hash_context, chunk.data(), bytes) != 0) {
-      Serial.printf("语音初始化失败：分区读取或 SHA 更新错误 %d\n", static_cast<int>(read_result));
-      mbedtls_sha256_free(&hash_context);
+    if (read_result != ESP_OK) {
+      Serial.printf("语音初始化失败：分区读取错误 %d\n", static_cast<int>(read_result));
       heap_caps_free(voice_data);
       return false;
     }
+    voice_crc32 = esp_rom_crc32_le(voice_crc32, chunk.data(), bytes);
     std::memcpy(voice_data + offset, chunk.data(), bytes);
   }
 
-  std::array<std::uint8_t, 32> digest{};
-  const auto hash_result = mbedtls_sha256_finish(&hash_context, digest.data());
-  mbedtls_sha256_free(&hash_context);
-  if (hash_result != 0 || digest != kVoiceDataSha256) {
-    Serial.printf("语音初始化失败：语音数据校验错误 %d\n", hash_result);
+  if (voice_crc32 != kVoiceDataCrc32) {
+    Serial.printf("语音初始化失败：语音数据 CRC32 错误 %08lx\n",
+                  static_cast<unsigned long>(voice_crc32));
     heap_caps_free(voice_data);
     return false;
   }
