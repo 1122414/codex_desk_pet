@@ -61,7 +61,17 @@ test("firmware manifest rejects a component that crosses its assigned partition"
 
 test("Tab5 release places the ESP32-P4 bootloader at its ROM boot offset", () => {
   const bootloader = FIRMWARE_FLASH_LAYOUT[0];
+  const application = FIRMWARE_FLASH_LAYOUT[3];
+  const voiceData = FIRMWARE_FLASH_LAYOUT[4];
   assert.equal(bootloader.name, "bootloader");
   assert.equal(bootloader.offset, 0x2000);
   assert.equal(bootloader.maximumBytes, 0x6000);
+  assert.deepEqual(
+    { offset: application.offset, maximumBytes: application.maximumBytes },
+    { offset: 0x10000, maximumBytes: 0x580000 },
+  );
+  assert.deepEqual(
+    { offset: voiceData.offset, maximumBytes: voiceData.maximumBytes },
+    { offset: 0xb10000, maximumBytes: 0x2d0000 },
+  );
 });

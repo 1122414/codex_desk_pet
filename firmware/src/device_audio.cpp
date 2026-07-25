@@ -94,8 +94,10 @@ bool DeviceAudio::initializeVoice() {
     return false;
   }
 
+  // The flashed data file is xiaoxin_small. Its pronunciation tables must be
+  // paired with the matching xiaoxin voice set rather than the empty template.
   voice_ = esp_tts_voice_set_init(
-      &esp_tts_voice_template,
+      &esp_tts_voice_xiaoxin,
       const_cast<void*>(voice_data));
   if (voice_ == nullptr) {
     esp_partition_munmap(voice_map_handle_);
