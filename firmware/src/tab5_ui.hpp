@@ -42,6 +42,7 @@ class Tab5Ui {
   UiAction pollTouch(const Snapshot& snapshot, std::uint64_t now_ms, bool paired);
   UiAction mapInputAction(const InputAction& action);
   UiAction pairingTouch(Point point, TouchPhase phase);
+  void drawPairingCode();
   void drawNormal(
       const Snapshot& snapshot,
       std::uint64_t now_ms,
@@ -84,6 +85,8 @@ class Tab5Ui {
   InputController input_{kInputLayout};
   Point last_touch_{};
   bool touch_active_ = false;
+  bool pairing_touch_latched_ = false;
+  std::uint64_t pairing_released_at_ = 0;
   String pairing_code_;
   String device_id_;
   String setup_code_;

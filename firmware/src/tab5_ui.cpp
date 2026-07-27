@@ -93,8 +93,11 @@ void Tab5Ui::render(
     const std::uint8_t transfer_progress) {
   if (!paired) {
     if (pairing_screen_rendered_ &&
-        rendered_pairing_code_ == pairing_code_ &&
         rendered_connection_detail_ == connection_detail) {
+      if (rendered_pairing_code_ != pairing_code_) {
+        drawPairingCode();
+        rendered_pairing_code_ = pairing_code_;
+      }
       return;
     }
   } else if (now_ms - last_rendered_at_ < 50) {
@@ -132,16 +135,29 @@ UiAction Tab5Ui::pollTouch(
         static_cast<std::int16_t>(std::clamp<std::int32_t>(detail.y, 0, kScreenHeight - 1)),
     };
     last_touch_ = point;
-    // M5Unified keeps a released point in getCount() for one update with a
-    // touch_end state. Handle that release directly instead of waiting for a
-    // later zero-count update, which can lose short taps on Tab5.
     const auto released = detail.wasReleased();
-    const auto phase = released
-                           ? TouchPhase::Released
-                           : (touch_active_ ? TouchPhase::Moved
-                                            : TouchPhase::Pressed);
+    const auto pressed = detail.wasPressed();
+    const auto phase = released ? TouchPhase::Released
+                                : (pressed ? TouchPhase::Pressed
+                                           : TouchPhase::Moved);
     touch_active_ = !released;
-    if (!paired) return pairingTouch(point, phase);
+    if (!paired) {
+      if (released) {
+        pairing_released_at_ = now_ms;
+        return {};
+      }
+      if (!pressed) return {};
+      if (pairing_touch_latched_) {
+        if (pairing_released_at_ == 0 ||
+            now_ms - pairing_released_at_ < 40) {
+          return {};
+        }
+        pairing_touch_latched_ = false;
+      }
+      pairing_touch_latched_ = true;
+      pairing_released_at_ = 0;
+      return pairingTouch(point, phase);
+    }
     const auto safe = approvalCanAccept(snapshot.approval);
     if (released && !snapshot.approval.present) {
       if (kPreviousPetButton.contains(point)) {
@@ -158,7 +174,10 @@ UiAction Tab5Ui::pollTouch(
   }
   if (!touch_active_) return {};
   touch_active_ = false;
-  if (!paired) return pairingTouch(last_touch_, TouchPhase::Released);
+  if (!paired) {
+    pairing_released_at_ = now_ms;
+    return {};
+  }
   const auto safe = approvalCanAccept(snapshot.approval);
   if (!snapshot.approval.present) {
     if (kPreviousPetButton.contains(last_touch_)) {
@@ -220,6 +239,19 @@ UiAction Tab5Ui::pairingTouch(const Point point, const TouchPhase phase) {
     return {UiActionType::SubmitPairingCode, code};
   }
   return {};
+}
+
+void Tab5Ui::drawPairingCode() {
+  M5.Display.startWrite();
+  M5.Display.setFont(&fonts::efontCN_16);
+  M5.Display.setTextDatum(top_center);
+  M5.Display.fillRoundRect(430, 150, 420, 48, 12, kPanel);
+  M5.Display.setTextColor(kOrange, kPanel);
+  M5.Display.setTextSize(2);
+  M5.Display.drawString(pairing_code_, kScreenWidth / 2, 160);
+  M5.Display.setTextSize(1);
+  M5.Display.setTextDatum(top_left);
+  M5.Display.endWrite();
 }
 
 void Tab5Ui::drawNormal(
