@@ -20,6 +20,15 @@ try {
       "USB CDC 同时承载设备协议，固件必须使用 CORE_DEBUG_LEVEL=0，避免日志破坏 JSON 报文",
     );
   }
+  const usbTransport = await readFile(
+    path.join(root, "firmware", "src", "transports", "usb_transport.cpp"),
+    "utf8",
+  );
+  if (!usbTransport.includes("Serial.setTxBufferSize(kMaximumLineBytes)")) {
+    throw new Error(
+      "USB CDC 发送缓冲必须容纳完整协议帧，避免握手 JSON 被截断",
+    );
+  }
   const sources = (await readdir(coreDirectory))
     .filter((file) => file.endsWith(".cpp"))
     .sort()

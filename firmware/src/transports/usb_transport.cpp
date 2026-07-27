@@ -4,6 +4,8 @@ namespace codex::firmware {
 
 void UsbTransport::begin() {
   Serial.setRxBufferSize(kMaximumLineBytes);
+  Serial.setTxBufferSize(kMaximumLineBytes);
+  Serial.setTxTimeoutMs(1'000);
   receive_buffer_.reserve(1'024);
 }
 
