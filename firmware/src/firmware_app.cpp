@@ -31,25 +31,6 @@ void FirmwareApp::setup() {
   tzset();
   if (M5.Rtc.isEnabled()) M5.Rtc.setSystemTimeFromRtc();
   Serial.begin(115200);
-#if ESP_IDF_VERSION_MAJOR >= 5
-  esp_task_wdt_config_t watchdog_config{};
-  watchdog_config.timeout_ms = 10'000;
-  watchdog_config.idle_core_mask = 0;
-  watchdog_config.trigger_panic = true;
-  const auto watchdog_result = esp_task_wdt_init(&watchdog_config);
-  if (watchdog_result == ESP_ERR_INVALID_STATE) {
-    esp_task_wdt_reconfigure(&watchdog_config);
-  }
-  for (BaseType_t core = 0; core < portNUM_PROCESSORS; ++core) {
-    const auto idle_task = xTaskGetIdleTaskHandleForCore(core);
-    if (idle_task != nullptr) {
-      esp_task_wdt_delete(idle_task);
-    }
-  }
-#else
-  esp_task_wdt_init(10, true);
-#endif
-  esp_task_wdt_add(nullptr);
 
   if (!config_store_.begin()) connection_detail_ = "配置存储初始化失败";
   pairing_secret_ = config_store_.config().pairing_secret;
@@ -90,6 +71,27 @@ void FirmwareApp::setup() {
   configureProtocol(usb_client_);
   configureProtocol(wifi_client_);
   connection_detail_ = paired() ? "等待电脑 Bridge" : "请通过USB连接电脑并输入配对码";
+
+#if ESP_IDF_VERSION_MAJOR >= 5
+  esp_task_wdt_config_t watchdog_config{};
+  watchdog_config.timeout_ms = 10'000;
+  watchdog_config.idle_core_mask = 0;
+  watchdog_config.trigger_panic = true;
+  const auto watchdog_result = esp_task_wdt_init(&watchdog_config);
+  if (watchdog_result == ESP_ERR_INVALID_STATE) {
+    esp_task_wdt_reconfigure(&watchdog_config);
+  }
+  for (BaseType_t core = 0; core < portNUM_PROCESSORS; ++core) {
+    const auto idle_task = xTaskGetIdleTaskHandleForCore(core);
+    if (idle_task != nullptr) {
+      esp_task_wdt_delete(idle_task);
+    }
+  }
+#else
+  esp_task_wdt_init(10, true);
+#endif
+  esp_task_wdt_add(nullptr);
+  esp_task_wdt_reset();
 }
 
 void FirmwareApp::loop() {

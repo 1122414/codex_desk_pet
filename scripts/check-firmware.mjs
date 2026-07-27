@@ -105,6 +105,12 @@ try {
       "Tab5 必须移除框架遗留的 idle 看门狗订阅，避免显示与音频负载触发误重启",
     );
   }
+  if (
+    firmwareApp.indexOf("esp_task_wdt_add(nullptr)") <
+    firmwareApp.indexOf("configureProtocol(wifi_client_)")
+  ) {
+    throw new Error("Tab5 看门狗只能在耗时硬件初始化完成后注册");
+  }
   const sources = (await readdir(coreDirectory))
     .filter((file) => file.endsWith(".cpp"))
     .sort()
