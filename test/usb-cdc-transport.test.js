@@ -26,7 +26,7 @@ class FakeUsbTransport extends EventEmitter {
   }
 }
 
-test("USB transport wakes the device and releases its owned descriptor once", () => {
+test("USB transport wakes the device and requests descriptor release once", async () => {
   const readable = new PassThrough();
   const writable = new PassThrough();
   let closed = 0;
@@ -48,6 +48,7 @@ test("USB transport wakes the device and releases its owned descriptor once", ()
   assert.equal(output, "\n");
   transport.close();
   transport.close();
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(closed, 1);
 });
 

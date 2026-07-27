@@ -54,6 +54,9 @@ const usbManager = new UsbDeviceManager({
 usbManager.on("diagnostic", (message) => {
   if (process.env.CODEX_DESK_DEBUG === "1") console.warn(`[usb] ${message}`);
 });
+usbManager.on("attached", (devicePath) => {
+  if (process.env.CODEX_DESK_DEBUG === "1") console.warn(`[usb] attached ${devicePath}`);
+});
 await usbManager.start();
 
 const server = new DeskHttpServer({

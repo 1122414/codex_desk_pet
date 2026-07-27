@@ -190,6 +190,11 @@ export class DeviceSession extends EventEmitter {
       return;
     }
     if (!this.ready && now - this.#handshakeStartedAt >= this.handshakeTimeoutMs) {
+      if (this.role === "bridge" && this.transport.kind === "usb") {
+        this.#handshakeStartedAt = now;
+        this.transport.wakeDevice?.();
+        return;
+      }
       this.state = "stale";
       this.emit("timeout", { phase: "handshake" });
       this.close();

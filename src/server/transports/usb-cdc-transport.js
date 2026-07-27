@@ -1,12 +1,6 @@
 import { execFile } from "node:child_process";
 import { EventEmitter } from "node:events";
-import {
-  closeSync,
-  createReadStream,
-  createWriteStream,
-  openSync,
-} from "node:fs";
-import { lstat, readdir, realpath, stat } from "node:fs/promises";
+import { lstat, open, readdir, realpath, stat } from "node:fs/promises";
 import { promisify } from "node:util";
 import { JsonLineTransport } from "./json-line-transport.js";
 
@@ -36,7 +30,7 @@ export class UsbCdcTransport extends JsonLineTransport {
     readable,
     writable,
     devicePath,
-    closeHandle = () => closeSync(handle),
+    closeHandle = () => handle.close(),
   }) {
     super({ readable, writable, kind: "usb" });
     this.handle = handle;
@@ -55,9 +49,9 @@ export class UsbCdcTransport extends JsonLineTransport {
     const info = await stat(devicePath);
     if (!info.isCharacterDevice()) throw new Error("USB CDC path is not a character device");
     await configure(devicePath);
-    const handle = openSync(devicePath, "r+");
-    const readable = createReadStream(devicePath, { fd: handle, autoClose: false });
-    const writable = createWriteStream(devicePath, { fd: handle, autoClose: false });
+    const handle = await open(devicePath, "r+");
+    const readable = handle.createReadStream({ autoClose: false });
+    const writable = handle.createWriteStream({ autoClose: false });
     return new UsbCdcTransport({ handle, readable, writable, devicePath });
   }
 
@@ -68,14 +62,11 @@ export class UsbCdcTransport extends JsonLineTransport {
 
   close() {
     if (!this.open) return;
+    super.close();
     this.readableStream.destroy();
     this.writableStream.destroy();
-    try {
-      this.closeHandle();
-    } catch (error) {
-      this.emit("diagnostic", error.message);
-    }
-    super.close();
+    Promise.resolve(this.closeHandle())
+      .catch((error) => this.emit("diagnostic", error.message));
   }
 }
 
@@ -124,9 +115,7 @@ export class UsbDeviceManager extends EventEmitter {
         transport.wakeDevice?.();
         this.emit("attached", devicePath);
       } catch (error) {
-        if (!["ENOENT", "ENXIO", "EACCES", "EBUSY"].includes(error.code)) {
-          this.emit("diagnostic", `${devicePath}: ${error.message}`);
-        }
+        this.emit("diagnostic", `${devicePath}: ${error.message}`);
       }
     }
   }

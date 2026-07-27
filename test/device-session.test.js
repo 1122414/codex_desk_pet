@@ -287,3 +287,28 @@ test("an idle unauthenticated transport is closed after the handshake deadline",
   assert.equal(bridge.state, "closed");
   assert.equal(transports.left.open, false);
 });
+
+test("an idle USB bridge keeps one transport open and periodically wakes the device", () => {
+  const clock = { value: 1_000 };
+  const transports = createMemoryTransportPair({ kind: "usb" });
+  let wakeCount = 0;
+  transports.left.wakeDevice = () => {
+    wakeCount += 1;
+  };
+  const bridge = new DeviceSession({
+    role: "bridge",
+    transport: transports.left,
+    secretResolver: async () => null,
+    now: () => clock.value,
+    handshakeTimeoutMs: 1_000,
+  });
+  bridge.start({ autoTick: false });
+
+  clock.value += 1_001;
+  bridge.tick(clock.value);
+  assert.equal(bridge.state, "handshaking");
+  assert.equal(transports.left.open, true);
+  assert.equal(wakeCount, 1);
+
+  bridge.close();
+});
