@@ -17,8 +17,9 @@ export const FIRMWARE_FLASH_LAYOUT = Object.freeze([
   Object.freeze({ name: "bootloader", file: "bootloader.bin", offset: 0x002000, maximumBytes: 0x006000 }),
   Object.freeze({ name: "partitions", file: "partitions.bin", offset: 0x008000, maximumBytes: 0x001000 }),
   Object.freeze({ name: "ota-initializer", file: "boot_app0.bin", offset: 0x00e000, maximumBytes: 0x002000 }),
-  Object.freeze({ name: "application", file: "firmware.bin", offset: 0x010000, maximumBytes: 0x580000 }),
-  Object.freeze({ name: "voice-data", file: "voice_data.bin", offset: 0xb10000, maximumBytes: 0x2d0000 }),
+  Object.freeze({ name: "application", file: "firmware.bin", offset: 0x010000, maximumBytes: 0x5e0000 }),
+  Object.freeze({ name: "voice-data", file: "voice_data.bin", offset: 0xbd0000, maximumBytes: 0x2d0000 }),
+  Object.freeze({ name: "bundled-pet", file: "spiffs.bin", offset: 0xea0000, maximumBytes: 0x150000 }),
 ]);
 
 export function sha256(buffer) {

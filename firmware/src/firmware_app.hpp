@@ -8,6 +8,7 @@
 #include "device_config.hpp"
 #include "device_protocol.hpp"
 #include "pet_store.hpp"
+#include "transports/ble_transport.hpp"
 #include "transports/usb_transport.hpp"
 #include "transports/wifi_transport.hpp"
 
@@ -44,8 +45,10 @@ class FirmwareApp {
   Tab5Ui ui_;
   UsbTransport usb_transport_;
   WifiTransport wifi_transport_;
+  BleTransport ble_transport_;
   DeviceProtocolClient usb_client_;
   DeviceProtocolClient wifi_client_;
+  DeviceProtocolClient ble_client_;
   DeskModel model_;
   Telemetry local_telemetry_;
   String pairing_secret_;

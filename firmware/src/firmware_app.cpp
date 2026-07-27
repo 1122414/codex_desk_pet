@@ -46,28 +46,39 @@ void FirmwareApp::setup() {
 
   usb_transport_.begin();
   const auto& stored = config_store_.config();
+  const auto ble_ready = ble_transport_.begin(stored.device_id);
   if (!stored.wifi_ssid.isEmpty() && !stored.bridge_host.isEmpty()) {
     wifi_transport_.begin(
         stored.wifi_ssid, stored.wifi_password, stored.bridge_host, stored.bridge_port);
   }
   usb_client_.begin(usb_transport_, stored.device_id, pairing_secret_);
   wifi_client_.begin(wifi_transport_, stored.device_id, pairing_secret_);
+  ble_client_.begin(ble_transport_, stored.device_id, pairing_secret_);
   const auto voice_ready = audio_.voiceAvailable();
   const auto storage_ready = pet_store_.available();
+  auto capabilities = kTab5Capabilities;
+  capabilities.ble = ble_ready;
   usb_client_.setDeviceInfo(
       CODEX_DESK_FIRMWARE_VERSION,
       "m5stack-tab5-k145",
-      kTab5Capabilities,
+      capabilities,
       voice_ready,
       storage_ready);
   wifi_client_.setDeviceInfo(
       CODEX_DESK_FIRMWARE_VERSION,
       "m5stack-tab5-k145",
-      kTab5Capabilities,
+      capabilities,
+      voice_ready,
+      storage_ready);
+  ble_client_.setDeviceInfo(
+      CODEX_DESK_FIRMWARE_VERSION,
+      "m5stack-tab5-k145",
+      capabilities,
       voice_ready,
       storage_ready);
   configureProtocol(usb_client_);
   configureProtocol(wifi_client_);
+  configureProtocol(ble_client_);
   connection_detail_ = paired() ? "等待电脑 Bridge" : "请通过USB连接电脑并输入配对码";
 }
 
@@ -76,6 +87,7 @@ void FirmwareApp::loop() {
   M5.update();
   usb_client_.poll(now_ms);
   wifi_client_.poll(now_ms);
+  ble_client_.poll(now_ms);
   updateConnectionState();
   syncClock(now_ms);
   updateTelemetry(now_ms);
@@ -238,6 +250,8 @@ void FirmwareApp::handleUiAction(const UiAction& action) {
       break;
     case UiActionType::SubmitPairingCode:
       usb_client_.setPairingCode(action.value);
+      wifi_client_.setPairingCode(action.value);
+      ble_client_.setPairingCode(action.value);
       connection_detail_ = "正在验证配对码";
       break;
     case UiActionType::None:
@@ -321,6 +335,7 @@ void FirmwareApp::applyPairingSecret(const String& secret) {
   pairing_secret_ = secret;
   usb_client_.setPairingSecret(secret);
   wifi_client_.setPairingSecret(secret);
+  ble_client_.setPairingSecret(secret);
   connection_detail_ = "配对成功";
   audio_.enqueue(AudioCue::PairingSucceeded);
 }
@@ -332,12 +347,14 @@ void FirmwareApp::updateConnectionState() {
 DeviceProtocolClient* FirmwareApp::primaryClient() {
   if (usb_client_.ready()) return &usb_client_;
   if (wifi_client_.ready()) return &wifi_client_;
+  if (ble_client_.ready()) return &ble_client_;
   return nullptr;
 }
 
 TransportKind FirmwareApp::primaryTransport() const {
   if (usb_client_.ready()) return TransportKind::Usb;
   if (wifi_client_.ready()) return TransportKind::Wifi;
+  if (ble_client_.ready()) return TransportKind::Ble;
   return TransportKind::Offline;
 }
 

@@ -48,7 +48,7 @@ npm run release:firmware
 输出目录为 `dist/firmware/v0.1.0/`，其中包括：
 
 - `codex-desk-buddy-tab5-factory.bin`：首次安装或完整恢复使用的整机镜像。
-- `bootloader.bin`、`partitions.bin`、`boot_app0.bin`、`firmware.bin`、`voice_data.bin`：按固定偏移拆分的组件。
+- `bootloader.bin`、`partitions.bin`、`boot_app0.bin`、`firmware.bin`、`voice_data.bin`、`spiffs.bin`：按固定偏移拆分的组件。
 - `manifest.json`：板型、协议、Flash 容量、偏移、大小和逐文件 SHA‑256。
 - `THIRD_PARTY_ESP_SR_LICENSE.txt`：随中文语音数据交付的上游许可。
 

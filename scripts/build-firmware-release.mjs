@@ -70,6 +70,7 @@ if (!allowDirty) {
 
 run(process.execPath, [path.join(root, "scripts", "setup-esp-tts.mjs")]);
 run(pio, ["run", "-d", firmwareRoot]);
+run(pio, ["run", "-d", firmwareRoot, "-t", "buildfs"]);
 
 const sources = new Map([
   ["bootloader", path.join(buildRoot, "bootloader.bin")],
@@ -77,6 +78,7 @@ const sources = new Map([
   ["ota-initializer", path.join(platformioRoot, "packages", "framework-arduinoespressif32", "tools", "partitions", "boot_app0.bin")],
   ["application", path.join(buildRoot, "firmware.bin")],
   ["voice-data", path.join(ttsRoot, "voice_data", "esp_tts_voice_data_xiaoxin_small.dat")],
+  ["bundled-pet", path.join(buildRoot, "spiffs.bin")],
 ]);
 
 await rm(releaseRoot, { recursive: true, force: true });
