@@ -29,7 +29,7 @@ try {
       "USB CDC 发送缓冲必须容纳完整协议帧，避免握手 JSON 被截断",
     );
   }
-  if (!usbTransport.includes("return Serial.isPlugged()")) {
+  if (!usbTransport.includes("Serial.isConnected() || Serial.isPlugged()")) {
     throw new Error(
       "ESP32-P4 USB 协议必须按物理枚举状态主动握手，避免主机与设备互相等待",
     );

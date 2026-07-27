@@ -14,7 +14,7 @@ const char* UsbTransport::kind() const {
 }
 
 bool UsbTransport::connected() const {
-  return Serial.isPlugged();
+  return Serial.isConnected() || Serial.isPlugged();
 }
 
 void UsbTransport::poll(const MessageHandler& handler) {
