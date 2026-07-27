@@ -114,6 +114,8 @@ class Tab5Ui {
   std::uint64_t look_until_ = 0;
   std::uint64_t last_rendered_at_ = 0;
   bool pairing_screen_rendered_ = false;
+  bool normal_screen_rendered_ = false;
+  bool rendered_approval_present_ = false;
   String rendered_pairing_code_;
   String rendered_connection_detail_;
 };

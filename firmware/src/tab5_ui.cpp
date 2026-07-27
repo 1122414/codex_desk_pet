@@ -133,16 +133,23 @@ void Tab5Ui::render(
       }
       return;
     }
-  } else if (now_ms - last_rendered_at_ < 100) {
+  } else if (now_ms - last_rendered_at_ < 200) {
     return;
   }
   last_rendered_at_ = now_ms;
+  const auto clear_background = paired
+      ? !normal_screen_rendered_ ||
+          rendered_approval_present_ != snapshot.approval.present
+      : !pairing_screen_rendered_;
   M5.Display.startWrite();
-  M5.Display.fillScreen(kBackground);
+  if (clear_background) M5.Display.fillScreen(kBackground);
   if (paired) {
     pairing_screen_rendered_ = false;
     drawNormal(snapshot, now_ms, connection_detail, transfer_progress);
+    normal_screen_rendered_ = true;
+    rendered_approval_present_ = snapshot.approval.present;
   } else {
+    normal_screen_rendered_ = false;
     drawPairing(connection_detail);
     pairing_screen_rendered_ = true;
     rendered_pairing_code_ = pairing_code_;

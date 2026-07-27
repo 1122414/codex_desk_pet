@@ -65,6 +65,9 @@ try {
   ) {
     throw new Error("Tab5 原生帧缓冲绘制必须合并为单次显示事务");
   }
+  if (!tab5Ui.includes("if (clear_background) M5.Display.fillScreen")) {
+    throw new Error("Tab5 不能在每个动画帧清空整屏");
+  }
   const bundledPetDirectory = path.join(
     root,
     "firmware",
