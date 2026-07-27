@@ -8,6 +8,7 @@ import { HookApprovalBroker } from "./hook-approval-broker.js";
 import { HookTokenRepository } from "./hook-token-repository.js";
 import { PetCatalog } from "./pet-catalog.js";
 import { SettingsRepository } from "./settings-repository.js";
+import { MacBleDeviceManager } from "./transports/macos-ble-device-manager.js";
 import { UsbDeviceManager } from "./transports/usb-cdc-transport.js";
 
 const mode = process.env.CODEX_DESK_MODE ?? "direct";
@@ -58,6 +59,17 @@ usbManager.on("attached", (devicePath) => {
   if (process.env.CODEX_DESK_DEBUG === "1") console.warn(`[usb] attached ${devicePath}`);
 });
 await usbManager.start();
+const bleManager = new MacBleDeviceManager({
+  hub: deviceHub,
+  enabled: process.platform === "darwin" && process.env.CODEX_DESK_BLE !== "0",
+});
+bleManager.on("diagnostic", (message) => {
+  if (process.env.CODEX_DESK_DEBUG === "1") console.warn(`[ble] ${message}`);
+});
+bleManager.on("attached", ({ id, name }) => {
+  if (process.env.CODEX_DESK_DEBUG === "1") console.warn(`[ble] attached ${name} (${id})`);
+});
+await bleManager.start();
 
 const server = new DeskHttpServer({
   store,
@@ -80,6 +92,7 @@ async function shutdown() {
   hookApprovalBroker.close();
   await server.close();
   await deviceServer.close();
+  await bleManager.close();
   await usbManager.close();
   await deviceHub.close();
   await bridge.stop();
