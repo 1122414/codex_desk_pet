@@ -185,7 +185,11 @@ bool FirmwareApp::handleDeviceCommand(
 }
 
 void FirmwareApp::handleSnapshot(const Snapshot& snapshot) {
-  if (!model_.applySnapshot(snapshot)) return;
+  auto display_snapshot = snapshot;
+  if (have_local_telemetry_) {
+    display_snapshot.telemetry = local_telemetry_;
+  }
+  if (!model_.applySnapshot(display_snapshot)) return;
   requested_pet_ = "";
   if (!have_cued_state_ || snapshot.state != last_cued_state_) {
     last_cued_state_ = snapshot.state;
@@ -263,6 +267,8 @@ void FirmwareApp::updateTelemetry(const std::uint64_t now_ms) {
   telemetry.charging = M5.Power.isCharging();
   telemetry.wifi_rssi = wifi_transport_.rssi();
   telemetry.transport = primaryTransport();
+  local_telemetry_ = telemetry;
+  have_local_telemetry_ = true;
   model_.updateTelemetryLocally(telemetry);
   if (auto* client = primaryClient(); client != nullptr) {
     client->sendTelemetry(

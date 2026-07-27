@@ -380,10 +380,11 @@ export class DeskStore extends EventEmitter {
     const dailyBuckets = Array.isArray(this.accountUsage?.dailyUsageBuckets)
       ? this.accountUsage.dailyUsageBuckets
       : [];
-    const todayTokens = dailyBuckets
-      .filter((bucket) => bucket?.startDate === todayKey)
+    const todayBuckets = dailyBuckets
+      .filter((bucket) => bucket?.startDate === todayKey);
+    const todayTokens = todayBuckets
       .reduce((sum, bucket) => sum + safeInteger(bucket?.tokens), 0);
-    const activeStates = new Set(["running", "needs-input", "reviewing", "blocked"]);
+    const activeStates = new Set(["running", "needs-input", "reviewing"]);
     const activeCount = tasks.filter((task) => activeStates.has(task.state)).length;
 
     return {
@@ -411,6 +412,7 @@ export class DeskStore extends EventEmitter {
       accountTokens: {
         lifetime: safeInteger(this.accountUsage?.summary?.lifetimeTokens),
         today: todayTokens,
+        todayAvailable: todayBuckets.length > 0,
       },
       quota: weekly ? {
         available: true,

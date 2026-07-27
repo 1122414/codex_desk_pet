@@ -97,6 +97,7 @@ struct Quota {
 struct AccountTokens {
   std::uint64_t lifetime = 0;
   std::uint64_t today = 0;
+  bool today_available = false;
 };
 
 struct Clock {

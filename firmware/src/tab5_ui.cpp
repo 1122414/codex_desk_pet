@@ -105,6 +105,11 @@ bool Tab5Ui::begin(
   M5.Display.setBrightness(128);
   M5.Speaker.setVolume(48);
   bundled_pet_ready_ = SPIFFS.begin(false);
+  if (bundled_pet_ready_) {
+    bundled_pet_canvas_.setPsram(true);
+    bundled_pet_canvas_ready_ =
+        bundled_pet_canvas_.createSprite(384, 416) != nullptr;
+  }
   return frame_pixels_ != nullptr;
 }
 
@@ -426,6 +431,13 @@ bool Tab5Ui::drawBundledPet(const std::uint8_t frame_index) {
   const auto variant = frame_index % 8 >= 4 ? 1 : 0;
   char path[40]{};
   snprintf(path, sizeof(path), "/bundled-pet/r%uf%u.png", row, variant);
+  if (
+      bundled_pet_canvas_ready_ &&
+      bundled_pet_cached_path_ == path) {
+    bundled_pet_canvas_.pushSprite(
+        &canvas_, 36, 108, kPetTransparentColor);
+    return true;
+  }
   auto file = SPIFFS.open(path, FILE_READ);
   if (!file || file.size() == 0 || file.size() > 96 * 1024) return false;
   bundled_pet_buffer_.resize(file.size());
@@ -434,6 +446,28 @@ bool Tab5Ui::drawBundledPet(const std::uint8_t frame_index) {
       bundled_pet_buffer_.size());
   file.close();
   if (read != bundled_pet_buffer_.size()) return false;
+  if (bundled_pet_canvas_ready_) {
+    bundled_pet_canvas_.fillSprite(kPetTransparentColor);
+    const auto decoded = bundled_pet_canvas_.drawPng(
+        bundled_pet_buffer_.data(),
+        bundled_pet_buffer_.size(),
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        2.0F,
+        2.0F);
+    if (!decoded) {
+      bundled_pet_cached_path_ = "";
+      return false;
+    }
+    bundled_pet_cached_path_ = path;
+    bundled_pet_canvas_.pushSprite(
+        &canvas_, 36, 108, kPetTransparentColor);
+    return true;
+  }
   return canvas_.drawPng(
       bundled_pet_buffer_.data(),
       bundled_pet_buffer_.size(),
@@ -582,16 +616,24 @@ void Tab5Ui::drawQuota(const Snapshot& snapshot) {
   canvas_.setTextColor(kMuted, kPanel);
   canvas_.setTextSize(1);
   canvas_.drawString("本周额度", 470, 106);
+  const auto used = snapshot.quota.available ? snapshot.quota.used_percent : 0;
+  const auto remaining = snapshot.quota.available ? 100 - used : 0;
   canvas_.setTextColor(snapshot.quota.available ? kText : kMuted, kPanel);
   canvas_.setTextSize(2);
   canvas_.drawString(
       snapshot.quota.available
-          ? String(snapshot.quota.used_percent) + "%"
+          ? String(remaining) + "%"
           : "--",
       470,
       136);
   canvas_.setTextSize(1);
   canvas_.setTextColor(kMuted, kPanel);
+  if (snapshot.quota.available) {
+    canvas_.drawString(
+        "剩余 · 已用 " + String(used) + "%",
+        578,
+        146);
+  }
   String reset_text = "等待 Bridge 同步";
   if (snapshot.quota.available && snapshot.quota.resets_at > 0) {
     auto reset = static_cast<std::time_t>(
@@ -602,17 +644,16 @@ void Tab5Ui::drawQuota(const Snapshot& snapshot) {
     snprintf(
         text,
         sizeof(text),
-        "刷新 %02d/%02d %02d:%02d",
+        "重置 %02d/%02d %02d:%02d",
         local.tm_mon + 1,
         local.tm_mday,
         local.tm_hour,
         local.tm_min);
     reset_text = text;
   }
-  canvas_.drawString(reset_text, 578, 146);
-  canvas_.drawRoundRect(470, 184, 344, 12, 6, kPanelLight);
-  const auto used = snapshot.quota.available ? snapshot.quota.used_percent : 0;
-  canvas_.fillRoundRect(472, 186, 340 * used / 100, 8, 4, used >= 90 ? kRed : kBlue);
+  canvas_.drawString(reset_text, 470, 178);
+  canvas_.drawRoundRect(470, 198, 344, 10, 5, kPanelLight);
+  canvas_.fillRoundRect(472, 200, 340 * used / 100, 6, 3, used >= 90 ? kRed : kBlue);
 }
 
 void Tab5Ui::drawTokenSummary(const Snapshot& snapshot) {
@@ -632,7 +673,9 @@ void Tab5Ui::drawTokenSummary(const Snapshot& snapshot) {
   canvas_.setTextColor(kMuted, kPanel);
   canvas_.drawString("当前任务", 1000, 146);
   canvas_.drawString(
-      "今日 " + compactNumber(snapshot.account_tokens.today),
+      snapshot.account_tokens.today_available
+          ? "今日 " + compactNumber(snapshot.account_tokens.today)
+          : "今日 --",
       876,
       184);
   canvas_.drawString(
@@ -658,7 +701,8 @@ void Tab5Ui::drawTaskList(
   canvas_.setTextDatum(top_right);
   canvas_.setTextColor(kMuted, kPanel);
   canvas_.drawString(
-      String(snapshot.task_counts.total) + " 个任务",
+      "显示 " + String(snapshot.task_counts.visible) + "/" +
+          String(snapshot.task_counts.total),
       1218,
       252);
   canvas_.setTextDatum(top_left);

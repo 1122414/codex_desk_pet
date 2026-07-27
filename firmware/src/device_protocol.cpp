@@ -765,6 +765,8 @@ void DeviceProtocolClient::handleSnapshot(const JsonObjectConst payload) {
       payload["accountTokens"]["lifetime"].as<std::uint64_t>();
   snapshot.account_tokens.today =
       payload["accountTokens"]["today"].as<std::uint64_t>();
+  snapshot.account_tokens.today_available =
+      payload["accountTokens"]["todayAvailable"] | false;
   snapshot.quota.available = payload["quota"]["available"] | false;
   snapshot.quota.used_percent =
       std::min<int>(payload["quota"]["usedPercent"] | 0, 100);

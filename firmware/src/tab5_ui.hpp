@@ -92,9 +92,12 @@ class Tab5Ui {
 
   PetStore* pet_store_ = nullptr;
   M5Canvas canvas_{&M5.Display};
+  M5Canvas bundled_pet_canvas_{&M5.Display};
   std::uint16_t* frame_pixels_ = nullptr;
   std::vector<std::uint8_t> bundled_pet_buffer_;
+  String bundled_pet_cached_path_;
   bool bundled_pet_ready_ = false;
+  bool bundled_pet_canvas_ready_ = false;
   AnimationPlayer animation_player_;
   InputController input_{kInputLayout};
   Point last_touch_{};

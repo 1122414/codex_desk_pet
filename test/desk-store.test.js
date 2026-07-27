@@ -133,4 +133,35 @@ test("desk store selects the seven-day Codex rate-limit window and today's usage
   });
   assert.equal(snapshot.accountTokens.lifetime, 8_765_432);
   assert.equal(snapshot.accountTokens.today, 12_345);
+  assert.equal(snapshot.accountTokens.todayAvailable, true);
+});
+
+test("desk store does not count blocked goals as currently running or invent today's usage", () => {
+  const store = new DeskStore();
+  store.replaceThreads([
+    {
+      id: "running",
+      name: "正在执行",
+      updatedAt: 200,
+      status: { type: "active", activeFlags: [] },
+      turns: [],
+    },
+    {
+      id: "blocked",
+      name: "已经阻塞",
+      updatedAt: 100,
+      status: { type: "idle" },
+      goal: { status: "blocked" },
+      turns: [],
+    },
+  ]);
+  store.setAccountUsage({
+    summary: { lifetimeTokens: 100 },
+    dailyUsageBuckets: [{ startDate: "2026-07-26", tokens: 50 }],
+  });
+
+  const snapshot = store.snapshot(new Date(2026, 6, 27, 12).getTime());
+  assert.equal(snapshot.taskCounts.active, 1);
+  assert.equal(snapshot.accountTokens.today, 0);
+  assert.equal(snapshot.accountTokens.todayAvailable, false);
 });

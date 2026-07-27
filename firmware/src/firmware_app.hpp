@@ -47,6 +47,7 @@ class FirmwareApp {
   DeviceProtocolClient usb_client_;
   DeviceProtocolClient wifi_client_;
   DeskModel model_;
+  Telemetry local_telemetry_;
   String pairing_secret_;
   String connection_detail_ = "正在启动";
   String requested_pet_;
@@ -57,6 +58,7 @@ class FirmwareApp {
   bool have_cued_state_ = false;
   bool ntp_started_ = false;
   bool rtc_synced_ = false;
+  bool have_local_telemetry_ = false;
   std::uint64_t wifi_reboot_at_ = 0;
 };
 
