@@ -100,7 +100,14 @@ async function runTransportCycles(connectionCycles, seed) {
       previousTransport = transportKind;
 
       const commandId = `stability-command-${suffix}`;
-      const fault = cycle < 4 ? cycle : Math.floor(random() * 4);
+      const sampledFault = cycle < 4
+        ? [0, 1, 3, 2][cycle]
+        : Math.floor(random() * 4);
+      // USB intentionally permits one reliable message in flight, so it cannot
+      // reorder reliable frames. Exercise that fault only on the wider Wi-Fi
+      // window and use the dropped-ACK case for USB instead.
+      const fault =
+          sampledFault === 2 && transportKind === "usb" ? 3 : sampledFault;
       switch (fault) {
         case 0: {
           transports.right.duplicateNext();

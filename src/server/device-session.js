@@ -298,8 +298,9 @@ export class DeviceSession extends EventEmitter {
   }
 
   #transmit(type, payload, reliable) {
+    const sequence = reliable ? this.#nextSequence++ : this.#nextSequence;
     const plaintextEnvelope = createEnvelope({
-      sequence: this.#nextSequence++,
+      sequence,
       type,
       payload,
       sentAt: this.now(),
@@ -357,39 +358,39 @@ export class DeviceSession extends EventEmitter {
       return;
     }
 
-    const observation = this.#receiveWindow.observe(envelope);
-    if (observation.status === "duplicate") {
-      if (RELIABLE_MESSAGE_TYPES.includes(envelope.type)) this.#sendAck(envelope);
-      return;
-    }
-    if (observation.status === "gap") {
-      this.#send("error", {
-        code: "RESYNC_REQUIRED",
-        expectedSequence: observation.expected,
-        receivedSequence: envelope.sequence,
-      }, false);
-      return;
-    }
-
     if (envelope.type === "ack") {
       if (this.#outbox.acknowledge(envelope)) this.#flushReliableQueue();
       return;
     }
+    const reliable = RELIABLE_MESSAGE_TYPES.includes(envelope.type);
+    if (reliable) {
+      const observation = this.#receiveWindow.observe(envelope);
+      if (observation.status === "duplicate") {
+        this.#sendAck(envelope);
+        return;
+      }
+      if (observation.status === "gap") {
+        this.#send("error", {
+          code: "RESYNC_REQUIRED",
+          expectedSequence: observation.expected,
+          receivedSequence: envelope.sequence,
+        }, false);
+        return;
+      }
+    }
 
     if (handshake) {
-      if (envelope.type !== "ready" && RELIABLE_MESSAGE_TYPES.includes(envelope.type)) {
+      if (envelope.type !== "ready" && reliable) {
         this.#sendAck(envelope);
       }
       await this.#handleHandshake(envelope);
-      if (envelope.type === "ready" && RELIABLE_MESSAGE_TYPES.includes(envelope.type)) {
+      if (envelope.type === "ready" && reliable) {
         this.#sendAck(envelope);
       }
       return;
     }
 
-    if (RELIABLE_MESSAGE_TYPES.includes(envelope.type)) {
-      this.#sendAck(envelope);
-    }
+    if (reliable) this.#sendAck(envelope);
 
     switch (envelope.type) {
       case "heartbeat":

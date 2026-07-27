@@ -639,18 +639,6 @@ void DeviceProtocolClient::onTransportMessage(const String& message) {
     sendError("AUTHENTICATION_REQUIRED");
     return;
   }
-  const auto observation =
-      receive_window_.observe(sequence, type == "snapshot");
-  if (observation.status == SequenceStatus::Duplicate) {
-    if (isReliableType(type)) {
-      sendAck(id, sequence);
-    }
-    return;
-  }
-  if (observation.status == SequenceStatus::Gap) {
-    sendError("RESYNC_REQUIRED");
-    return;
-  }
   if (type == "ack") {
     if (
         payload["acknowledgedId"].is<const char*>() &&
@@ -661,17 +649,30 @@ void DeviceProtocolClient::onTransportMessage(const String& message) {
     }
     return;
   }
+  const auto reliable = isReliableType(type);
+  if (reliable) {
+    const auto observation =
+        receive_window_.observe(sequence, type == "snapshot");
+    if (observation.status == SequenceStatus::Duplicate) {
+      sendAck(id, sequence);
+      return;
+    }
+    if (observation.status == SequenceStatus::Gap) {
+      sendError("RESYNC_REQUIRED");
+      return;
+    }
+  }
   if (handshake) {
-    if (type != "ready" && isReliableType(type)) {
+    if (type != "ready" && reliable) {
       sendAck(id, sequence);
     }
     handleHandshake(type, payload);
-    if (type == "ready" && isReliableType(type)) {
+    if (type == "ready" && reliable) {
       sendAck(id, sequence);
     }
     return;
   }
-  if (isReliableType(type)) {
+  if (reliable) {
     sendAck(id, sequence);
   }
   handleReadyMessage(type, payload);
@@ -1036,7 +1037,7 @@ bool DeviceProtocolClient::sendEnvelope(
   }
 
   const auto id = randomId();
-  const auto sequence = next_sequence_++;
+  const auto sequence = reliable ? next_sequence_++ : next_sequence_;
   const auto sent_at = std::max<std::uint64_t>(millis(), 1);
   JsonDocument document;
   document["version"] = kProtocolVersion;

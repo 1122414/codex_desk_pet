@@ -153,7 +153,7 @@ test("duplicate device commands execute once and return a correlated result", as
   assert.equal(results[0].ok, true);
 });
 
-test("a lost ACK triggers retry while sequence recovery prevents duplicate execution", async (t) => {
+test("a lost ACK retries without resync or duplicate execution", async (t) => {
   const commands = [];
   const snapshots = [];
   const { bridge, device, transports, clock } = createSessions({
@@ -182,7 +182,7 @@ test("a lost ACK triggers retry while sequence recovery prevents duplicate execu
   device.tick(clock.value);
   await waitFor(() => device.pendingAcknowledgements === 0);
   assert.equal(commands.length, 1);
-  assert.ok(snapshots.length >= 2);
+  assert.equal(snapshots.length, 1);
 });
 
 test("pet resources transfer in chunks and install on the device cache", async (t) => {
