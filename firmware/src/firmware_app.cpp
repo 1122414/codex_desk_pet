@@ -15,6 +15,25 @@ constexpr std::uint64_t kWifiProvisioningRestartDelayMs = 750;
 constexpr DeviceCapabilities kTab5Capabilities{
     true, true, true, true, true, false, true, true, true};
 
+void restartWirelessCoprocessor() {
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+  if (M5.getBoard() != m5::board_t::board_M5Tab5) return;
+
+  auto& antenna = M5.getIOExpander(0);
+  antenna.setDirection(0, true);
+  antenna.setHighImpedance(0, false);
+  antenna.digitalWrite(0, false);
+
+  auto& power = M5.getIOExpander(1);
+  power.setDirection(0, true);
+  power.setHighImpedance(0, false);
+  power.digitalWrite(0, false);
+  delay(250);
+  power.digitalWrite(0, true);
+  delay(1'000);
+#endif
+}
+
 }  // namespace
 
 void FirmwareApp::setup() {
@@ -24,6 +43,7 @@ void FirmwareApp::setup() {
   config.internal_mic = false;
   config.internal_rtc = true;
   M5.begin(config);
+  restartWirelessCoprocessor();
   M5.Display.setRotation(1);
   setenv("TZ", "CST-8", 1);
   tzset();

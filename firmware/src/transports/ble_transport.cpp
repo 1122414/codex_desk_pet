@@ -3,6 +3,7 @@
 #include <BLEAdvertising.h>
 #include <BLEDevice.h>
 #include <BLEService.h>
+#include <WiFi.h>
 #include <mbedtls/sha256.h>
 
 #include <algorithm>
@@ -113,7 +114,9 @@ bool BleTransport::begin(const String& device_id) {
   if (receive_queue_ == nullptr) return false;
 
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
-  if (!BLEDevice::setPins(12, 13, 11, 10, 9, 8, 15)) {
+  if (
+      !WiFi.setPins(12, 13, 11, 10, 9, 8, 15) ||
+      !WiFi.mode(WIFI_STA)) {
     vQueueDelete(receive_queue_);
     receive_queue_ = nullptr;
     return false;

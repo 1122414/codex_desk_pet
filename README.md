@@ -136,7 +136,7 @@ npm run build:firmware
 npm run release:firmware
 ```
 
-第一条命令从 Espressif 官方仓库下载固定 commit 的 ESP-SR P4 中文 TTS 文件，并逐个校验 SHA‑256。下载物不进入 Git。固件目标、PioArduino 框架和库版本都固定在 `firmware/platformio.ini`。当前构建目标为 `esp32-p4-evboard`，并通过 Tab5 的 C6 SDIO 连线启用 Wi‑Fi。
+第一条命令从 Espressif 官方仓库下载固定 commit 的 ESP-SR P4 中文 TTS 文件，并逐个校验 SHA‑256。下载物不进入 Git。固件目标、PioArduino 框架和库版本都固定在 `firmware/platformio.ini`。当前构建目标为 `m5stack-tab5-p4`，使用 Tab5 专用板型把 microSD 固定到 SDMMC Slot 0，并通过 Slot 1 上的 C6 SDIO 连线启用 Wi‑Fi 与 BLE。
 
 TTS 使用独立的 `voice_data` 分区；只烧录应用固件不会得到语音。`release:firmware` 会把 bootloader、分区表、应用和经过校验的语音数据合并为完整工厂镜像。设备到手后明确指定串口烧录：
 
