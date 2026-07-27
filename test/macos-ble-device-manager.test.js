@@ -101,3 +101,16 @@ test("MacBleDeviceManager closes the active transport on disconnect", async () =
   assert.equal(transport.open, false);
   await manager.close();
 });
+
+test("MacBleDeviceManager ignores helper stdin EPIPE during shutdown", async () => {
+  const child = new FakeChild();
+  const manager = new MacBleDeviceManager({
+    hub: { attachTransport() {} },
+    enabled: true,
+    buildHelper: async () => "/tmp/fake-ble-helper",
+    spawnHelper: () => child,
+  });
+  await manager.start();
+  child.stdin.emit("error", Object.assign(new Error("broken pipe"), { code: "EPIPE" }));
+  await manager.close();
+});

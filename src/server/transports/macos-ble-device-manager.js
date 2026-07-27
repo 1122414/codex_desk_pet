@@ -205,6 +205,11 @@ export class MacBleDeviceManager extends EventEmitter {
     this.#stdoutBuffer = "";
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
+    child.stdin.on("error", (error) => {
+      if (!this.#closed && error.code !== "EPIPE") {
+        this.emit("diagnostic", `BLE helper input failed: ${error.message}`);
+      }
+    });
     child.stdout.on("data", (chunk) => this.#acceptOutput(chunk));
     child.stderr.on("data", (chunk) => {
       const message = chunk.trim();
