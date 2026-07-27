@@ -34,6 +34,15 @@ try {
       "ESP32-P4 USB 协议必须按物理枚举状态主动握手，避免主机与设备互相等待",
     );
   }
+  const firmwareApp = await readFile(
+    path.join(root, "firmware", "src", "firmware_app.cpp"),
+    "utf8",
+  );
+  if (!firmwareApp.includes("esp_task_wdt_delete(idle_task)")) {
+    throw new Error(
+      "Tab5 必须移除框架遗留的 idle 看门狗订阅，避免显示与音频负载触发误重启",
+    );
+  }
   const sources = (await readdir(coreDirectory))
     .filter((file) => file.endsWith(".cpp"))
     .sort()

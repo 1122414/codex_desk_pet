@@ -40,6 +40,12 @@ void FirmwareApp::setup() {
   if (watchdog_result == ESP_ERR_INVALID_STATE) {
     esp_task_wdt_reconfigure(&watchdog_config);
   }
+  for (BaseType_t core = 0; core < portNUM_PROCESSORS; ++core) {
+    const auto idle_task = xTaskGetIdleTaskHandleForCore(core);
+    if (idle_task != nullptr) {
+      esp_task_wdt_delete(idle_task);
+    }
+  }
 #else
   esp_task_wdt_init(10, true);
 #endif
