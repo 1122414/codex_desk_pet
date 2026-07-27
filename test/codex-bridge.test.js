@@ -24,6 +24,23 @@ class FakeAppServerClient extends EventEmitter {
     this.requests.push({ method, params });
     if (method === "thread/list") return { data: this.threadList };
     if (method === "thread/read") return { thread: { turns: [] } };
+    if (method === "account/rateLimits/read") {
+      return {
+        rateLimits: {
+          limitId: "codex",
+          primary: { usedPercent: 8, windowDurationMins: 300, resetsAt: 100 },
+          secondary: { usedPercent: 21, windowDurationMins: 10_080, resetsAt: 200 },
+        },
+        rateLimitsByLimitId: null,
+      };
+    }
+    if (method === "account/usage/read") {
+      return {
+        summary: { lifetimeTokens: 123_456 },
+        dailyUsageBuckets: [],
+      };
+    }
+    if (method === "thread/goal/get") return { goal: null };
     throw new Error(`Unexpected fake request: ${method}`);
   }
 
@@ -63,6 +80,46 @@ test("mock bridge can exercise a safely correlated approval flow", async () => {
   await bridge.decideApproval(approval.id, "accept");
   assert.equal(store.snapshot().approval, null);
   await assert.rejects(() => bridge.decideApproval(approval.id, "accept"), /no longer pending/);
+});
+
+test("bridge loads official weekly quota, account usage, and thread goals", async () => {
+  const store = new DeskStore();
+  const client = new FakeAppServerClient();
+  client.threadList = [{
+    id: "thread-goal",
+    name: "同步真实状态",
+    updatedAt: Date.now() / 1_000,
+    status: { type: "notLoaded" },
+  }];
+  const originalRequest = client.request.bind(client);
+  client.request = async (method, params) => {
+    if (method === "thread/goal/get") {
+      return {
+        goal: {
+          threadId: params.threadId,
+          objective: "完成桌宠",
+          status: "active",
+          tokenBudget: null,
+          tokensUsed: 4321,
+          timeUsedSeconds: 20,
+          createdAt: 1,
+          updatedAt: Date.now() / 1_000,
+        },
+      };
+    }
+    return originalRequest(method, params);
+  };
+  const bridge = new CodexBridge({ store, client, pollIntervalMs: 0 });
+  await bridge.start();
+
+  const snapshot = store.snapshot();
+  assert.equal(snapshot.quota.available, true);
+  assert.equal(snapshot.quota.usedPercent, 21);
+  assert.equal(snapshot.quota.resetsAt, 200);
+  assert.equal(snapshot.accountTokens.lifetime, 123_456);
+  assert.equal(snapshot.tasks[0].state, "running");
+  assert.equal(snapshot.tasks[0].tokens, 4321);
+  await bridge.stop();
 });
 
 test("bridge maps current command approval fields and returns the exact wire decision", async () => {

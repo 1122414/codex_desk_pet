@@ -218,6 +218,8 @@ export class CodexBridge extends EventEmitter {
   #clientBound = false;
   #started = false;
   #stopping = false;
+  #lastAccountRefreshAt = 0;
+  #lastGoalRefreshAt = 0;
 
   constructor({
     store,
@@ -228,6 +230,8 @@ export class CodexBridge extends EventEmitter {
     reconnectJitterRatio = 0.2,
     random = Math.random,
     hookApprovalBroker = null,
+    accountRefreshIntervalMs = 60_000,
+    goalRefreshIntervalMs = 12_000,
   } = {}) {
     super();
     if (!store) throw new TypeError("CodexBridge requires a DeskStore");
@@ -242,6 +246,8 @@ export class CodexBridge extends EventEmitter {
     this.reconnectJitterRatio = reconnectJitterRatio;
     this.random = random;
     this.hookApprovalBroker = hookApprovalBroker;
+    this.accountRefreshIntervalMs = accountRefreshIntervalMs;
+    this.goalRefreshIntervalMs = goalRefreshIntervalMs;
     this.initialization = null;
   }
 
@@ -328,7 +334,62 @@ export class CodexBridge extends EventEmitter {
       archived: false,
       useStateDbOnly: true,
     });
-    this.store.replaceThreads(response?.data ?? []);
+    const threads = response?.data ?? [];
+    this.store.replaceThreads(threads);
+    await Promise.all([
+      this.#refreshAccountData(),
+      this.#refreshGoals(threads),
+    ]);
+  }
+
+  async #refreshAccountData(force = false) {
+    const now = Date.now();
+    if (
+      !force &&
+      this.#lastAccountRefreshAt &&
+      now - this.#lastAccountRefreshAt < this.accountRefreshIntervalMs
+    ) return;
+    this.#lastAccountRefreshAt = now;
+    const [rateLimits, usage] = await Promise.allSettled([
+      this.client.request("account/rateLimits/read", {}),
+      this.client.request("account/usage/read", {}),
+    ]);
+    if (rateLimits.status === "fulfilled") {
+      this.store.setRateLimits(rateLimits.value);
+    } else {
+      this.emit("diagnostic", `Rate-limit lookup failed: ${rateLimits.reason.message}`);
+    }
+    if (usage.status === "fulfilled") {
+      this.store.setAccountUsage(usage.value);
+    } else {
+      this.emit("diagnostic", `Account usage lookup failed: ${usage.reason.message}`);
+    }
+  }
+
+  async #refreshGoals(threads, force = false) {
+    const now = Date.now();
+    if (
+      !force &&
+      this.#lastGoalRefreshAt &&
+      now - this.#lastGoalRefreshAt < this.goalRefreshIntervalMs
+    ) return;
+    this.#lastGoalRefreshAt = now;
+    const candidates = (threads ?? [])
+      .filter((thread) => typeof thread?.id === "string" && thread.id)
+      .slice(0, 12);
+    const results = await Promise.allSettled(
+      candidates.map((thread) => this.client.request("thread/goal/get", { threadId: thread.id })),
+    );
+    results.forEach((result, index) => {
+      if (result.status === "fulfilled") {
+        this.store.patchThread(candidates[index].id, { goal: result.value?.goal ?? null });
+      } else {
+        this.emit(
+          "diagnostic",
+          `Goal lookup failed for ${candidates[index].id}: ${result.reason.message}`,
+        );
+      }
+    });
   }
 
   async decideApproval(id, decision) {
@@ -411,6 +472,8 @@ export class CodexBridge extends EventEmitter {
     this.#expirePendingRequests();
     await this.client?.stop();
     this.initialization = null;
+    this.#lastAccountRefreshAt = 0;
+    this.#lastGoalRefreshAt = 0;
     this.store.setConnection({ status: "disconnected", mode: this.mode, error: null });
   }
 

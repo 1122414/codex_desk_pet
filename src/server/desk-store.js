@@ -2,8 +2,10 @@ import { EventEmitter } from "node:events";
 import {
   computeLevel,
   extractTotalTokens,
+  getThreadRecency,
   mapThreadToPresentation,
   selectDisplayThread,
+  sortDisplayThreads,
   summarizeThread,
   toEpochMs,
 } from "../shared/codex-state.js";
@@ -20,6 +22,58 @@ const DEFAULT_TELEMETRY = Object.freeze({
   wifiRssi: null,
   lastSeenAt: null,
 });
+const MAX_DEVICE_TASKS = 12;
+const WEEKLY_WINDOW_MINUTES = 7 * 24 * 60;
+
+function safeInteger(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.floor(number) : 0;
+}
+
+function localDateKey(now) {
+  const date = new Date(now);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function selectWeeklyWindow(response) {
+  const snapshots = [
+    response?.rateLimitsByLimitId?.codex,
+    response?.rateLimits,
+  ].filter(Boolean);
+  for (const snapshot of snapshots) {
+    const windows = [snapshot.primary, snapshot.secondary].filter(Boolean);
+    const exact = windows.find((window) => window.windowDurationMins === WEEKLY_WINDOW_MINUTES);
+    if (exact) return { ...exact, limitName: snapshot.limitName ?? "Codex" };
+  }
+  return null;
+}
+
+function taskProgress(thread) {
+  const plan = Array.isArray(thread.plan) ? thread.plan : [];
+  if (plan.length) {
+    const completed = plan.filter((step) => step?.status === "completed").length;
+    return {
+      known: true,
+      completed,
+      total: plan.length,
+      percent: Math.round((completed / plan.length) * 100),
+    };
+  }
+  const budget = safeInteger(thread.goal?.tokenBudget);
+  const used = safeInteger(thread.goal?.tokensUsed);
+  if (budget > 0) {
+    return {
+      known: true,
+      completed: Math.min(used, budget),
+      total: budget,
+      percent: Math.min(100, Math.round((used / budget) * 100)),
+    };
+  }
+  return { known: false, completed: 0, total: 0, percent: 0 };
+}
 
 function serializeApproval(approval) {
   if (!approval) return null;
@@ -46,6 +100,8 @@ export class DeskStore extends EventEmitter {
     this.telemetry = { ...DEFAULT_TELEMETRY };
     this.pendingUserInput = null;
     this.previewAnimation = null;
+    this.rateLimits = null;
+    this.accountUsage = null;
   }
 
   get revision() {
@@ -117,6 +173,31 @@ export class DeskStore extends EventEmitter {
           ...(method === "turn/started" ? { lastError: null, errorWillRetry: false } : {}),
         });
         return;
+      case "turn/plan/updated":
+        this.patchThread(params.threadId, {
+          plan: Array.isArray(params.plan) ? params.plan : [],
+          planExplanation: params.explanation ?? null,
+          planTurnId: params.turnId ?? null,
+        });
+        return;
+      case "thread/goal/updated":
+        this.patchThread(params.threadId, { goal: params.goal ?? null });
+        return;
+      case "thread/goal/cleared":
+        this.patchThread(params.threadId, { goal: null });
+        return;
+      case "account/rateLimits/updated": {
+        const update = params.rateLimits ?? null;
+        const limitId = update?.limitId;
+        const byLimitId = { ...(this.rateLimits?.rateLimitsByLimitId ?? {}) };
+        if (limitId) byLimitId[limitId] = update;
+        this.setRateLimits({
+          ...this.rateLimits,
+          rateLimits: update ?? this.rateLimits?.rateLimits ?? null,
+          rateLimitsByLimitId: Object.keys(byLimitId).length ? byLimitId : null,
+        });
+        return;
+      }
       case "item/autoApprovalReview/started":
         this.patchThread(params.threadId, { reviewing: true });
         return;
@@ -253,6 +334,16 @@ export class DeskStore extends EventEmitter {
     this.#changed("telemetry");
   }
 
+  setRateLimits(rateLimits) {
+    this.rateLimits = rateLimits ?? null;
+    this.#changed("rate-limits");
+  }
+
+  setAccountUsage(accountUsage) {
+    this.accountUsage = accountUsage ?? null;
+    this.#changed("account-usage");
+  }
+
   setPreviewAnimation(animation) {
     if (animation !== null) getAnimation(animation);
     this.previewAnimation = animation;
@@ -270,6 +361,30 @@ export class DeskStore extends EventEmitter {
     const approval = selected
       ? [...this.#approvals.values()].find((candidate) => candidate.threadId === selected.id)
       : [...this.#approvals.values()][0];
+    const tasks = sortDisplayThreads(threads, { now })
+      .slice(0, MAX_DEVICE_TASKS)
+      .map((thread) => {
+        const presentation = mapThreadToPresentation(thread, { now });
+        return {
+          id: thread.id,
+          title: summarizeThread(thread).slice(0, 56),
+          state: presentation.state,
+          updatedAt: Math.floor(getThreadRecency(thread) / 1_000),
+          tokens: extractTotalTokens(thread.tokenUsage) || safeInteger(thread.goal?.tokensUsed),
+          progress: taskProgress(thread),
+          goalStatus: thread.goal?.status ?? null,
+        };
+      });
+    const weekly = selectWeeklyWindow(this.rateLimits);
+    const todayKey = localDateKey(now);
+    const dailyBuckets = Array.isArray(this.accountUsage?.dailyUsageBuckets)
+      ? this.accountUsage.dailyUsageBuckets
+      : [];
+    const todayTokens = dailyBuckets
+      .filter((bucket) => bucket?.startDate === todayKey)
+      .reduce((sum, bucket) => sum + safeInteger(bucket?.tokens), 0);
+    const activeStates = new Set(["running", "needs-input", "reviewing", "blocked"]);
+    const activeCount = tasks.filter((task) => activeStates.has(task.state)).length;
 
     return {
       revision: this.#revision,
@@ -286,7 +401,34 @@ export class DeskStore extends EventEmitter {
         updatedAt: selected.updatedAt ?? selected.recencyAt ?? null,
         threadStatus: selected.status?.type ?? "notLoaded",
       } : null,
+      tasks,
+      taskCounts: {
+        total: threads.length,
+        active: activeCount,
+        visible: tasks.length,
+      },
       tokens: { total: totalTokens, level },
+      accountTokens: {
+        lifetime: safeInteger(this.accountUsage?.summary?.lifetimeTokens),
+        today: todayTokens,
+      },
+      quota: weekly ? {
+        available: true,
+        usedPercent: Math.max(0, Math.min(100, Math.round(Number(weekly.usedPercent) || 0))),
+        resetsAt: safeInteger(weekly.resetsAt),
+        windowMinutes: safeInteger(weekly.windowDurationMins),
+        name: weekly.limitName,
+      } : {
+        available: false,
+        usedPercent: 0,
+        resetsAt: 0,
+        windowMinutes: 0,
+        name: "Codex",
+      },
+      clock: {
+        unixMs: now,
+        utcOffsetMinutes: -new Date(now).getTimezoneOffset(),
+      },
       pet: { selectedId: this.selectedPetId },
       approval: serializeApproval(approval),
       userInput: serializeUserInput(this.pendingUserInput),

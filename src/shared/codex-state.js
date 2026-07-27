@@ -43,8 +43,13 @@ export function mapThreadToPresentation(thread, options = {}) {
     Number.isFinite(hookAge) &&
     hookAge <= hookActivityWindowMs,
   );
+  const goalStatus = thread?.goal?.status;
 
-  if (status.type === "systemError" || lastTurn?.status === "failed") {
+  if (
+    status.type === "systemError" ||
+    lastTurn?.status === "failed" ||
+    ["blocked", "usageLimited", "budgetLimited"].includes(goalStatus)
+  ) {
     return { state: DEVICE_STATES.BLOCKED, animation: "failed" };
   }
 
@@ -63,6 +68,7 @@ export function mapThreadToPresentation(thread, options = {}) {
   }
 
   if (
+    goalStatus === "active" ||
     status.type === "active" ||
     lastTurn?.status === "inProgress" ||
     (freshHook && thread.hookState === DEVICE_STATES.RUNNING)
@@ -71,14 +77,16 @@ export function mapThreadToPresentation(thread, options = {}) {
   }
 
   const hookCompleted = freshHook && thread.hookState === DEVICE_STATES.COMPLETED;
+  const goalCompleted = goalStatus === "complete";
   const completedAt = Math.max(
     toEpochMs(lastTurn?.completedAt),
+    goalCompleted ? toEpochMs(thread?.goal?.updatedAt) : 0,
     hookCompleted
       ? toEpochMs(thread.hookCompletedAt)
       : 0,
   );
   const elapsed = completedAt ? Math.max(0, now - completedAt) : Infinity;
-  if ((lastTurn?.status === "completed" || hookCompleted) && elapsed <= completionWindowMs) {
+  if ((lastTurn?.status === "completed" || hookCompleted || goalCompleted) && elapsed <= completionWindowMs) {
     return {
       state: DEVICE_STATES.COMPLETED,
       animation: elapsed <= Math.min(1_500, completionWindowMs) ? "jumping" : "waving",
@@ -105,11 +113,17 @@ export function selectDisplayThread(threads, options = {}) {
   if (!Array.isArray(threads) || threads.length === 0) return null;
   const now = options.now ?? Date.now();
 
+  return sortDisplayThreads(threads, { now })[0];
+}
+
+export function sortDisplayThreads(threads, options = {}) {
+  if (!Array.isArray(threads)) return [];
+  const now = options.now ?? Date.now();
   return [...threads].sort((left, right) => {
     const a = threadPriority(left, now);
     const b = threadPriority(right, now);
     return b.priority - a.priority || b.recency - a.recency || String(left.id).localeCompare(String(right.id));
-  })[0];
+  });
 }
 
 export function extractTotalTokens(tokenUsage) {
