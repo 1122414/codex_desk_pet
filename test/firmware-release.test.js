@@ -69,14 +69,14 @@ test("Tab5 release places the ESP32-P4 bootloader at its ROM boot offset", () =>
   assert.equal(bootloader.maximumBytes, 0x6000);
   assert.deepEqual(
     { offset: application.offset, maximumBytes: application.maximumBytes },
-    { offset: 0x10000, maximumBytes: 0x620000 },
+    { offset: 0x10000, maximumBytes: 0x640000 },
   );
   assert.deepEqual(
     { offset: voiceData.offset, maximumBytes: voiceData.maximumBytes },
-    { offset: 0xc50000, maximumBytes: 0x2d0000 },
+    { offset: 0xc90000, maximumBytes: 0x2d0000 },
   );
   assert.deepEqual(
     { offset: bundledPet.offset, maximumBytes: bundledPet.maximumBytes },
-    { offset: 0xf20000, maximumBytes: 0x0d0000 },
+    { offset: 0xf60000, maximumBytes: 0x090000 },
   );
 });

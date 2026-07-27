@@ -52,7 +52,7 @@ npm run smoke:codex
 - 浏览器 Mock 验收：1280×720 布局、9/9 动画、16/16 V2 看向方向、V1 能力禁用、Pet 切换和审批均通过，浏览器控制台 0 错误。
 - `npm run smoke:codex`：Codex Desktop `0.146.0-alpha.3.1` 的 App Server 初始化和最近线程读取通过。
 - `npm run doctor`：Codex Hooks 已安装并识别 6 类事件；PlatformIO 与完整发布包健康。
-- v0.2.0 应用与 SPIFFS 已分别通过真实 ESP32-P4 工具链构建；正式工厂镜像在最终发布步骤重新生成并以清单 SHA-256 为准。
+- v0.2.0 完整工厂镜像已通过真实 ESP32-P4 工具链构建并逐组件复验：16,711,680 Bytes，SHA-256 `062387f75214f1a0a95d3ee0759bbb461ce95445f27e71d7be046ec40ad0bd6a`。
 
 ## 用户回公司后的剩余清单
 
