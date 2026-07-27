@@ -67,6 +67,12 @@ try {
   ) {
     throw new Error("Tab5 必须跳过内容未变化的整屏提交，避免周期性闪烁");
   }
+  if (
+    !tab5Ui.includes("frame_index != rendered_pet_frame_index_") ||
+    !tab5Ui.includes("pushCanvasRegion(kPetSpriteArea)")
+  ) {
+    throw new Error("Tab5 动画帧必须局部提交，不能被静态界面缓存跳过");
+  }
   const bundledPetDirectory = path.join(
     root,
     "firmware",
@@ -104,6 +110,9 @@ try {
   );
   if (firmwareApp.includes("esp_task_wdt_add(nullptr)")) {
     throw new Error("Tab5 UI 主循环不能订阅会触发循环重启的任务看门狗");
+  }
+  if (!firmwareApp.includes('pet_id == "chibi-skadi"')) {
+    throw new Error("Tab5 内置 Pet 不得重复请求外部素材包");
   }
   const deviceProtocol = await readFile(
     path.join(root, "firmware", "src", "device_protocol.cpp"),

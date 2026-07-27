@@ -114,8 +114,11 @@ void FirmwareApp::loop() {
   requestSelectedPet(now_ms);
   handleUiAction(ui_.poll(model_.snapshot(), now_ms, paired()));
 
+  const auto& selected_pet_id = model_.snapshot().selected_pet_id;
+  const auto transfer_progress =
+      selected_pet_id == "chibi-skadi" ? 0 : pet_store_.transferProgress();
   ui_.render(
-      model_.snapshot(), now_ms, paired(), connection_detail_, pet_store_.transferProgress());
+      model_.snapshot(), now_ms, paired(), connection_detail_, transfer_progress);
   if (wifi_reboot_at_ != 0 && now_ms >= wifi_reboot_at_) {
     ESP.restart();
   }
@@ -313,7 +316,13 @@ void FirmwareApp::syncClock(const std::uint64_t now_ms) {
 
 void FirmwareApp::requestSelectedPet(const std::uint64_t now_ms) {
   const String pet_id(model_.snapshot().selected_pet_id.c_str());
-  if (pet_id.isEmpty() || pet_id == "codex-core" || !pet_store_.available()) return;
+  if (
+      pet_id.isEmpty() ||
+      pet_id == "codex-core" ||
+      pet_id == "chibi-skadi" ||
+      !pet_store_.available()) {
+    return;
+  }
   auto* client = primaryClient();
   if (client == nullptr) return;
   if (requested_pet_ == pet_id && now_ms - requested_at_ < kResourceRetryMs) return;

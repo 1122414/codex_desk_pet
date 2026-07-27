@@ -241,6 +241,20 @@ void Tab5Ui::render(
         transfer_progress,
         minute_bucket);
     if (normal_screen_rendered_ && fingerprint == rendered_fingerprint_) {
+      if (!snapshot.approval.present) {
+        const auto frame_index = frameIndex(snapshot, now_ms);
+        if (frame_index != rendered_pet_frame_index_) {
+          canvas_.fillRect(
+              kPetSpriteArea.x,
+              kPetSpriteArea.y,
+              kPetSpriteArea.width,
+              kPetSpriteArea.height,
+              kPanel);
+          drawPetFrame(snapshot, frame_index);
+          pushCanvasRegion(kPetSpriteArea);
+          rendered_pet_frame_index_ = frame_index;
+        }
+      }
       if (
           !snapshot.approval.present &&
           task_scroll_pixels_ != rendered_task_scroll_pixels_) {
@@ -506,6 +520,28 @@ void Tab5Ui::drawPairing(const String& connection_detail) {
 
 void Tab5Ui::drawPet(const Snapshot& snapshot, const std::uint64_t now_ms) {
   const auto index = frameIndex(snapshot, now_ms);
+  drawPetFrame(snapshot, index);
+  rendered_pet_frame_index_ = index;
+  String pet_name(snapshot.selected_pet_id.c_str());
+  const auto selected = std::find_if(
+      snapshot.pets.begin(), snapshot.pets.end(),
+      [&snapshot](const PetSummary& pet) { return pet.id == snapshot.selected_pet_id; });
+  if (selected != snapshot.pets.end() && !selected->display_name.empty()) {
+    pet_name = String(selected->display_name.c_str());
+  }
+  canvas_.setTextColor(kText, kPanel);
+  canvas_.setTextSize(1);
+  canvas_.setTextDatum(top_left);
+  drawTruncated(pet_name, 62, 546, 332);
+  canvas_.setTextColor(stateColor(snapshot.state), kPanel);
+  canvas_.setTextDatum(middle_center);
+  canvas_.drawString(stateLabel(snapshot.state), 228, 590);
+  canvas_.setTextDatum(top_left);
+}
+
+void Tab5Ui::drawPetFrame(
+    const Snapshot& snapshot,
+    const std::uint8_t index) {
   String error;
   const auto custom = snapshot.selected_pet_id != "codex-core" && pet_store_ != nullptr &&
       pet_store_->loadFrame(
@@ -524,21 +560,6 @@ void Tab5Ui::drawPet(const Snapshot& snapshot, const std::uint64_t now_ms) {
   if (!drawn) {
     drawFallbackPet(snapshot.animation, index % 8);
   }
-  String pet_name(snapshot.selected_pet_id.c_str());
-  const auto selected = std::find_if(
-      snapshot.pets.begin(), snapshot.pets.end(),
-      [&snapshot](const PetSummary& pet) { return pet.id == snapshot.selected_pet_id; });
-  if (selected != snapshot.pets.end() && !selected->display_name.empty()) {
-    pet_name = String(selected->display_name.c_str());
-  }
-  canvas_.setTextColor(kText, kPanel);
-  canvas_.setTextSize(1);
-  canvas_.setTextDatum(top_left);
-  drawTruncated(pet_name, 62, 546, 332);
-  canvas_.setTextColor(stateColor(snapshot.state), kPanel);
-  canvas_.setTextDatum(middle_center);
-  canvas_.drawString(stateLabel(snapshot.state), 228, 590);
-  canvas_.setTextDatum(top_left);
 }
 
 bool Tab5Ui::drawBundledPet(const std::uint8_t frame_index) {

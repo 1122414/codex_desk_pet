@@ -50,6 +50,7 @@ class Tab5Ui {
       std::uint8_t transfer_progress);
   void drawPairing(const String& connection_detail);
   void drawPet(const Snapshot& snapshot, std::uint64_t now_ms);
+  void drawPetFrame(const Snapshot& snapshot, std::uint8_t frame_index);
   bool drawBundledPet(std::uint8_t frame_index);
   void drawFallbackPet(Animation animation, std::uint8_t frame);
   void drawApproval(const Approval& approval);
@@ -78,6 +79,7 @@ class Tab5Ui {
   static constexpr std::int16_t kScreenWidth = 1280;
   static constexpr std::int16_t kScreenHeight = 720;
   static constexpr Rect kPetArea{24, 88, 408, 608};
+  static constexpr Rect kPetSpriteArea{36, 108, 384, 416};
   static constexpr Rect kPreviousPetButton{44, 636, 64, 44};
   static constexpr Rect kNextPetButton{348, 636, 64, 44};
   static constexpr Rect kTaskListArea{464, 288, 758, 390};
@@ -117,6 +119,7 @@ class Tab5Ui {
   float look_degrees_ = 0.0F;
   std::uint64_t look_until_ = 0;
   std::uint64_t rendered_fingerprint_ = 0;
+  std::uint8_t rendered_pet_frame_index_ = UINT8_MAX;
   bool pairing_screen_rendered_ = false;
   bool normal_screen_rendered_ = false;
   String rendered_pairing_code_;
