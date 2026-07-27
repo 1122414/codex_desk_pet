@@ -144,7 +144,7 @@ TTS 使用独立的 `voice_data` 分区；只烧录应用固件不会得到语�
 npm run flash:firmware -- --port /dev/cu.usbmodemXXXX
 ```
 
-脚本会在接触设备前校验清单、所有组件和整机镜像；不会自动猜测串口，也不会默认擦除整片 Flash。完整新手安装与恢复步骤见 [安装与恢复](docs/install-and-recovery.md)。当前 Tab5 已完成整机烧录、USB 枚举、应用升级和触摸硬件诊断；扬声器试听、无线和长稳仍按真机清单验收。
+脚本会在接触设备前校验清单、所有组件和整机镜像；不会自动猜测串口，也不会默认擦除整片 Flash。完整新手安装与恢复步骤见 [安装与恢复](docs/install-and-recovery.md)。当前 Tab5 已完成整机烧录、USB 枚举、真实账户配对、加密 USB 状态同步和触摸硬件诊断；扬声器试听、无线和长稳仍按真机清单验收。
 
 ## 验证
 
@@ -174,7 +174,7 @@ npm run smoke:codex
 - 当前 Codex App Server 没有公开 Pet 列表或 Pet 选择事件。MVP 由 Desk Bridge 同步触屏和电脑控制面板，但不会写入 Codex 原生客户端的私有设置。
 - Hooks 能让设备看到其他 Codex 客户端的 Running、Needs input 和 Completed 生命周期，并把设备对 `PermissionRequest` 的明确允许/拒绝返回原客户端。详情不完整、超过设备显示上限、Bridge 不可用或 115 秒超时时不代替用户决定，Codex 回到原生审批流程。
 - 当前等级根据“正在展示的线程”的累计 Token 计算，每 50,000 Token 一级；它不是 Codex 官方等级。
-- 完整 Tab5 固件已经通过真实 ESP32-P4 工具链编译并在真机完成整机烧录、USB 枚举和触摸硬件诊断；C6 Wi‑Fi、microSD、自定义 Pet、扬声器、电量曲线和最新配对键盘手感仍需物理验收。Tab5 MVP 不提供 BLE。
+- 完整 Tab5 固件已经通过真实 ESP32-P4 工具链编译并在真机完成整机烧录、USB 枚举、真实账户配对、加密 USB 状态同步和配对键盘验收；C6 Wi‑Fi、microSD、自定义 Pet、扬声器和电量曲线仍需物理验收。Tab5 MVP 不提供 BLE。
 - 设备固件已链接 Espressif ESP-SR v1.2.0 离线中文 TTS；六种状态、Pet 安装/切换和配对都在独立音频任务中播报，缺失或损坏的 `voice_data` 会安全降级为不同音型。真机语音分区已完成烧录、映射和 CRC 完整性校验，音质与音量仍需真机试听。
 - 控制面板固定监听 `127.0.0.1`；真机只连接独立的 `4318` 设备端口。设备 payload 已做应用层加密，但公网部署仍需额外的防火墙、WSS/反向代理和产品运维方案。
 

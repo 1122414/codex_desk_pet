@@ -269,6 +269,7 @@ void DeviceProtocolClient::poll(const std::uint64_t now_ms) {
   retryPending(now_ms);
   if (
       state_ == State::Handshaking &&
+      now_ms >= connected_at_ &&
       now_ms - connected_at_ >= kHandshakeTimeoutMs) {
     notifyState(false, "handshake timeout");
     startHandshake(now_ms, false);
@@ -276,6 +277,7 @@ void DeviceProtocolClient::poll(const std::uint64_t now_ms) {
   }
   if (
       state_ == State::Ready &&
+      now_ms >= last_received_at_ &&
       now_ms - last_received_at_ >= kConnectionTimeoutMs) {
     notifyState(false, "connection timeout");
     startHandshake(now_ms, false);
@@ -283,6 +285,7 @@ void DeviceProtocolClient::poll(const std::uint64_t now_ms) {
   }
   if (
       state_ == State::Ready &&
+      now_ms >= last_sent_at_ &&
       now_ms - last_sent_at_ >= kHeartbeatIntervalMs) {
     sendEnvelope(
         "heartbeat",

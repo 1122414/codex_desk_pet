@@ -3,6 +3,7 @@
 namespace codex::firmware {
 
 void UsbTransport::begin() {
+  Serial.setRxBufferSize(kMaximumLineBytes);
   receive_buffer_.reserve(1'024);
 }
 
