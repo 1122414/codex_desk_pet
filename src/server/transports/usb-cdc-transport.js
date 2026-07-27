@@ -48,6 +48,11 @@ export class UsbCdcTransport extends JsonLineTransport {
     return new UsbCdcTransport({ handle, readable, writable, devicePath });
   }
 
+  wakeDevice() {
+    if (!this.open || this.writableStream.writable === false) return;
+    this.writableStream.write("\n");
+  }
+
   close() {
     if (!this.open) return;
     super.close();
@@ -99,6 +104,7 @@ export class UsbDeviceManager extends EventEmitter {
         this.#transports.set(devicePath, transport);
         transport.once("close", () => this.#transports.delete(devicePath));
         this.hub.attachTransport(transport);
+        transport.wakeDevice?.();
         this.emit("attached", devicePath);
       } catch (error) {
         if (!["ENOENT", "ENXIO", "EACCES", "EBUSY"].includes(error.code)) {

@@ -8,9 +8,14 @@ class FakeUsbTransport extends EventEmitter {
     super();
     this.devicePath = devicePath;
     this.kind = "usb";
+    this.wakeCount = 0;
   }
 
   send() {}
+
+  wakeDevice() {
+    this.wakeCount += 1;
+  }
 
   close() {
     this.emit("close");
@@ -37,6 +42,7 @@ test("USB device manager attaches each configured CDC port once and reconnects a
   t.after(() => manager.close());
   await manager.start();
   assert.deepEqual(opened, ["/dev/cu.usbmodem-test", "/dev/ttyACM0"]);
+  assert.deepEqual(attached.map((transport) => transport.wakeCount), [1, 1]);
   await manager.scan();
   assert.equal(opened.length, 2);
   attached[0].close();
