@@ -44,6 +44,16 @@ export function mapThreadToPresentation(thread, options = {}) {
     hookAge <= hookActivityWindowMs,
   );
   const goalStatus = thread?.goal?.status;
+  const threadActivityAt = Math.max(
+    toEpochMs(thread?.updatedAt),
+    toEpochMs(thread?.lastEventAt),
+    toEpochMs(thread?.hookUpdatedAt),
+  );
+  const goalUpdatedAt = toEpochMs(thread?.goal?.updatedAt);
+  const freshActivityAfterGoal = (
+    threadActivityAt > goalUpdatedAt &&
+    now - threadActivityAt <= hookActivityWindowMs
+  );
 
   if (
     status.type === "systemError" ||
@@ -70,7 +80,11 @@ export function mapThreadToPresentation(thread, options = {}) {
     goalStatus === "active" ||
     status.type === "active" ||
     lastTurn?.status === "inProgress" ||
-    (freshHook && thread.hookState === DEVICE_STATES.RUNNING)
+    (freshHook && thread.hookState === DEVICE_STATES.RUNNING) ||
+    (
+      ["blocked", "complete", "usageLimited", "budgetLimited"].includes(goalStatus) &&
+      freshActivityAfterGoal
+    )
   ) {
     return { state: DEVICE_STATES.RUNNING, animation: "running" };
   }

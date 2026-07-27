@@ -63,6 +63,21 @@ test("fresh execution overrides a stale blocked goal", () => {
   );
 });
 
+test("recent thread activity overrides an older terminal goal", () => {
+  const resumed = thread({
+    status: { type: "notLoaded" },
+    updatedAt: NOW / 1_000,
+    goal: {
+      status: "blocked",
+      updatedAt: (NOW - 60_000) / 1_000,
+    },
+  });
+  assert.deepEqual(
+    mapThreadToPresentation(resumed, { now: NOW }),
+    { state: "running", animation: "running" },
+  );
+});
+
 test("task list is ordered strictly by newest activity", () => {
   const newestIdle = thread({ id: "newest", updatedAt: NOW / 1_000 + 10 });
   const olderRunning = thread({
