@@ -115,6 +115,12 @@ try {
   if (!deviceProtocol.includes('type != "ack" &&\n      type != "error"')) {
     throw new Error("Tab5 认证前不得对错误报文再次回复错误");
   }
+  if (
+    !usbTransport.includes("kChunkBytes = 128") ||
+    !usbTransport.includes("Serial.flush()")
+  ) {
+    throw new Error("Tab5 USB 长报文必须分块并完整刷新到主机");
+  }
   const sources = (await readdir(coreDirectory))
     .filter((file) => file.endsWith(".cpp"))
     .sort()

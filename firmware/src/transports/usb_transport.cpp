@@ -1,5 +1,8 @@
 #include "transports/usb_transport.hpp"
 
+#include <algorithm>
+#include <cstdint>
+
 namespace codex::firmware {
 
 void UsbTransport::begin() {
@@ -54,7 +57,28 @@ bool UsbTransport::sendText(const String& message) {
   if (!connected() || message.length() > kMaximumLineBytes) {
     return false;
   }
-  return Serial.println(message) > 0;
+  constexpr std::size_t kChunkBytes = 128;
+  constexpr std::uint64_t kWriteTimeoutMs = 3'000;
+  const auto started_at = static_cast<std::uint64_t>(millis());
+  std::size_t offset = 0;
+  while (offset < message.length()) {
+    const auto chunk = std::min<std::size_t>(
+        kChunkBytes,
+        message.length() - offset);
+    const auto written = Serial.write(
+        reinterpret_cast<const std::uint8_t*>(message.c_str() + offset),
+        chunk);
+    offset += written;
+    if (
+        written == 0 &&
+        static_cast<std::uint64_t>(millis()) - started_at >= kWriteTimeoutMs) {
+      return false;
+    }
+    delay(1);
+  }
+  if (Serial.write('\n') != 1) return false;
+  Serial.flush();
+  return true;
 }
 
 void UsbTransport::close() {
