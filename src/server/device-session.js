@@ -30,7 +30,7 @@ import {
 const HANDSHAKE_TYPES = new Set(HANDSHAKE_MESSAGE_TYPES);
 
 const DEFAULT_RELIABLE_WINDOWS = Object.freeze({
-  usb: 8,
+  usb: 1,
   wifi: 24,
   ble: 4,
   memory: 64,

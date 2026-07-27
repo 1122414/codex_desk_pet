@@ -229,7 +229,6 @@ test("large pet transfers use a bounded ACK window before installing", async (t)
 test("snapshots remain responsive while a large resource waits in the reliable queue", async (t) => {
   const { bridge, device, transports } = createSessions({
     transportKind: "usb",
-    sessionOptions: { maxReliableInFlight: 1 },
   });
   t.after(() => {
     bridge.close();

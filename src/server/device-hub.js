@@ -111,6 +111,42 @@ export class DeviceHub extends EventEmitter {
       this.emit("deviceConnected", { deviceId, transport: transport.kind });
     });
     session.on("paired", ({ deviceId }) => this.emit("devicePaired", { deviceId, transport: transport.kind }));
+    session.on("authenticationFailed", ({ deviceId, reason }) => {
+      this.emit(
+        "diagnostic",
+        `Device authentication failed (${transport.kind}, ${deviceId ?? "unknown"}): ${reason}`,
+      );
+    });
+    session.on("remoteError", ({
+      code,
+      message,
+      expectedSequence,
+      receivedSequence,
+    }) => {
+      const sequenceDetail =
+        Number.isInteger(expectedSequence) && Number.isInteger(receivedSequence)
+          ? ` expected=${expectedSequence} received=${receivedSequence}`
+          : "";
+      this.emit(
+        "diagnostic",
+        `Device protocol error (${transport.kind}): ${code}${sequenceDetail}${message ? ` ${message}` : ""}`,
+      );
+    });
+    session.on("timeout", ({ phase }) => {
+      this.emit(
+        "diagnostic",
+        `Device session timeout (${transport.kind}, ${session.deviceId ?? "unknown"}): ${phase}`,
+      );
+    });
+    session.on("reliabilityFailure", (failed) => {
+      const messages = failed
+        .map(({ type, sequence }) => `${type}#${sequence}`)
+        .join(",");
+      this.emit(
+        "diagnostic",
+        `Device reliability failure (${transport.kind}, ${session.deviceId ?? "unknown"}): ${messages}`,
+      );
+    });
     session.on("resourceRequest", (request) => {
       this.#sendResource(session, request).catch((error) => {
         session.sendEvent({ event: "resource.error", petId: request.petId, error: error.message });
