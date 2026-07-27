@@ -57,6 +57,11 @@ export class UsbCdcTransport extends JsonLineTransport {
 
   wakeDevice() {
     if (!this.open || this.writableStream.writable === false) return;
+    if (typeof this.handle?.write === "function") {
+      this.handle.write("\n")
+        .catch((error) => this.emit("diagnostic", error.message));
+      return;
+    }
     this.writableStream.write("\n");
   }
 

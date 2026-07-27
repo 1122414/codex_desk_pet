@@ -52,6 +52,28 @@ test("USB transport wakes the device and requests descriptor release once", asyn
   assert.equal(closed, 1);
 });
 
+test("USB transport writes wake byte through the open device handle", async () => {
+  const readable = new PassThrough();
+  const writable = new PassThrough();
+  const writes = [];
+  const transport = new UsbCdcTransport({
+    handle: {
+      write: async (value) => {
+        writes.push(value);
+      },
+    },
+    readable,
+    writable,
+    devicePath: "/dev/cu.usbmodem-test",
+    closeHandle: () => {},
+  });
+
+  transport.wakeDevice();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(writes, ["\n"]);
+  transport.close();
+});
+
 test("USB device manager attaches each configured CDC port once and reconnects after close", async (t) => {
   const attached = [];
   const opened = [];
