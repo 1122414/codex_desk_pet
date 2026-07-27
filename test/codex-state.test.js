@@ -5,6 +5,7 @@ import {
   extractTotalTokens,
   mapThreadToPresentation,
   selectDisplayThread,
+  sortDisplayThreads,
   summarizeThread,
 } from "../src/shared/codex-state.js";
 
@@ -51,6 +52,30 @@ test("display selection prioritizes approvals, then active recency", () => {
   assert.equal(selectDisplayThread([idle, active, approval], { now: NOW }).id, "approval");
 });
 
+test("fresh execution overrides a stale blocked goal", () => {
+  const active = thread({
+    status: { type: "active", activeFlags: [] },
+    goal: { status: "blocked" },
+  });
+  assert.deepEqual(
+    mapThreadToPresentation(active, { now: NOW }),
+    { state: "running", animation: "running" },
+  );
+});
+
+test("task list is ordered strictly by newest activity", () => {
+  const newestIdle = thread({ id: "newest", updatedAt: NOW / 1_000 + 10 });
+  const olderRunning = thread({
+    id: "older-running",
+    updatedAt: NOW / 1_000,
+    status: { type: "active", activeFlags: [] },
+  });
+  assert.deepEqual(
+    sortDisplayThreads([olderRunning, newestIdle]).map(({ id }) => id),
+    ["newest", "older-running"],
+  );
+});
+
 test("token usage produces a configurable level", () => {
   const tokens = extractTotalTokens({ total: { totalTokens: 125_500 } });
   assert.equal(tokens, 125_500);
@@ -61,4 +86,3 @@ test("thread summary is compact and safe for a small display", () => {
   assert.equal(summarizeThread(null), "暂无 Codex 任务");
   assert.equal(summarizeThread(thread({ name: "  A\n  concise   title  " })), "A concise title");
 });
-

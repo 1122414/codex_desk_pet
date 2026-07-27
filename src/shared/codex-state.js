@@ -47,8 +47,7 @@ export function mapThreadToPresentation(thread, options = {}) {
 
   if (
     status.type === "systemError" ||
-    lastTurn?.status === "failed" ||
-    ["blocked", "usageLimited", "budgetLimited"].includes(goalStatus)
+    lastTurn?.status === "failed"
   ) {
     return { state: DEVICE_STATES.BLOCKED, animation: "failed" };
   }
@@ -74,6 +73,10 @@ export function mapThreadToPresentation(thread, options = {}) {
     (freshHook && thread.hookState === DEVICE_STATES.RUNNING)
   ) {
     return { state: DEVICE_STATES.RUNNING, animation: "running" };
+  }
+
+  if (["blocked", "usageLimited", "budgetLimited"].includes(goalStatus)) {
+    return { state: DEVICE_STATES.BLOCKED, animation: "failed" };
   }
 
   const hookCompleted = freshHook && thread.hookState === DEVICE_STATES.COMPLETED;
@@ -113,16 +116,19 @@ export function selectDisplayThread(threads, options = {}) {
   if (!Array.isArray(threads) || threads.length === 0) return null;
   const now = options.now ?? Date.now();
 
-  return sortDisplayThreads(threads, { now })[0];
-}
-
-export function sortDisplayThreads(threads, options = {}) {
-  if (!Array.isArray(threads)) return [];
-  const now = options.now ?? Date.now();
   return [...threads].sort((left, right) => {
     const a = threadPriority(left, now);
     const b = threadPriority(right, now);
-    return b.priority - a.priority || b.recency - a.recency || String(left.id).localeCompare(String(right.id));
+    return b.priority - a.priority || b.recency - a.recency ||
+      String(left.id).localeCompare(String(right.id));
+  })[0];
+}
+
+export function sortDisplayThreads(threads) {
+  if (!Array.isArray(threads)) return [];
+  return [...threads].sort((left, right) => {
+    return getThreadRecency(right) - getThreadRecency(left) ||
+      String(left.id).localeCompare(String(right.id));
   });
 }
 

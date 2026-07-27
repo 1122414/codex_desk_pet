@@ -382,7 +382,11 @@ export class CodexBridge extends EventEmitter {
     );
     results.forEach((result, index) => {
       if (result.status === "fulfilled") {
-        this.store.patchThread(candidates[index].id, { goal: result.value?.goal ?? null });
+        this.store.patchThread(
+          candidates[index].id,
+          { goal: result.value?.goal ?? null },
+          { touchActivity: false },
+        );
       } else {
         this.emit(
           "diagnostic",

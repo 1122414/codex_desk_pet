@@ -165,3 +165,38 @@ test("desk store does not count blocked goals as currently running or invent tod
   assert.equal(snapshot.accountTokens.today, 0);
   assert.equal(snapshot.accountTokens.todayAvailable, false);
 });
+
+test("passive goal refresh preserves task recency and supplies current token total", () => {
+  const store = new DeskStore();
+  store.replaceThreads([
+    {
+      id: "newer",
+      name: "最新任务",
+      updatedAt: 200,
+      status: { type: "idle" },
+      turns: [],
+    },
+    {
+      id: "older",
+      name: "较早任务",
+      updatedAt: 100,
+      status: { type: "idle" },
+      turns: [],
+    },
+  ]);
+  store.patchThread(
+    "older",
+    { goal: { status: "complete", tokensUsed: 12_345 } },
+    { touchActivity: false },
+  );
+  store.patchThread(
+    "newer",
+    { goal: { status: "active", tokensUsed: 54_321 } },
+    { touchActivity: false },
+  );
+
+  const snapshot = store.snapshot(300_000);
+  assert.deepEqual(snapshot.tasks.map(({ id }) => id), ["newer", "older"]);
+  assert.equal(snapshot.tokens.total, 54_321);
+  assert.equal(snapshot.tasks[0].tokens, 54_321);
+});

@@ -60,6 +60,7 @@ class Tab5Ui {
   void drawQuota(const Snapshot& snapshot);
   void drawTokenSummary(const Snapshot& snapshot);
   void drawTaskList(const Snapshot& snapshot, std::uint64_t now_ms);
+  void pushCanvasRegion(const Rect& bounds);
   void drawChevron(const Rect& bounds, bool points_right);
   void drawTruncated(const String& text, std::int16_t x, std::int16_t y, std::int16_t width);
   void drawWrapped(
@@ -93,6 +94,7 @@ class Tab5Ui {
   PetStore* pet_store_ = nullptr;
   M5Canvas canvas_{&M5.Display};
   std::uint16_t* frame_pixels_ = nullptr;
+  std::uint16_t* region_pixels_ = nullptr;
   std::vector<std::uint8_t> bundled_pet_buffer_;
   String bundled_pet_cached_path_;
   bool bundled_pet_ready_ = false;
@@ -102,8 +104,9 @@ class Tab5Ui {
   bool touch_active_ = false;
   bool task_touch_active_ = false;
   std::int16_t task_touch_start_y_ = 0;
-  std::uint8_t task_scroll_start_ = 0;
-  std::uint8_t task_scroll_offset_ = 0;
+  std::int16_t task_scroll_start_pixels_ = 0;
+  std::int16_t task_scroll_pixels_ = 0;
+  std::int16_t rendered_task_scroll_pixels_ = -1;
   bool pairing_touch_latched_ = false;
   std::uint64_t pairing_released_at_ = 0;
   std::uint64_t clock_received_at_ms_ = 0;

@@ -138,9 +138,13 @@ export class DeskStore extends EventEmitter {
     this.#changed("thread");
   }
 
-  patchThread(id, patch) {
+  patchThread(id, patch, { touchActivity = true } = {}) {
     const existing = this.#threads.get(id) ?? { id, preview: "", status: { type: "notLoaded" }, turns: [] };
-    this.#threads.set(id, { ...existing, ...patch, lastEventAt: Date.now() });
+    this.#threads.set(id, {
+      ...existing,
+      ...patch,
+      ...(touchActivity ? { lastEventAt: Date.now() } : {}),
+    });
     this.#changed("thread");
   }
 
@@ -354,7 +358,8 @@ export class DeskStore extends EventEmitter {
     const threads = [...this.#threads.values()];
     const selected = selectDisplayThread(threads, { now });
     const mapped = selected ? mapThreadToPresentation(selected, { now }) : { state: "ready", animation: "idle" };
-    const totalTokens = extractTotalTokens(selected?.tokenUsage);
+    const totalTokens = extractTotalTokens(selected?.tokenUsage) ||
+      safeInteger(selected?.goal?.tokensUsed);
     const level = computeLevel(totalTokens, this.tokensPerLevel);
     const previewBlocked = mapped.state === "needs-input" || mapped.state === "blocked";
     const previewing = this.previewAnimation !== null && !previewBlocked;
@@ -385,7 +390,9 @@ export class DeskStore extends EventEmitter {
     const todayTokens = todayBuckets
       .reduce((sum, bucket) => sum + safeInteger(bucket?.tokens), 0);
     const activeStates = new Set(["running", "needs-input", "reviewing"]);
-    const activeCount = tasks.filter((task) => activeStates.has(task.state)).length;
+    const activeCount = threads.filter((thread) => (
+      activeStates.has(mapThreadToPresentation(thread, { now }).state)
+    )).length;
 
     return {
       revision: this.#revision,

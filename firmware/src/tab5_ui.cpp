@@ -26,6 +26,8 @@ constexpr std::int16_t kKeyWidth = 208;
 constexpr std::int16_t kKeyHeight = 88;
 constexpr std::int16_t kTaskRowHeight = 72;
 constexpr std::uint8_t kVisibleTaskRows = 5;
+constexpr std::int16_t kRegionChunkRows = 24;
+constexpr std::int16_t kRegionBufferWidth = 808;
 constexpr std::uint16_t kBundledPetWidth = 192;
 constexpr std::uint16_t kBundledPetHeight = 208;
 constexpr std::size_t kBundledPetPixels =
@@ -122,7 +124,6 @@ std::uint64_t renderFingerprint(
     const Snapshot& snapshot,
     const String& connection_detail,
     const std::uint8_t transfer_progress,
-    const std::uint8_t task_scroll_offset,
     const std::uint64_t minute_bucket) {
   std::uint64_t hash = 1469598103934665603ULL;
   hashValue(hash, snapshot.bridge_connected);
@@ -174,7 +175,6 @@ std::uint64_t renderFingerprint(
   }
   hashString(hash, connection_detail);
   hashValue(hash, transfer_progress);
-  hashValue(hash, task_scroll_offset);
   hashValue(hash, minute_bucket);
   return hash;
 }
@@ -196,10 +196,19 @@ bool Tab5Ui::begin(
   if (frame_pixels_ == nullptr) {
     frame_pixels_ = static_cast<std::uint16_t*>(malloc(kPetFrameBytes));
   }
+  const auto region_bytes =
+      static_cast<std::size_t>(kRegionBufferWidth) *
+      kRegionChunkRows *
+      sizeof(std::uint16_t);
+  region_pixels_ = static_cast<std::uint16_t*>(heap_caps_malloc(
+      region_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (region_pixels_ == nullptr) {
+    region_pixels_ = static_cast<std::uint16_t*>(malloc(region_bytes));
+  }
   M5.Display.setBrightness(128);
   M5.Speaker.setVolume(48);
   bundled_pet_ready_ = SPIFFS.begin(false);
-  return frame_pixels_ != nullptr;
+  return frame_pixels_ != nullptr && region_pixels_ != nullptr;
 }
 
 UiAction Tab5Ui::poll(
@@ -230,9 +239,17 @@ void Tab5Ui::render(
         snapshot,
         connection_detail,
         transfer_progress,
-        task_scroll_offset_,
         minute_bucket);
-    if (normal_screen_rendered_ && fingerprint == rendered_fingerprint_) return;
+    if (normal_screen_rendered_ && fingerprint == rendered_fingerprint_) {
+      if (
+          !snapshot.approval.present &&
+          task_scroll_pixels_ != rendered_task_scroll_pixels_) {
+        drawTaskList(snapshot, now_ms);
+        pushCanvasRegion({464, 288, 780, 390});
+        rendered_task_scroll_pixels_ = task_scroll_pixels_;
+      }
+      return;
+    }
     rendered_fingerprint_ = fingerprint;
   }
   canvas_.fillScreen(kBackground);
@@ -240,6 +257,7 @@ void Tab5Ui::render(
     pairing_screen_rendered_ = false;
     drawNormal(snapshot, now_ms, connection_detail, transfer_progress);
     normal_screen_rendered_ = true;
+    rendered_task_scroll_pixels_ = task_scroll_pixels_;
   } else {
     normal_screen_rendered_ = false;
     drawPairing(connection_detail);
@@ -292,24 +310,22 @@ UiAction Tab5Ui::pollTouch(
       return pairingTouch(point, phase);
     }
     if (!snapshot.approval.present) {
-      const auto maximum_scroll = snapshot.tasks.size() > kVisibleTaskRows
-          ? snapshot.tasks.size() - kVisibleTaskRows
-          : 0;
+      const auto maximum_scroll = std::max<std::int32_t>(
+          0,
+          static_cast<std::int32_t>(snapshot.tasks.size()) * kTaskRowHeight -
+              kTaskListArea.height);
       if (pressed && kTaskListArea.contains(point)) {
         input_.cancel();
         task_touch_active_ = true;
         task_touch_start_y_ = point.y;
-        task_scroll_start_ = std::min<std::size_t>(
-            task_scroll_offset_, maximum_scroll);
+        task_scroll_start_pixels_ = static_cast<std::int16_t>(
+            std::min<std::int32_t>(task_scroll_pixels_, maximum_scroll));
         return {};
       }
       if (task_touch_active_) {
         const auto delta = task_touch_start_y_ - point.y;
-        const auto rows = delta >= 0
-            ? (delta + kTaskRowHeight / 2) / kTaskRowHeight
-            : -((-delta + kTaskRowHeight / 2) / kTaskRowHeight);
-        task_scroll_offset_ = static_cast<std::uint8_t>(std::clamp<int>(
-            static_cast<int>(task_scroll_start_) + rows,
+        task_scroll_pixels_ = static_cast<std::int16_t>(std::clamp<int>(
+            static_cast<int>(task_scroll_start_pixels_) + delta,
             0,
             static_cast<int>(maximum_scroll)));
         if (released) task_touch_active_ = false;
@@ -497,7 +513,9 @@ void Tab5Ui::drawPet(const Snapshot& snapshot, const std::uint64_t now_ms) {
           static_cast<std::size_t>(kPetFrameWidth) * kPetFrameHeight, error);
   auto drawn = custom;
   if (drawn) {
+    canvas_.setSwapBytes(true);
     canvas_.pushImage(36, 108, kPetFrameWidth, kPetFrameHeight, frame_pixels_, kPetTransparentColor);
+    canvas_.setSwapBytes(false);
   } else if (
       snapshot.selected_pet_id == "chibi-skadi" &&
       drawBundledPet(index)) {
@@ -584,6 +602,7 @@ bool Tab5Ui::drawBundledPet(const std::uint8_t frame_index) {
     }
     bundled_pet_cached_path_ = path;
   }
+  canvas_.setSwapBytes(true);
   canvas_.pushImage(
       36,
       108,
@@ -591,6 +610,7 @@ bool Tab5Ui::drawBundledPet(const std::uint8_t frame_index) {
       kPetFrameHeight,
       frame_pixels_,
       kPetTransparentColor);
+  canvas_.setSwapBytes(false);
   return true;
 }
 
@@ -665,10 +685,16 @@ void Tab5Ui::drawStatus(
   canvas_.setTextColor(stateColor(snapshot.state), kPanel);
   canvas_.setTextSize(2);
   canvas_.setTextDatum(middle_left);
-  canvas_.drawString(stateLabel(snapshot.state), 62, 36);
+  const String status_text = stateLabel(snapshot.state);
+  canvas_.drawString(status_text, 62, 36);
   canvas_.setTextColor(kMuted, kPanel);
   canvas_.setTextSize(1);
-  drawTruncated(connection_detail, 210, 28, 650);
+  const auto detail_x = static_cast<std::int16_t>(
+      62 + canvas_.textWidth(status_text) * 2 + 24);
+  const String detail = snapshot.task_title.empty()
+      ? connection_detail
+      : String(snapshot.task_title.c_str());
+  drawTruncated(detail, detail_x, 28, 872 - detail_x);
 
   const auto unix_seconds = currentUnixSeconds(snapshot, now_ms);
   std::time_t now = static_cast<std::time_t>(
@@ -776,9 +802,7 @@ void Tab5Ui::drawTokenSummary(const Snapshot& snapshot) {
   canvas_.setTextColor(kMuted, kPanel);
   canvas_.setTextSize(1);
   canvas_.drawString("TOKEN", 876, 106);
-  const auto task_tokens = !snapshot.tasks.empty()
-      ? snapshot.tasks.front().tokens
-      : snapshot.tokens.total;
+  const auto task_tokens = snapshot.tokens.total;
   canvas_.setTextColor(kText, kPanel);
   canvas_.setTextSize(2);
   canvas_.drawString(compactNumber(task_tokens), 876, 136);
@@ -820,11 +844,12 @@ void Tab5Ui::drawTaskList(
       252);
   canvas_.setTextDatum(top_left);
 
-  const auto maximum_scroll = snapshot.tasks.size() > kVisibleTaskRows
-      ? snapshot.tasks.size() - kVisibleTaskRows
-      : 0;
-  task_scroll_offset_ = static_cast<std::uint8_t>(
-      std::min<std::size_t>(task_scroll_offset_, maximum_scroll));
+  const auto maximum_scroll = std::max<std::int32_t>(
+      0,
+      static_cast<std::int32_t>(snapshot.tasks.size()) * kTaskRowHeight -
+          kTaskListArea.height);
+  task_scroll_pixels_ = static_cast<std::int16_t>(
+      std::min<std::int32_t>(task_scroll_pixels_, maximum_scroll));
   if (snapshot.tasks.empty()) {
     canvas_.setTextColor(kMuted, kPanel);
     canvas_.setTextDatum(middle_center);
@@ -834,14 +859,22 @@ void Tab5Ui::drawTaskList(
   }
 
   const auto now_seconds = currentUnixSeconds(snapshot, now_ms);
+  const auto first_index = static_cast<std::size_t>(
+      task_scroll_pixels_ / kTaskRowHeight);
+  const auto pixel_offset = task_scroll_pixels_ % kTaskRowHeight;
   const auto end = std::min<std::size_t>(
       snapshot.tasks.size(),
-      task_scroll_offset_ + kVisibleTaskRows);
-  for (std::size_t index = task_scroll_offset_; index < end; ++index) {
+      first_index + kVisibleTaskRows + 1);
+  canvas_.setClipRect(
+      kTaskListArea.x,
+      kTaskListArea.y,
+      kTaskListArea.width,
+      kTaskListArea.height);
+  for (std::size_t index = first_index; index < end; ++index) {
     const auto& task = snapshot.tasks[index];
-    const auto row = static_cast<std::int16_t>(index - task_scroll_offset_);
-    const auto y = kTaskListArea.y + row * kTaskRowHeight;
-    const auto background = row % 2 == 0 ? kPanelLight : kPanel;
+    const auto row = static_cast<std::int16_t>(index - first_index);
+    const auto y = kTaskListArea.y + row * kTaskRowHeight - pixel_offset;
+    const auto background = index % 2 == 0 ? kPanelLight : kPanel;
     canvas_.fillRoundRect(464, y, 758, 64, 10, background);
     canvas_.fillCircle(482, y + 22, 6, stateColor(task.state));
     canvas_.setTextColor(kText, background);
@@ -880,19 +913,43 @@ void Tab5Ui::drawTaskList(
       canvas_.fillRoundRect(686 + phase, y + 45, 54, 4, 2, kBlue);
     }
   }
+  canvas_.clearClipRect();
 
   if (maximum_scroll > 0) {
     constexpr std::int16_t track_y = 290;
     constexpr std::int16_t track_height = 360;
     const auto thumb_height = std::max<std::int16_t>(
         48,
-        track_height * kVisibleTaskRows / snapshot.tasks.size());
+        track_height * kTaskListArea.height /
+            (snapshot.tasks.size() * kTaskRowHeight));
     const auto travel = track_height - thumb_height;
     const auto thumb_y = track_y +
-        travel * task_scroll_offset_ / std::max<std::size_t>(maximum_scroll, 1);
+        travel * task_scroll_pixels_ / std::max<std::int32_t>(maximum_scroll, 1);
     canvas_.fillRoundRect(1236, track_y, 6, track_height, 3, kPanelLight);
     canvas_.fillRoundRect(1236, thumb_y, 6, thumb_height, 3, kBlue);
   }
+}
+
+void Tab5Ui::pushCanvasRegion(const Rect& bounds) {
+  if (region_pixels_ == nullptr || bounds.width > kRegionBufferWidth) return;
+  M5.Display.startWrite();
+  for (std::int16_t offset = 0; offset < bounds.height; offset += kRegionChunkRows) {
+    const auto rows = static_cast<std::int16_t>(
+        std::min<std::int32_t>(kRegionChunkRows, bounds.height - offset));
+    canvas_.readRect(
+        bounds.x,
+        bounds.y + offset,
+        bounds.width,
+        rows,
+        region_pixels_);
+    M5.Display.pushImage(
+        bounds.x,
+        bounds.y + offset,
+        bounds.width,
+        rows,
+        region_pixels_);
+  }
+  M5.Display.endWrite();
 }
 
 void Tab5Ui::drawChevron(const Rect& bounds, const bool points_right) {
@@ -925,9 +982,26 @@ void Tab5Ui::drawTruncated(
     const std::int16_t x,
     const std::int16_t y,
     const std::int16_t width) {
-  canvas_.setClipRect(x, y, width, canvas_.fontHeight());
-  canvas_.drawString(text, x, y);
-  canvas_.clearClipRect();
+  if (width <= 0) return;
+  if (canvas_.textWidth(text) <= width) {
+    canvas_.drawString(text, x, y);
+    return;
+  }
+  constexpr const char* suffix = "...";
+  const auto available = std::max<std::int16_t>(
+      0,
+      width - canvas_.textWidth(suffix));
+  String fitted;
+  for (std::size_t index = 0; index < text.length();) {
+    const auto bytes = std::min(
+        utf8CharacterLength(text[index]),
+        text.length() - index);
+    const auto next = fitted + text.substring(index, index + bytes);
+    if (canvas_.textWidth(next) > available) break;
+    fitted = next;
+    index += bytes;
+  }
+  canvas_.drawString(fitted + suffix, x, y);
 }
 
 void Tab5Ui::drawWrapped(
