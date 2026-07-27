@@ -100,16 +100,8 @@ try {
     path.join(root, "firmware", "src", "firmware_app.cpp"),
     "utf8",
   );
-  if (!firmwareApp.includes("esp_task_wdt_delete(idle_task)")) {
-    throw new Error(
-      "Tab5 必须移除框架遗留的 idle 看门狗订阅，避免显示与音频负载触发误重启",
-    );
-  }
-  if (
-    firmwareApp.indexOf("esp_task_wdt_add(nullptr)") <
-    firmwareApp.indexOf("configureProtocol(wifi_client_)")
-  ) {
-    throw new Error("Tab5 看门狗只能在耗时硬件初始化完成后注册");
+  if (firmwareApp.includes("esp_task_wdt_add(nullptr)")) {
+    throw new Error("Tab5 UI 主循环不能订阅会触发循环重启的任务看门狗");
   }
   const sources = (await readdir(coreDirectory))
     .filter((file) => file.endsWith(".cpp"))
