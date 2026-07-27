@@ -91,7 +91,6 @@ class Tab5Ui {
   };
 
   PetStore* pet_store_ = nullptr;
-  M5Canvas canvas_{&M5.Display};
   std::uint16_t* frame_pixels_ = nullptr;
   std::vector<std::uint8_t> bundled_pet_buffer_;
   String bundled_pet_cached_path_;

@@ -54,6 +54,17 @@ try {
       "Tab5 内置 Pet 必须使用预解码友好的 RLE 帧，避免 PNG 解码阻塞主循环",
     );
   }
+  if (tab5Ui.includes("M5Canvas") || tab5Ui.includes("pushSprite(")) {
+    throw new Error(
+      "Tab5 不能通过全屏离屏画布刷新，避免 1280x720 PSRAM 拷贝阻塞触摸与看门狗",
+    );
+  }
+  if (
+    !tab5Ui.includes("M5.Display.startWrite()") ||
+    !tab5Ui.includes("M5.Display.endWrite()")
+  ) {
+    throw new Error("Tab5 原生帧缓冲绘制必须合并为单次显示事务");
+  }
   const bundledPetDirectory = path.join(
     root,
     "firmware",
