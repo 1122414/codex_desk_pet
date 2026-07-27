@@ -34,6 +34,49 @@ try {
       "ESP32-P4 USB 协议必须等待 CDC 真正连接后握手，避免首包在主机打开端口前被截断",
     );
   }
+  const tab5Ui = await readFile(
+    path.join(root, "firmware", "src", "tab5_ui.cpp"),
+    "utf8",
+  );
+  if (
+    !tab5Ui.includes('"/bundled-pet/r%uf%u.rle"') ||
+    tab5Ui.includes("drawPng(")
+  ) {
+    throw new Error(
+      "Tab5 内置 Pet 必须使用预解码友好的 RLE 帧，避免 PNG 解码阻塞主循环",
+    );
+  }
+  const bundledPetDirectory = path.join(
+    root,
+    "firmware",
+    "data",
+    "bundled-pet",
+  );
+  const bundledPetFrames = (await readdir(bundledPetDirectory))
+    .filter((file) => /^r[0-8]f[01]\.rle$/.test(file))
+    .sort();
+  if (bundledPetFrames.length !== 18) {
+    throw new Error("Tab5 内置 Pet 必须包含 18 帧 RLE 资源");
+  }
+  for (const frame of bundledPetFrames) {
+    const data = await readFile(path.join(bundledPetDirectory, frame));
+    if (
+      data.length < 12 ||
+      data.subarray(0, 4).toString("ascii") !== "CPR1" ||
+      data.readUInt16LE(4) !== 192 ||
+      data.readUInt16LE(6) !== 208 ||
+      (data.length - 8) % 4 !== 0
+    ) {
+      throw new Error(`Tab5 内置 Pet 帧格式无效：${frame}`);
+    }
+    let pixels = 0;
+    for (let offset = 8; offset < data.length; offset += 4) {
+      pixels += data.readUInt16LE(offset);
+    }
+    if (pixels !== 192 * 208) {
+      throw new Error(`Tab5 内置 Pet 帧像素数无效：${frame}`);
+    }
+  }
   const firmwareApp = await readFile(
     path.join(root, "firmware", "src", "firmware_app.cpp"),
     "utf8",

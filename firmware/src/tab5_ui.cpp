@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <ctime>
 
 namespace codex::firmware {
@@ -25,6 +26,10 @@ constexpr std::int16_t kKeyWidth = 208;
 constexpr std::int16_t kKeyHeight = 88;
 constexpr std::int16_t kTaskRowHeight = 72;
 constexpr std::uint8_t kVisibleTaskRows = 5;
+constexpr std::uint16_t kBundledPetWidth = 192;
+constexpr std::uint16_t kBundledPetHeight = 208;
+constexpr std::size_t kBundledPetPixels =
+    static_cast<std::size_t>(kBundledPetWidth) * kBundledPetHeight;
 
 const char* stateLabel(const PresentationState state) {
   switch (state) {
@@ -425,10 +430,10 @@ bool Tab5Ui::drawBundledPet(const std::uint8_t frame_index) {
   const auto row = std::min<std::uint8_t>(frame_index / 8, 8);
   const auto variant = frame_index % 8 >= 4 ? 1 : 0;
   char path[40]{};
-  snprintf(path, sizeof(path), "/bundled-pet/r%uf%u.png", row, variant);
+  snprintf(path, sizeof(path), "/bundled-pet/r%uf%u.rle", row, variant);
   if (bundled_pet_cached_path_ != path) {
     auto file = SPIFFS.open(path, FILE_READ);
-    if (!file || file.size() == 0 || file.size() > 96 * 1024) return false;
+    if (!file || file.size() < 12 || file.size() > 160 * 1024) return false;
     bundled_pet_buffer_.resize(file.size());
     const auto read = file.read(
         bundled_pet_buffer_.data(),
@@ -439,19 +444,56 @@ bool Tab5Ui::drawBundledPet(const std::uint8_t frame_index) {
       bundled_pet_cached_path_ = "";
       return false;
     }
+    const auto* data = bundled_pet_buffer_.data();
+    if (
+        memcmp(data, "CPR1", 4) != 0 ||
+        (static_cast<std::uint16_t>(data[4]) |
+         (static_cast<std::uint16_t>(data[5]) << 8U)) != kBundledPetWidth ||
+        (static_cast<std::uint16_t>(data[6]) |
+         (static_cast<std::uint16_t>(data[7]) << 8U)) != kBundledPetHeight) {
+      bundled_pet_buffer_.clear();
+      bundled_pet_cached_path_ = "";
+      return false;
+    }
+    std::size_t source_index = 0;
+    std::size_t offset = 8;
+    while (offset + 4 <= bundled_pet_buffer_.size()) {
+      const auto length = static_cast<std::uint16_t>(data[offset]) |
+          (static_cast<std::uint16_t>(data[offset + 1]) << 8U);
+      const auto color = static_cast<std::uint16_t>(data[offset + 2]) |
+          (static_cast<std::uint16_t>(data[offset + 3]) << 8U);
+      if (length == 0 || source_index + length > kBundledPetPixels) {
+        bundled_pet_cached_path_ = "";
+        return false;
+      }
+      for (std::uint16_t index = 0; index < length; ++index, ++source_index) {
+        const auto source_x = source_index % kBundledPetWidth;
+        const auto source_y = source_index / kBundledPetWidth;
+        const auto destination =
+            (source_y * 2U * kPetFrameWidth) + source_x * 2U;
+        frame_pixels_[destination] = color;
+        frame_pixels_[destination + 1] = color;
+        frame_pixels_[destination + kPetFrameWidth] = color;
+        frame_pixels_[destination + kPetFrameWidth + 1] = color;
+      }
+      offset += 4;
+    }
+    if (
+        source_index != kBundledPetPixels ||
+        offset != bundled_pet_buffer_.size()) {
+      bundled_pet_cached_path_ = "";
+      return false;
+    }
     bundled_pet_cached_path_ = path;
   }
-  return canvas_.drawPng(
-      bundled_pet_buffer_.data(),
-      bundled_pet_buffer_.size(),
+  canvas_.pushImage(
       36,
       108,
-      0,
-      0,
-      0,
-      0,
-      2.0F,
-      2.0F);
+      kPetFrameWidth,
+      kPetFrameHeight,
+      frame_pixels_,
+      kPetTransparentColor);
+  return true;
 }
 
 void Tab5Ui::drawFallbackPet(const Animation animation, const std::uint8_t frame) {

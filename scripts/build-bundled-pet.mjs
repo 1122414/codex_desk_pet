@@ -1,4 +1,4 @@
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
@@ -14,6 +14,43 @@ const cellHeight = 208;
 const columns = 8;
 const rows = 9;
 const sourceFrames = [0, 4];
+const transparentColor = 0x0001;
+
+function rgb565(red, green, blue) {
+  const value = ((red & 0xf8) << 8) | ((green & 0xfc) << 3) | (blue >> 3);
+  return value === transparentColor ? 0 : value;
+}
+
+function encodeFrame(rgba) {
+  const runs = [];
+  let color = -1;
+  let length = 0;
+  for (let offset = 0; offset < rgba.length; offset += 4) {
+    const next = rgba[offset + 3] < 128
+      ? transparentColor
+      : rgb565(rgba[offset], rgba[offset + 1], rgba[offset + 2]);
+    if (next === color && length < 0xffff) {
+      length += 1;
+      continue;
+    }
+    if (length > 0) runs.push({ length, color });
+    color = next;
+    length = 1;
+  }
+  if (length > 0) runs.push({ length, color });
+
+  const output = Buffer.allocUnsafe(8 + runs.length * 4);
+  output.write("CPR1", 0, "ascii");
+  output.writeUInt16LE(cellWidth, 4);
+  output.writeUInt16LE(cellHeight, 6);
+  let offset = 8;
+  for (const run of runs) {
+    output.writeUInt16LE(run.length, offset);
+    output.writeUInt16LE(run.color, offset + 2);
+    offset += 4;
+  }
+  return output;
+}
 
 const metadata = await sharp(source).metadata();
 if (metadata.width !== cellWidth * columns || metadata.height !== cellHeight * rows) {
@@ -28,16 +65,24 @@ await mkdir(output, { recursive: true });
 for (let row = 0; row < rows; row += 1) {
   for (let index = 0; index < sourceFrames.length; index += 1) {
     const column = sourceFrames[index];
-    await sharp(source)
+    const { data, info } = await sharp(source)
       .extract({
         left: column * cellWidth,
         top: row * cellHeight,
         width: cellWidth,
         height: cellHeight,
       })
-      .png({ compressionLevel: 9, palette: true, quality: 90 })
-      .toFile(path.join(output, `r${row}f${index}.png`));
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    if (info.width !== cellWidth || info.height !== cellHeight || info.channels !== 4) {
+      throw new Error("内置 Pet 帧解码尺寸异常");
+    }
+    await writeFile(
+      path.join(output, `r${row}f${index}.rle`),
+      encodeFrame(data),
+    );
   }
 }
 
-process.stdout.write(`已生成 ${rows * sourceFrames.length} 帧内置 Pet：${output}\n`);
+process.stdout.write(`已生成 ${rows * sourceFrames.length} 帧 RLE 内置 Pet：${output}\n`);
