@@ -83,6 +83,7 @@ export function buildMacosLaunchAgent({
     stringEntry("CODEX_DESK_CODEX_COMMAND", codexPath),
     stringEntry("CODEX_DESK_USB_AUTO", "1"),
     stringEntry("CODEX_DESK_BLE", "1"),
+    stringEntry("CODEX_DESK_DEVICE_HOST", "0.0.0.0"),
     stringEntry("HOME", homeDirectory),
     stringEntry("NODE_ENV", "production"),
     stringEntry("PATH", path),

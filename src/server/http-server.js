@@ -16,7 +16,7 @@ import {
 } from "./codex-hook.js";
 
 const MAX_BODY_BYTES = 16 * 1024;
-const BRIDGE_VERSION = "0.1.0";
+const BRIDGE_VERSION = "0.2.0";
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 class HttpError extends Error {

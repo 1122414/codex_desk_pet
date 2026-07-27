@@ -15,7 +15,7 @@
 namespace codex::firmware {
 namespace {
 
-constexpr std::uint8_t kProtocolVersion = 3;
+constexpr std::uint8_t kProtocolVersion = 4;
 constexpr std::uint8_t kDeviceInfoVersion = 2;
 constexpr std::size_t kAeadKeyBytes = 32;
 constexpr std::size_t kAeadNonceBytes = 12;
@@ -203,23 +203,23 @@ bool constantTimeEquals(
 
 bool deriveNonce(
     const std::array<std::uint8_t, kAeadKeyBytes>& key,
+    const String& id,
     const std::uint64_t sequence,
     std::array<std::uint8_t, kAeadNonceBytes>& nonce) {
-  static constexpr char kNonceMaterial[] = "codex-desk-nonce-prefix-v1";
-  std::array<std::uint8_t, kAeadKeyBytes> prefix{};
+  String material = "codex-desk-envelope-nonce-v2\n";
+  material += id;
+  material += '\n';
+  material += String(static_cast<unsigned long long>(sequence));
+  std::array<std::uint8_t, kAeadKeyBytes> digest{};
   if (!hmacSha256Raw(
           key.data(),
           key.size(),
-          reinterpret_cast<const std::uint8_t*>(kNonceMaterial),
-          sizeof(kNonceMaterial) - 1U,
-          prefix.data())) {
+          reinterpret_cast<const std::uint8_t*>(material.c_str()),
+          material.length(),
+          digest.data())) {
     return false;
   }
-  std::copy_n(prefix.begin(), 4, nonce.begin());
-  for (std::size_t index = 0; index < 8; ++index) {
-    nonce[4U + index] =
-        static_cast<std::uint8_t>(sequence >> ((7U - index) * 8U));
-  }
+  std::copy_n(digest.begin(), nonce.size(), nonce.begin());
   return true;
 }
 
@@ -1125,7 +1125,7 @@ bool DeviceProtocolClient::encryptPayload(
     return false;
   }
   std::array<std::uint8_t, kAeadNonceBytes> nonce{};
-  if (!deriveNonce(key, sequence, nonce)) return false;
+  if (!deriveNonce(key, id, sequence, nonce)) return false;
   const auto aad = envelopeAdditionalData(
       id, sequence, type, sent_at, session_id);
   std::vector<std::uint8_t> ciphertext(plaintext.length());
@@ -1198,7 +1198,7 @@ bool DeviceProtocolClient::decryptPayload(
     return false;
   }
   std::array<std::uint8_t, kAeadNonceBytes> expected_nonce{};
-  if (!deriveNonce(key, sequence, expected_nonce) ||
+  if (!deriveNonce(key, id, sequence, expected_nonce) ||
       !constantTimeEquals(
           nonce_bytes.data(), expected_nonce.data(), expected_nonce.size())) {
     return false;

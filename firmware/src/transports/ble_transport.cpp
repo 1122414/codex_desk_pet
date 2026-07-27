@@ -13,7 +13,7 @@
 namespace codex::firmware {
 namespace {
 
-constexpr std::uint8_t kProtocolVersion = 3;
+constexpr std::uint8_t kProtocolVersion = 4;
 constexpr char kServiceUuid[] = "7c4b1000-8f3a-4d6b-9c2e-4f5a6b7c8d90";
 constexpr char kReceiveUuid[] = "7c4b1001-8f3a-4d6b-9c2e-4f5a6b7c8d90";
 constexpr char kTransmitUuid[] = "7c4b1002-8f3a-4d6b-9c2e-4f5a6b7c8d90";

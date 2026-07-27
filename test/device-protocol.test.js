@@ -281,6 +281,38 @@ test("authenticated encryption rejects metadata and ciphertext tampering", () =>
   );
 });
 
+test("encrypted control frames keep unique nonces when they share a reliable sequence", () => {
+  const context = {
+    secret: "9".repeat(64),
+    deviceId: "desk-unit-control",
+    deviceNonce: "device_nonce_control_01",
+    bridgeNonce: "bridge_nonce_control_01",
+    direction: "device-to-bridge",
+  };
+  const control = (id, type) => createEnvelope({
+    sequence: 12,
+    type,
+    payload: type === "heartbeat"
+      ? { lastReceivedSequence: 11 }
+      : { code: "RESYNC_REQUIRED" },
+    id,
+    sentAt: 4_000,
+    sessionId: "session-control-0001",
+  });
+  const heartbeat = encryptEnvelopePayload(
+    control("control-message-0001", "heartbeat"),
+    context,
+  );
+  const error = encryptEnvelopePayload(
+    control("control-message-0002", "error"),
+    context,
+  );
+
+  assert.notEqual(heartbeat.payload.nonce, error.payload.nonce);
+  assert.equal(decryptEnvelopePayload(heartbeat, context).type, "heartbeat");
+  assert.equal(decryptEnvelopePayload(error, context).type, "error");
+});
+
 test("encrypted Wi-Fi resource chunks remain below the transport frame limit", () => {
   const data = Buffer.alloc(TRANSPORT_PROFILES.wifi.resourceChunkBytes, 0x6a);
   const pet = {

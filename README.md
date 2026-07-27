@@ -1,20 +1,23 @@
 # Codex Desk Buddy
 
-Codex Desk Buddy 是面向 M5Stack Tab5 Kit（SKU `K145`，ESP32-P4 + ESP32-C6）的桌面宠物项目。它连接 Codex App Server，展示最近活动的任务、Pet 动画、Token、等级、时钟和设备遥测；设备可 USB-C 常联，也可拔线后通过 Wi‑Fi 与仍在运行的电脑 Bridge 通信。Tab5 MVP 不启用 BLE：首次配对和 Wi‑Fi 配置都通过加密认证的 USB 数据线完成。
+Codex Desk Buddy 是面向 M5Stack Tab5 Kit（SKU `K145`，ESP32-P4 + ESP32-C6）的桌面宠物项目。它连接 Codex App Server，展示最近活动的任务、Pet 动画、Token、等级、时钟和设备遥测；设备可 USB-C 常联，也可拔线后通过 BLE 获取状态与执行轻量控制，或通过 Wi‑Fi 使用 Pet、语音和摄像头等完整能力。首次账户配对和 Wi‑Fi 配置仍通过加密认证的 USB 数据线完成。
 
 ## 当前已经实现
 
 - 真实 Codex App Server 初始化、线程列表轮询和事件归一化。
 - 官方 Codex Hooks 跨客户端状态同步：Codex Desktop、CLI 和 IDE 中的 Session、Turn、工具、等待审批与完成事件可由本机 Bridge 感知；乱序和陈旧事件会被丢弃。
 - `running`、`needs-input`、`reviewing`、`completed`、`blocked` 等状态映射。
+- 任务按真实最近更新时间倒序展示；线程 Token 使用 App Server 的累计用量，项目总量只统计实际返回的值，不用伪造数据补零。
 - 命令执行、文件修改与额外权限请求的单次允许/拒绝；Bridge 会话使用原始 JSON-RPC 请求 ID，Desktop/CLI/IDE 会话使用官方 `PermissionRequest` Hook 返回值。只有审批详情完整时开放“允许”，屏幕放不下的请求只能拒绝或回本项目电脑控制面板处理。
 - Codex Pet v1（8×9）和 v2（8×11）图集播放。
 - 自定义 Pet 会校验 WebP 格式、实际尺寸、32 MiB 大小上限和 SHA‑256；声明了清单哈希时必须完全匹配。
 - 9 个标准动画；v2 Pet 和内置 Pet 支持 16 个看向方向。
 - 触摸/滑动、屏幕左右键、电脑下拉框、键盘方向键切换 Pet，所有界面共享 Bridge 选择状态。
 - 浏览器和设备端中文语音提示、非阻塞提示音、时钟、电池、当前线程 Token 和等级进度。
+- Pet 对话通过临时只读 Codex 会话完成；语音对话使用 Codex App Server Realtime，语音命令先转写并在设备上明确确认后才创建可执行任务。
+- Tab5 自带 2MP MIPI 摄像头可手动拍照，ESP32-P4 硬件编码 JPEG，经已认证的 USB/Wi‑Fi 加密分块传输后交给临时只读多模态会话观察；图片分析后立即删除。
 - HTTP + SSE 控制面板、会话 Cookie、CSRF 防护、命令去重和仅本机回环监听。
-- USB CDC 自动发现/重连和独立 Wi‑Fi WebSocket 设备服务；首次账户配对使用 USB，Wi‑Fi 是日常无线链路。Tab5 的 ESP32-P4 没有原生无线电，板载 ESP32-C6 负责 Wi‑Fi；BLE 在此 MVP 中明确不启用。
+- USB CDC 自动发现/重连、BLE 低带宽热备和独立 Wi‑Fi WebSocket 设备服务。Tab5 的 ESP32-P4 没有原生无线电，板载 ESP32-C6 负责 BLE 与 Wi‑Fi；Pet 大文件、语音和图片只允许走 USB/Wi‑Fi。
 - USB 单次配对码、每设备独立密钥、HMAC 双向认证、AES‑256‑GCM 会话加密、凭据撤销、会话替换和未认证连接清理。
 - ACK 窗口流控、指数退避、全量快照恢复、跨链路命令去重和 Pet 资源原子安装。
 - 可实际编译为 Tab5 K145 固件的 PlatformIO 工程：1280×720 触摸界面、大尺寸 Pet、离线中文 TTS、扬声器提示、电池、RTC、看向方向、审批和 USB/Wi‑Fi 链路优先级。
@@ -23,6 +26,7 @@ Codex Desk Buddy 是面向 M5Stack Tab5 Kit（SKU `K145`，ESP32-P4 + ESP32-C6�
 - 已认证设备会上报板型、固件、协议、中文语音和 microSD 状态；Bridge 校验兼容性并在控制面板显示诊断结果。
 - 可重复生成包含 bootloader、分区表、应用、OTA 初始化器和离线中文语音数据的完整工厂镜像；发布清单记录每个组件的偏移、大小与 SHA‑256，烧录前会再次验证。
 - 固定种子的故障注入会完成 500 次 USB/Wi‑Fi 切换，并覆盖协议丢包、重复、乱序、ACK 丢失、Pet 中断续传、坏块和未完成提交；原生 C++ 另运行 50,000 次双槽断电与序号循环。
+- macOS 用户级后台服务可在登录后自动启动 Bridge，并在异常退出后自动拉起。
 
 ## 快速启动
 
@@ -56,7 +60,16 @@ npm run test:virtual-tab5
 CODEX_DESK_DEVICE_HOST=0.0.0.0 npm start
 ```
 
-设备连接 `ws://<电脑局域网地址>:4318/device/ws`。控制面板仍只监听 `127.0.0.1:4317`。设备协议 v3 在认证后会加密包括任务、审批、ACK、心跳和 Pet 资源在内的全部 payload，并把设备版本与能力哈希绑定到握手证明；明文降级、方向错误、设备信息、元数据或密文篡改都会被拒绝。外层消息类型和时序元数据不加密，因此设备端口仍不应暴露到公网。
+设备连接 `ws://<电脑局域网地址>:4318/device/ws`。控制面板仍只监听 `127.0.0.1:4317`。设备协议 v4 在认证后会加密包括任务、审批、ACK、心跳和 Pet 资源在内的全部 payload，并把设备版本与能力哈希绑定到握手证明；明文降级、方向错误、设备信息、元数据或密文篡改都会被拒绝。外层消息类型和时序元数据不加密，因此设备端口仍不应暴露到公网。
+
+macOS 可安装用户级后台服务；它会自动启用 USB、BLE 和局域网设备端口，并在登录后持续运行。设备端口监听所有本机网络接口，控制面板仍只允许本机访问：
+
+```bash
+npm run install:macos-service
+npm run status:macos-service
+```
+
+更新代码后重新执行安装命令即可原子替换后台运行副本。日志位于 `~/Library/Logs/CodexDeskBuddy/`，卸载使用 `npm run remove:macos-service`。
 
 USB CDC 可以指定端口，也可以自动发现：
 
@@ -94,6 +107,7 @@ daemon 模式只表示 Bridge 通过官方 `proxy` 命令连接托管服务。�
 
 - 在设备屏幕上左右滑动、点左右箭头，或在页面上按 `←` / `→` 切换 Pet。
 - 触摸/拖动内置或 v2 Pet，会播放最接近的 22.5° 看向方向。
+- 按住“对话”说话，松开后 Pet 会回复；按住“命令”说话，松开后仍需在设备上确认；点“拍照”会拍一张照片并让 Pet 简短描述。
 - “全部状态”可以预览 9 个标准动画；真实审批和错误状态会强制覆盖实验室预览。
 - 声音和语音需要用户点击开启，以符合浏览器的自动播放限制。
 - `Mock` 模式可以调整电池与链路标识，验证未来设备遥测界面。
@@ -174,8 +188,9 @@ npm run smoke:codex
 - 当前 Codex App Server 没有公开 Pet 列表或 Pet 选择事件。MVP 由 Desk Bridge 同步触屏和电脑控制面板，但不会写入 Codex 原生客户端的私有设置。
 - Hooks 能让设备看到其他 Codex 客户端的 Running、Needs input 和 Completed 生命周期，并把设备对 `PermissionRequest` 的明确允许/拒绝返回原客户端。详情不完整、超过设备显示上限、Bridge 不可用或 115 秒超时时不代替用户决定，Codex 回到原生审批流程。
 - 当前等级根据“正在展示的线程”的累计 Token 计算，每 50,000 Token 一级；它不是 Codex 官方等级。
-- 完整 Tab5 固件已经通过真实 ESP32-P4 工具链编译并在真机完成整机烧录、USB 枚举、真实账户配对、加密 USB 状态同步和配对键盘验收；C6 Wi‑Fi、microSD、自定义 Pet、扬声器和电量曲线仍需物理验收。Tab5 MVP 不提供 BLE。
+- 完整 Tab5 固件已经通过真实 ESP32-P4 工具链编译；真机已完成整机烧录、USB 枚举、真实账户配对、加密 USB 状态同步、触摸键盘和 BLE 拔线状态同步。v0.2.0 的语音交互与摄像头固件尚未刷入，C6 Wi‑Fi、摄像头画面、microSD 自定义 Pet、扬声器和电量曲线仍需物理验收。
 - 设备固件已链接 Espressif ESP-SR v1.2.0 离线中文 TTS；六种状态、Pet 安装/切换和配对都在独立音频任务中播报，缺失或损坏的 `voice_data` 会安全降级为不同音型。真机语音分区已完成烧录、映射和 CRC 完整性校验，音质与音量仍需真机试听。
+- BLE 只承担状态、Pet 选择和审批等小消息，不传 Pet 素材、PCM 语音或 JPEG 图片。语音识别、LLM 回复和视觉理解都依赖仍在运行的电脑 Codex App Server；电脑关机时设备保留本地动画、时间和最近缓存状态，但不会伪造新的 Codex 信息。
 - 控制面板固定监听 `127.0.0.1`；真机只连接独立的 `4318` 设备端口。设备 payload 已做应用层加密，但公网部署仍需额外的防火墙、WSS/反向代理和产品运维方案。
 
 详细链路约束见 [设备协议](docs/device-protocol.md)，跨客户端状态见 [Codex Hooks](docs/codex-hooks.md)，音频实现与许可边界见 [固件音频](docs/firmware-audio.md)，故障注入边界见 [稳定性验证](docs/stability.md)，首次使用见 [安装与恢复](docs/install-and-recovery.md)，逐项结论见 [验收矩阵](docs/acceptance.md)，完整路线见 [2026-07-20_001.md](2026-07-20_001.md)。

@@ -9,11 +9,11 @@ import {
 } from "node:crypto";
 import { PET_ATLAS, STANDARD_ANIMATIONS } from "./pet-spec.js";
 
-export const DEVICE_PROTOCOL_VERSION = 3;
+export const DEVICE_PROTOCOL_VERSION = 4;
 export const DEVICE_INFO_VERSION = 2;
 export const DEVICE_BOARD_ID = "m5stack-tab5-k145";
-export const DEVICE_FIRMWARE_VERSION = "0.1.0";
-export const MINIMUM_DEVICE_FIRMWARE_VERSION = "0.1.0";
+export const DEVICE_FIRMWARE_VERSION = "0.2.0";
+export const MINIMUM_DEVICE_FIRMWARE_VERSION = "0.2.0";
 export const HEARTBEAT_INTERVAL_MS = 5_000;
 export const CONNECTION_TIMEOUT_MS = 15_000;
 export const MAX_RESOURCE_BYTES = 32 * 1024 * 1024;
@@ -604,14 +604,11 @@ function deriveEncryptionKey({ secret, ...context }) {
     .digest();
 }
 
-function deriveEnvelopeNonce(key, sequence) {
-  const nonce = Buffer.alloc(12);
-  createHmac("sha256", key)
-    .update("codex-desk-nonce-prefix-v1")
+function deriveEnvelopeNonce(key, id, sequence) {
+  return createHmac("sha256", key)
+    .update(`codex-desk-envelope-nonce-v2\n${id}\n${sequence}`)
     .digest()
-    .copy(nonce, 0, 0, 4);
-  nonce.writeBigUInt64BE(BigInt(sequence), 4);
-  return nonce;
+    .subarray(0, 12);
 }
 
 function envelopeAdditionalData(envelope) {
@@ -634,7 +631,7 @@ export function encryptEnvelopePayload(envelope, context) {
     throw new ProtocolError("Handshake messages must remain plaintext", "INVALID_ENCRYPTION_STATE");
   }
   const key = deriveEncryptionKey(context);
-  const nonce = deriveEnvelopeNonce(key, envelope.sequence);
+  const nonce = deriveEnvelopeNonce(key, envelope.id, envelope.sequence);
   const cipher = createCipheriv("aes-256-gcm", key, nonce, { authTagLength: 16 });
   cipher.setAAD(envelopeAdditionalData(envelope));
   const data = Buffer.concat([
@@ -660,7 +657,7 @@ export function decryptEnvelopePayload(envelope, context) {
     throw new ProtocolError("Encrypted envelope is required", "ENCRYPTION_REQUIRED");
   }
   const key = deriveEncryptionKey(context);
-  const expectedNonce = deriveEnvelopeNonce(key, envelope.sequence);
+  const expectedNonce = deriveEnvelopeNonce(key, envelope.id, envelope.sequence);
   const nonce = Buffer.from(envelope.payload.nonce, "base64url");
   const tag = Buffer.from(envelope.payload.tag, "base64url");
   if (

@@ -21,6 +21,7 @@ test("macOS LaunchAgent pins absolute executables and device transports", () => 
   assert.match(plist, /Codex &amp; Tools/);
   assert.match(plist, /<key>CODEX_DESK_USB_AUTO<\/key>\n    <string>1<\/string>/);
   assert.match(plist, /<key>CODEX_DESK_BLE<\/key>\n    <string>1<\/string>/);
+  assert.match(plist, /<key>CODEX_DESK_DEVICE_HOST<\/key>\n    <string>0\.0\.0\.0<\/string>/);
   assert.match(plist, /<key>KeepAlive<\/key>\n    <true\/>/);
 });
 
