@@ -1,6 +1,12 @@
 import { execFile } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { lstat, open, readdir, realpath, stat } from "node:fs/promises";
+import {
+  closeSync,
+  createReadStream,
+  createWriteStream,
+  openSync,
+} from "node:fs";
+import { lstat, readdir, realpath, stat } from "node:fs/promises";
 import { promisify } from "node:util";
 import { JsonLineTransport } from "./json-line-transport.js";
 
@@ -25,12 +31,19 @@ async function configureRawTerminal(devicePath) {
 }
 
 export class UsbCdcTransport extends JsonLineTransport {
-  constructor({ handle, readable, writable, devicePath }) {
+  constructor({
+    handle,
+    readable,
+    writable,
+    devicePath,
+    closeHandle = () => closeSync(handle),
+  }) {
     super({ readable, writable, kind: "usb" });
     this.handle = handle;
     this.devicePath = devicePath;
     this.readableStream = readable;
     this.writableStream = writable;
+    this.closeHandle = closeHandle;
   }
 
   static async open(devicePath, { configure = configureRawTerminal } = {}) {
@@ -42,9 +55,9 @@ export class UsbCdcTransport extends JsonLineTransport {
     const info = await stat(devicePath);
     if (!info.isCharacterDevice()) throw new Error("USB CDC path is not a character device");
     await configure(devicePath);
-    const handle = await open(devicePath, "r+");
-    const readable = handle.createReadStream({ autoClose: false });
-    const writable = handle.createWriteStream({ autoClose: false });
+    const handle = openSync(devicePath, "r+");
+    const readable = createReadStream(devicePath, { fd: handle, autoClose: false });
+    const writable = createWriteStream(devicePath, { fd: handle, autoClose: false });
     return new UsbCdcTransport({ handle, readable, writable, devicePath });
   }
 
@@ -55,10 +68,14 @@ export class UsbCdcTransport extends JsonLineTransport {
 
   close() {
     if (!this.open) return;
-    super.close();
     this.readableStream.destroy();
-    this.writableStream.end();
-    this.handle.close().catch((error) => this.emit("diagnostic", error.message));
+    this.writableStream.destroy();
+    try {
+      this.closeHandle();
+    } catch (error) {
+      this.emit("diagnostic", error.message);
+    }
+    super.close();
   }
 }
 

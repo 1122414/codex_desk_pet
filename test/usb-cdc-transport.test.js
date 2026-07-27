@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { UsbDeviceManager } from "../src/server/transports/usb-cdc-transport.js";
+import { PassThrough } from "node:stream";
+import {
+  UsbCdcTransport,
+  UsbDeviceManager,
+} from "../src/server/transports/usb-cdc-transport.js";
 
 class FakeUsbTransport extends EventEmitter {
   constructor(devicePath) {
@@ -21,6 +25,31 @@ class FakeUsbTransport extends EventEmitter {
     this.emit("close");
   }
 }
+
+test("USB transport wakes the device and releases its owned descriptor once", () => {
+  const readable = new PassThrough();
+  const writable = new PassThrough();
+  let closed = 0;
+  const transport = new UsbCdcTransport({
+    handle: 123,
+    readable,
+    writable,
+    devicePath: "/dev/cu.usbmodem-test",
+    closeHandle: () => {
+      closed += 1;
+    },
+  });
+  let output = "";
+  writable.on("data", (chunk) => {
+    output += chunk.toString("utf8");
+  });
+
+  transport.wakeDevice();
+  assert.equal(output, "\n");
+  transport.close();
+  transport.close();
+  assert.equal(closed, 1);
+});
 
 test("USB device manager attaches each configured CDC port once and reconnects after close", async (t) => {
   const attached = [];
