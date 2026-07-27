@@ -200,3 +200,31 @@ test("passive goal refresh preserves task recency and supplies current token tot
   assert.equal(snapshot.tokens.total, 54_321);
   assert.equal(snapshot.tasks[0].tokens, 54_321);
 });
+
+test("passive token refresh does not reorder the task list", () => {
+  const store = new DeskStore();
+  store.replaceThreads([
+    {
+      id: "newer",
+      name: "最新任务",
+      updatedAt: 200,
+      status: { type: "idle" },
+      turns: [],
+    },
+    {
+      id: "older",
+      name: "较早任务",
+      updatedAt: 100,
+      status: { type: "idle" },
+      turns: [],
+    },
+  ]);
+  store.handleNotification("thread/tokenUsage/updated", {
+    threadId: "older",
+    tokenUsage: { total: { totalTokens: 99_999 } },
+  });
+
+  const snapshot = store.snapshot(300_000);
+  assert.deepEqual(snapshot.tasks.map(({ id }) => id), ["newer", "older"]);
+  assert.equal(snapshot.tasks[1].tokens, 99_999);
+});

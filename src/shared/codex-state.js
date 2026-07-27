@@ -1,5 +1,6 @@
 const DEFAULT_COMPLETION_WINDOW_MS = 4_000;
 const DEFAULT_HOOK_ACTIVITY_WINDOW_MS = 30 * 60_000;
+const DEFAULT_RECENT_UNLOADED_WINDOW_MS = 90_000;
 
 export const DEVICE_STATES = Object.freeze({
   READY: "ready",
@@ -34,6 +35,8 @@ export function mapThreadToPresentation(thread, options = {}) {
   const now = options.now ?? Date.now();
   const completionWindowMs = options.completionWindowMs ?? DEFAULT_COMPLETION_WINDOW_MS;
   const hookActivityWindowMs = options.hookActivityWindowMs ?? DEFAULT_HOOK_ACTIVITY_WINDOW_MS;
+  const recentUnloadedWindowMs =
+    options.recentUnloadedWindowMs ?? DEFAULT_RECENT_UNLOADED_WINDOW_MS;
   const status = thread?.status ?? { type: "notLoaded" };
   const flags = new Set(status.activeFlags ?? []);
   const lastTurn = getLastTurn(thread ?? {});
@@ -44,8 +47,9 @@ export function mapThreadToPresentation(thread, options = {}) {
     hookAge <= hookActivityWindowMs,
   );
   const goalStatus = thread?.goal?.status;
+  const serverUpdatedAt = toEpochMs(thread?.updatedAt);
   const threadActivityAt = Math.max(
-    toEpochMs(thread?.updatedAt),
+    serverUpdatedAt,
     toEpochMs(thread?.lastEventAt),
     toEpochMs(thread?.hookUpdatedAt),
   );
@@ -53,6 +57,11 @@ export function mapThreadToPresentation(thread, options = {}) {
   const freshActivityAfterGoal = (
     threadActivityAt > goalUpdatedAt &&
     now - threadActivityAt <= hookActivityWindowMs
+  );
+  const recentlyUpdatedWhileUnloaded = (
+    status.type === "notLoaded" &&
+    serverUpdatedAt > 0 &&
+    now - serverUpdatedAt <= recentUnloadedWindowMs
   );
 
   if (
@@ -80,6 +89,7 @@ export function mapThreadToPresentation(thread, options = {}) {
     goalStatus === "active" ||
     status.type === "active" ||
     lastTurn?.status === "inProgress" ||
+    recentlyUpdatedWhileUnloaded ||
     (freshHook && thread.hookState === DEVICE_STATES.RUNNING) ||
     (
       ["blocked", "complete", "usageLimited", "budgetLimited"].includes(goalStatus) &&
@@ -115,14 +125,10 @@ export function mapThreadToPresentation(thread, options = {}) {
 
 function threadPriority(thread, now) {
   const presentation = mapThreadToPresentation(thread, { now });
-  const priority = {
-    [DEVICE_STATES.NEEDS_INPUT]: 6,
-    [DEVICE_STATES.RUNNING]: 5,
-    [DEVICE_STATES.REVIEWING]: 4,
-    [DEVICE_STATES.BLOCKED]: 3,
-    [DEVICE_STATES.COMPLETED]: 2,
-    [DEVICE_STATES.READY]: 1,
-  }[presentation.state];
+  // Only a live request that the user must answer may interrupt the most
+  // recently active thread. Persistent goal states such as blocked or active
+  // can outlive a Codex session and must not pin the desk display forever.
+  const priority = presentation.state === DEVICE_STATES.NEEDS_INPUT ? 1 : 0;
   return { priority, recency: getThreadRecency(thread) };
 }
 

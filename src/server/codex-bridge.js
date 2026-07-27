@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { JsonRpcClient } from "./json-rpc-client.js";
+import { readLatestSessionTokenUsage } from "./session-token-reader.js";
 
 const APPROVAL_METHODS = new Set([
   "item/commandExecution/requestApproval",
@@ -232,6 +233,7 @@ export class CodexBridge extends EventEmitter {
     hookApprovalBroker = null,
     accountRefreshIntervalMs = 60_000,
     goalRefreshIntervalMs = 12_000,
+    sessionTokenReader = readLatestSessionTokenUsage,
   } = {}) {
     super();
     if (!store) throw new TypeError("CodexBridge requires a DeskStore");
@@ -248,6 +250,7 @@ export class CodexBridge extends EventEmitter {
     this.hookApprovalBroker = hookApprovalBroker;
     this.accountRefreshIntervalMs = accountRefreshIntervalMs;
     this.goalRefreshIntervalMs = goalRefreshIntervalMs;
+    this.sessionTokenReader = sessionTokenReader;
     this.initialization = null;
   }
 
@@ -339,7 +342,38 @@ export class CodexBridge extends EventEmitter {
     await Promise.all([
       this.#refreshAccountData(),
       this.#refreshGoals(threads),
+      this.#refreshSessionTokens(threads),
     ]);
+  }
+
+  async #refreshSessionTokens(threads) {
+    const candidates = (threads ?? [])
+      .filter((thread) => typeof thread?.id === "string" && thread.id && thread.path)
+      .slice(0, 12);
+    const results = await Promise.allSettled(
+      candidates.map((thread) => this.sessionTokenReader(thread.path)),
+    );
+    results.forEach((result, index) => {
+      if (result.status === "fulfilled") {
+        const totalTokens = result.value?.totalTokens;
+        if (!Number.isSafeInteger(totalTokens) || totalTokens <= 0) return;
+        this.store.patchThread(
+          candidates[index].id,
+          {
+            tokenUsage: {
+              total: { totalTokens },
+              observedAt: result.value.observedAt ?? 0,
+            },
+          },
+          { touchActivity: false },
+        );
+      } else {
+        this.emit(
+          "diagnostic",
+          `Session token lookup failed for ${candidates[index].id}: ${result.reason.message}`,
+        );
+      }
+    });
   }
 
   async #refreshAccountData(force = false) {

@@ -45,11 +45,35 @@ test("a fresh completion celebrates before returning to idle", () => {
   assert.equal(mapThreadToPresentation(completed, { now: NOW + 5_000 }).animation, "idle");
 });
 
-test("display selection prioritizes approvals, then active recency", () => {
+test("a separately loaded Codex task is considered running while its session file is fresh", () => {
+  const recent = thread({
+    status: { type: "notLoaded" },
+    updatedAt: (NOW - 5_000) / 1_000,
+  });
+  const stale = thread({
+    status: { type: "notLoaded" },
+    updatedAt: (NOW - 120_000) / 1_000,
+  });
+  assert.equal(mapThreadToPresentation(recent, { now: NOW }).state, "running");
+  assert.equal(mapThreadToPresentation(stale, { now: NOW }).state, "ready");
+});
+
+test("display selection prioritizes approvals, then true recency", () => {
   const idle = thread({ id: "idle", updatedAt: NOW / 1_000 + 100 });
   const active = thread({ id: "active", status: { type: "active", activeFlags: [] } });
   const approval = thread({ id: "approval", status: { type: "active", activeFlags: ["waitingOnApproval"] }, updatedAt: NOW / 1_000 - 100 });
   assert.equal(selectDisplayThread([idle, active, approval], { now: NOW }).id, "approval");
+  assert.equal(selectDisplayThread([idle, active], { now: NOW }).id, "idle");
+});
+
+test("a stale blocked goal cannot pin the main display over recent work", () => {
+  const recent = thread({ id: "recent", updatedAt: NOW / 1_000 });
+  const staleBlocked = thread({
+    id: "stale-blocked",
+    updatedAt: (NOW - 2 * 86_400_000) / 1_000,
+    goal: { status: "blocked", updatedAt: (NOW - 2 * 86_400_000) / 1_000 },
+  });
+  assert.equal(selectDisplayThread([staleBlocked, recent], { now: NOW }).id, "recent");
 });
 
 test("fresh execution overrides a stale blocked goal", () => {

@@ -220,7 +220,11 @@ export class DeskStore extends EventEmitter {
         return;
       }
       case "thread/tokenUsage/updated":
-        this.patchThread(params.threadId, { tokenUsage: params.tokenUsage });
+        this.patchThread(
+          params.threadId,
+          { tokenUsage: params.tokenUsage },
+          { touchActivity: false },
+        );
         return;
       case "thread/closed":
       case "thread/deleted":
