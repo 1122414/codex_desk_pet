@@ -26,7 +26,9 @@ void UsbTransport::poll(const MessageHandler& handler) {
     const auto character = static_cast<char>(value);
     if (character == '\n') {
       receive_buffer_.trim();
-      if (!receive_buffer_.isEmpty()) {
+      if (receive_buffer_.isEmpty()) {
+        wake_requested_ = true;
+      } else {
         handler(receive_buffer_);
       }
       receive_buffer_ = "";
@@ -41,6 +43,12 @@ void UsbTransport::poll(const MessageHandler& handler) {
   }
 }
 
+bool UsbTransport::consumeWakeRequest() {
+  const auto requested = wake_requested_;
+  wake_requested_ = false;
+  return requested;
+}
+
 bool UsbTransport::sendText(const String& message) {
   if (!connected() || message.length() > kMaximumLineBytes) {
     return false;
@@ -50,6 +58,7 @@ bool UsbTransport::sendText(const String& message) {
 
 void UsbTransport::close() {
   receive_buffer_ = "";
+  wake_requested_ = false;
 }
 
 }  // namespace codex::firmware

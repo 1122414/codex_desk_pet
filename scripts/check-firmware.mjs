@@ -34,6 +34,14 @@ try {
       "ESP32-P4 USB 协议必须等待 CDC 真正连接后握手，避免首包在主机打开端口前被截断",
     );
   }
+  if (
+    !usbTransport.includes("wake_requested_ = true") ||
+    !usbTransport.includes("consumeWakeRequest")
+  ) {
+    throw new Error(
+      "ESP32-P4 USB 协议必须响应 Bridge 空行唤醒，确保刷写后无需重新插线也能握手",
+    );
+  }
   const tab5Ui = await readFile(
     path.join(root, "firmware", "src", "tab5_ui.cpp"),
     "utf8",

@@ -254,8 +254,15 @@ void DeviceProtocolClient::poll(const std::uint64_t now_ms) {
   }
   transport_->poll(
       [this](const String& message) { onTransportMessage(message); });
+  const auto wake_requested = transport_->consumeWakeRequest();
   const auto connected = transport_->connected();
-  if (connected && !transport_was_connected_) {
+  if (
+      wake_requested &&
+      connected &&
+      state_ != State::Ready &&
+      strcmp(transport_->kind(), "usb") == 0) {
+    startHandshake(now_ms, false);
+  } else if (connected && !transport_was_connected_) {
     startHandshake(now_ms, true);
   } else if (!connected && transport_was_connected_) {
     clearSession(true);
