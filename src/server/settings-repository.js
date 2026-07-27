@@ -1,10 +1,11 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 const DEFAULT_SETTINGS = Object.freeze({ selectedPetId: "codex-core" });
 
 export class SettingsRepository {
-  constructor(filePath = path.join(process.cwd(), ".codex-desk", "settings.json")) {
+  constructor(filePath = path.join(os.homedir(), ".codex-desk", "settings.json")) {
     this.filePath = filePath;
   }
 
@@ -29,4 +30,3 @@ export class SettingsRepository {
     await rename(temporary, this.filePath);
   }
 }
-

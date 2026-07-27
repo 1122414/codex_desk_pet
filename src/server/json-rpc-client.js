@@ -31,7 +31,12 @@ export class JsonRpcClient extends EventEmitter {
   #decoder = new JsonLineDecoder();
   #intentionallyStopped = new WeakSet();
 
-  constructor({ command = "codex", mode = "direct", requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, spawnProcess = spawn } = {}) {
+  constructor({
+    command = process.env.CODEX_DESK_CODEX_COMMAND ?? "codex",
+    mode = "direct",
+    requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+    spawnProcess = spawn,
+  } = {}) {
     super();
     this.command = command;
     this.mode = mode;
