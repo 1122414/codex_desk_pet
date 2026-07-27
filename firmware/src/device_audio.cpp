@@ -68,11 +68,11 @@ bool DeviceAudio::initializeVoice() {
       ESP_PARTITION_SUBTYPE_ANY,
       "voice_data");
   if (partition == nullptr) {
-    Serial.println("语音初始化失败：voice_data 分区不存在");
+    log_e("语音初始化失败：voice_data 分区不存在");
     return false;
   }
   if (partition->size < kVoiceDataSize) {
-    Serial.printf("语音初始化失败：voice_data 分区过小 (%u)\n", partition->size);
+    log_e("语音初始化失败：voice_data 分区过小 (%u)", partition->size);
     return false;
   }
 
@@ -84,7 +84,7 @@ bool DeviceAudio::initializeVoice() {
       kVoiceDataSize,
       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   if (voice_data == nullptr) {
-    Serial.println("语音初始化失败：PSRAM 分配失败");
+    log_e("语音初始化失败：PSRAM 分配失败");
     return false;
   }
   // The ESP32-P4 SHA accelerator returns inconsistent results for this large
@@ -100,7 +100,7 @@ bool DeviceAudio::initializeVoice() {
         chunk.data(),
         bytes);
     if (read_result != ESP_OK) {
-      Serial.printf("语音初始化失败：分区读取错误 %d\n", static_cast<int>(read_result));
+      log_e("语音初始化失败：分区读取错误 %d", static_cast<int>(read_result));
       heap_caps_free(voice_data);
       return false;
     }
@@ -109,8 +109,9 @@ bool DeviceAudio::initializeVoice() {
   }
 
   if (voice_crc32 != kVoiceDataCrc32) {
-    Serial.printf("语音初始化失败：语音数据 CRC32 错误 %08lx\n",
-                  static_cast<unsigned long>(voice_crc32));
+    log_e(
+        "语音初始化失败：语音数据 CRC32 错误 %08lx",
+        static_cast<unsigned long>(voice_crc32));
     heap_caps_free(voice_data);
     return false;
   }
@@ -121,7 +122,7 @@ bool DeviceAudio::initializeVoice() {
       &esp_tts_voice_xiaoxin,
       voice_data);
   if (voice_ == nullptr) {
-    Serial.println("语音初始化失败：xiaoxin 声音集创建失败");
+    log_e("语音初始化失败：xiaoxin 声音集创建失败");
     heap_caps_free(voice_data);
     return false;
   }
@@ -130,7 +131,7 @@ bool DeviceAudio::initializeVoice() {
     voice_data_ = voice_data;
     return true;
   }
-  Serial.println("语音初始化失败：TTS 引擎创建失败");
+  log_e("语音初始化失败：TTS 引擎创建失败");
   esp_tts_voice_set_free(voice_);
   voice_ = nullptr;
   heap_caps_free(voice_data);

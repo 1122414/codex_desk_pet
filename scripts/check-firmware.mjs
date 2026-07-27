@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -11,6 +11,15 @@ const temporary = await mkdtemp(path.join(os.tmpdir(), "codex-desk-firmware-"));
 const executable = path.join(temporary, "firmware-core-tests");
 
 try {
+  const platformIo = await readFile(
+    path.join(root, "firmware", "platformio.ini"),
+    "utf8",
+  );
+  if (!platformIo.includes("-DCORE_DEBUG_LEVEL=0")) {
+    throw new Error(
+      "USB CDC 同时承载设备协议，固件必须使用 CORE_DEBUG_LEVEL=0，避免日志破坏 JSON 报文",
+    );
+  }
   const sources = (await readdir(coreDirectory))
     .filter((file) => file.endsWith(".cpp"))
     .sort()

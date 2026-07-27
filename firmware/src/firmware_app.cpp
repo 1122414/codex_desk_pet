@@ -46,7 +46,7 @@ void FirmwareApp::setup() {
   pairing_secret_ = config_store_.config().pairing_secret;
   pet_store_.begin();
   if (!audio_.begin()) {
-    Serial.println("设备中文语音不可用，将使用非阻塞提示音");
+    log_e("设备中文语音不可用，将使用非阻塞提示音");
   }
   if (!ui_.begin(
           pet_store_,
