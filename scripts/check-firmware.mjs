@@ -112,6 +112,13 @@ try {
   ) {
     throw new Error("Tab5 收到 USB 唤醒时必须允许重置旧认证会话");
   }
+  if (
+    !deviceProtocol.includes(
+      'strcmp(transport_->kind(), "usb") == 0) {\n    startHandshake(now_ms, true);',
+    )
+  ) {
+    throw new Error("Tab5 USB 主机唤醒必须重置协议序号后重新握手");
+  }
   if (!deviceProtocol.includes('type != "ack" &&\n      type != "error"')) {
     throw new Error("Tab5 认证前不得对错误报文再次回复错误");
   }

@@ -260,7 +260,7 @@ void DeviceProtocolClient::poll(const std::uint64_t now_ms) {
       wake_requested &&
       connected &&
       strcmp(transport_->kind(), "usb") == 0) {
-    startHandshake(now_ms, false);
+    startHandshake(now_ms, true);
   } else if (connected && !transport_was_connected_) {
     startHandshake(now_ms, true);
   } else if (!connected && transport_was_connected_) {
