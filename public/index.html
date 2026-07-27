@@ -83,6 +83,28 @@
             <p id="pet-description" class="field-help">从电脑端 Pet 目录读取，并同步到所有设备。</p>
           </section>
 
+          <section class="panel-section companion-section">
+            <div>
+              <span class="section-label">PET INTELLIGENCE</span>
+              <h2>和宠物说话</h2>
+            </div>
+            <p id="companion-reply" class="companion-reply">可以闲聊，也可以先提交一条 Codex 命令等待确认。</p>
+            <label class="field-label" for="companion-input">消息</label>
+            <textarea id="companion-input" maxlength="2000" rows="3" placeholder="例如：今天这个项目进展怎么样？"></textarea>
+            <div class="companion-actions">
+              <button id="companion-chat" class="primary-button" type="button">仅对话</button>
+              <button id="companion-command" class="command-button" type="button">作为 Codex 命令</button>
+            </div>
+            <div id="companion-confirm" class="companion-confirm" hidden>
+              <strong>这会创建一项可执行的 Codex 任务</strong>
+              <span id="companion-command-text"></span>
+              <div>
+                <button id="companion-decline" class="dialog-cancel" type="button">取消</button>
+                <button id="companion-accept" class="primary-button" type="button">确认执行</button>
+              </div>
+            </div>
+          </section>
+
           <section class="panel-section">
             <div class="section-title-row">
               <div>

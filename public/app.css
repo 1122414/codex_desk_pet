@@ -27,6 +27,7 @@ body {
 }
 
 button, select, input { font: inherit; }
+textarea { font: inherit; }
 button, select { color: inherit; }
 button { -webkit-tap-highlight-color: transparent; }
 
@@ -129,6 +130,17 @@ select { flex: 1; height: 42px; padding: 0 12px; border: 1px solid #37413e; bord
 select:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(86,245,157,.1); }
 .version-badge { display: grid; place-items: center; min-width: 45px; border: 1px solid #315b43; border-radius: 9px; color: var(--green); background: var(--green-soft); font: 800 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .field-help { margin: 8px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.companion-section h2 { margin-bottom: 12px; }
+.companion-reply { min-height: 38px; margin: 0 0 13px; padding: 10px 11px; border: 1px solid #2d4036; border-radius: 8px; color: #d8f7e4; background: #0a1510; font-size: 11px; line-height: 1.55; overflow-wrap: anywhere; }
+.companion-section textarea { width: 100%; resize: vertical; min-height: 70px; padding: 9px 10px; border: 1px solid #37413e; border-radius: 8px; outline: 0; color: var(--text); background: #080a09; font-size: 11px; line-height: 1.5; }
+.companion-section textarea:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(86,245,157,.1); }
+.companion-actions { display: grid; grid-template-columns: 1fr 1.25fr; gap: 8px; margin-top: 9px; }
+.command-button { min-height: 36px; padding: 0 13px; border: 1px solid #745b2f; border-radius: 7px; color: var(--amber); background: #241b0d; font-size: 10px; cursor: pointer; }
+.companion-actions button:disabled { opacity: .45; cursor: wait; }
+.companion-confirm { margin-top: 10px; padding: 11px; border: 1px solid #745b2f; border-radius: 8px; background: #1b150c; font-size: 10px; }
+.companion-confirm strong, .companion-confirm span { display: block; }
+.companion-confirm span { margin: 6px 0 10px; color: var(--muted); overflow-wrap: anywhere; }
+.companion-confirm > div { display: flex; justify-content: flex-end; gap: 7px; }
 .text-button { border: 0; color: var(--green); background: transparent; font-size: 10px; cursor: pointer; }
 .animation-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-top: 16px; }
 .animation-button { min-height: 34px; padding: 5px 8px; border: 1px solid #303735; border-radius: 7px; color: #a9b3af; background: #0b0e0d; font-size: 10px; cursor: pointer; }

@@ -61,6 +61,15 @@ test("HTTP API requires a same-origin session for state changes", async (t) => {
     }),
   };
   const hookToken = "9".repeat(64);
+  const petAgent = {
+    pendingCommand: null,
+    chat: async (text) => ({ reply: `宠物回复：${text}` }),
+    queueCommand(text) {
+      this.pendingCommand = { requestId: "pet-command-1", prompt: text, createdAt: Date.now() };
+      return this.pendingCommand;
+    },
+    decideCommand: async (requestId, decision) => ({ requestId, decision }),
+  };
   const server = new DeskHttpServer({
     store,
     bridge,
@@ -69,6 +78,7 @@ test("HTTP API requires a same-origin session for state changes", async (t) => {
     deviceHub,
     hookToken,
     hookApprovalBroker,
+    petAgent,
   });
   const address = await server.listen({ port: 0 });
   t.after(async () => server.close());
@@ -111,6 +121,7 @@ test("HTTP API requires a same-origin session for state changes", async (t) => {
   assert.equal(diagnosticBody.codex.appServerUserAgent, "codex-desk-mock");
   assert.equal(diagnosticBody.hooks.endpointReady, true);
   assert.equal(diagnosticBody.hooks.approvalReady, true);
+  assert.equal(diagnosticBody.companion.available, true);
 
   const deniedHook = await fetch(`${base}/api/hooks/codex`, {
     method: "POST",
@@ -217,6 +228,52 @@ test("HTTP API requires a same-origin session for state changes", async (t) => {
   });
   assert.equal(selected.status, 200);
   assert.equal((await selected.json()).selectedId, "codex-core");
+
+  const companionChat = await fetch(`${base}/api/companion/chat`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: cookie,
+      "X-Codex-Desk-CSRF": csrfToken,
+      Origin: base,
+    },
+    body: JSON.stringify({ commandId: "companion-chat-0001", text: "你好" }),
+  });
+  assert.deepEqual(await companionChat.json(), { ok: true, reply: "宠物回复：你好" });
+
+  const companionCommand = await fetch(`${base}/api/companion/command`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: cookie,
+      "X-Codex-Desk-CSRF": csrfToken,
+      Origin: base,
+    },
+    body: JSON.stringify({ commandId: "companion-command-0001", text: "运行测试" }),
+  });
+  assert.equal(companionCommand.status, 202);
+  const queuedCommand = await companionCommand.json();
+  assert.equal(queuedCommand.command.requestId, "pet-command-1");
+
+  const companionDecision = await fetch(`${base}/api/companion/command/decide`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: cookie,
+      "X-Codex-Desk-CSRF": csrfToken,
+      Origin: base,
+    },
+    body: JSON.stringify({
+      commandId: "companion-decision-0001",
+      requestId: "pet-command-1",
+      decision: "accept",
+    }),
+  });
+  assert.deepEqual(await companionDecision.json(), {
+    ok: true,
+    requestId: "pet-command-1",
+    decision: "accept",
+  });
 
   const pairing = await fetch(`${base}/api/devices/pairing`, {
     method: "POST",

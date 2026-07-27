@@ -39,6 +39,8 @@ const elements = Object.fromEntries([
   "voice-toggle", "battery-slider", "battery-value", "mock-tools", "mock-approval", "toast",
   "start-pairing", "pairing-code", "device-list",
   "wifi-device-id", "wifi-ssid", "wifi-password", "bridge-host", "bridge-port", "provision-wifi",
+  "companion-reply", "companion-input", "companion-chat", "companion-command",
+  "companion-confirm", "companion-command-text", "companion-decline", "companion-accept",
 ].map((id) => [id, document.getElementById(id)]));
 
 let csrfToken = "";
@@ -320,10 +322,32 @@ async function render(nextSnapshot) {
   document.querySelectorAll("[data-transport]").forEach((button) => button.classList.toggle("active", button.dataset.transport === snapshot.telemetry.transport));
 
   renderApproval(snapshot.approval);
+  renderCompanion(snapshot.companion);
   elements["mock-tools"].hidden = snapshot.connection.mode !== "mock";
   document.querySelectorAll(".animation-button").forEach((button) => button.classList.toggle("active", button.dataset.animation === snapshot.presentation.animation && localLookDegree === null));
 
   if (oldState && oldState !== snapshot.presentation.state) announceState(snapshot.presentation.state);
+}
+
+function renderCompanion(companion) {
+  if (!companion) return;
+  const statusLabels = {
+    idle: "可以闲聊，也可以先提交一条 Codex 命令等待确认。",
+    thinking: "宠物正在思考…",
+    "awaiting-confirmation": "命令等待你的确认。",
+    running: "Codex 正在执行已确认的命令…",
+    completed: companion.reply || "已完成。",
+    declined: "命令已取消。",
+    failed: `失败：${companion.error || "未知错误"}`,
+  };
+  elements["companion-reply"].textContent =
+    companion.reply || statusLabels[companion.status] || companion.status;
+  const waiting = companion.status === "awaiting-confirmation" && companion.requestId;
+  elements["companion-confirm"].hidden = !waiting;
+  elements["companion-command-text"].textContent = waiting ? companion.prompt : "";
+  elements["companion-chat"].disabled = ["thinking", "running"].includes(companion.status);
+  elements["companion-command"].disabled =
+    ["thinking", "running", "awaiting-confirmation"].includes(companion.status);
 }
 
 function renderApproval(approval) {
@@ -583,6 +607,41 @@ async function updateTelemetry(overrides = {}) {
   }
 }
 
+async function sendCompanionChat() {
+  const text = elements["companion-input"].value.trim();
+  if (!text) return showToast("请先输入消息");
+  elements["companion-chat"].disabled = true;
+  try {
+    const result = await mutate("/api/companion/chat", { text });
+    elements["companion-input"].value = "";
+    showToast(result.reply);
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function queueCompanionCommand() {
+  const text = elements["companion-input"].value.trim();
+  if (!text) return showToast("请先输入命令");
+  try {
+    await mutate("/api/companion/command", { text });
+    elements["companion-input"].value = "";
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function decideCompanionCommand(decision) {
+  const requestId = snapshot?.companion?.requestId;
+  if (!requestId) return;
+  try {
+    await mutate("/api/companion/command/decide", { requestId, decision });
+    showToast(decision === "accept" ? "已交给 Codex 执行" : "命令已取消");
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
 function setToggle(button, enabled, label) {
   button.setAttribute("aria-pressed", String(enabled));
   button.textContent = `${label} ${enabled ? "开" : "关"}`;
@@ -651,6 +710,16 @@ function bindInteractions() {
   });
   elements["start-pairing"].addEventListener("click", startPairing);
   elements["provision-wifi"].addEventListener("click", provisionWifi);
+  elements["companion-chat"].addEventListener("click", sendCompanionChat);
+  elements["companion-command"].addEventListener("click", queueCompanionCommand);
+  elements["companion-decline"].addEventListener("click", () => decideCompanionCommand("decline"));
+  elements["companion-accept"].addEventListener("click", () => decideCompanionCommand("accept"));
+  elements["companion-input"].addEventListener("keydown", (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+      event.preventDefault();
+      sendCompanionChat();
+    }
+  });
 
   elements["sound-toggle"].addEventListener("click", () => {
     soundEnabled = !soundEnabled;

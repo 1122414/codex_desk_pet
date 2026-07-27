@@ -7,6 +7,7 @@ import { DeskHttpServer } from "./http-server.js";
 import { HookApprovalBroker } from "./hook-approval-broker.js";
 import { HookTokenRepository } from "./hook-token-repository.js";
 import { PetCatalog } from "./pet-catalog.js";
+import { PetAgent } from "./pet-agent.js";
 import { SettingsRepository } from "./settings-repository.js";
 import { MacBleDeviceManager } from "./transports/macos-ble-device-manager.js";
 import { UsbDeviceManager } from "./transports/usb-cdc-transport.js";
@@ -41,6 +42,7 @@ deviceHub.on("diagnostic", (message) => {
   if (process.env.CODEX_DESK_DEBUG === "1") console.warn(`[device] ${message}`);
 });
 await deviceHub.start();
+const petAgent = new PetAgent({ bridge, store });
 
 const deviceServer = new DeviceWebSocketServer({ hub: deviceHub });
 const deviceAddress = await deviceServer.listen({
@@ -79,6 +81,7 @@ const server = new DeskHttpServer({
   deviceHub,
   hookToken,
   hookApprovalBroker,
+  petAgent,
 });
 server.onError = (error) => console.error(error);
 const address = await server.listen({ port: Number(process.env.PORT ?? 4317) });
@@ -90,6 +93,7 @@ async function shutdown() {
   if (stopping) return;
   stopping = true;
   hookApprovalBroker.close();
+  petAgent.close();
   await server.close();
   await deviceServer.close();
   await bleManager.close();

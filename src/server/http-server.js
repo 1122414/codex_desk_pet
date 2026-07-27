@@ -103,6 +103,7 @@ export class DeskHttpServer {
     deviceHub = null,
     hookToken = null,
     hookApprovalBroker = null,
+    petAgent = null,
     publicDirectory = path.join(PROJECT_ROOT, "public"),
   }) {
     this.store = store;
@@ -112,6 +113,7 @@ export class DeskHttpServer {
     this.deviceHub = deviceHub;
     this.hookToken = hookToken;
     this.hookApprovalBroker = hookApprovalBroker;
+    this.petAgent = petAgent;
     this.publicDirectory = path.resolve(publicDirectory);
     this.#server = createServer((req, res) => {
       this.#handle(req, res).catch((error) => {
@@ -208,6 +210,10 @@ export class DeskHttpServer {
         hooks: {
           endpointReady: Boolean(this.hookToken),
           approvalReady: Boolean(this.hookToken && this.hookApprovalBroker),
+        },
+        companion: {
+          available: Boolean(this.petAgent),
+          pendingCommand: this.petAgent?.pendingCommand ?? null,
         },
         devices: this.deviceHub?.listDevices() ?? [],
       });
@@ -319,6 +325,39 @@ export class DeskHttpServer {
         await this.settings.save({ selectedPetId: body.petId });
         this.store.setSelectedPet(body.petId);
         json(res, 200, { ok: true, selectedId: body.petId });
+        return;
+      }
+      if (route === "/api/companion/chat") {
+        if (!this.petAgent) throw new HttpError(503, "宠物对话服务不可用");
+        try {
+          const result = await this.petAgent.chat(body.text);
+          json(res, 200, { ok: true, ...result });
+        } catch (error) {
+          throw new HttpError(error instanceof TypeError || error instanceof RangeError ? 400 : 503, error.message);
+        }
+        return;
+      }
+      if (route === "/api/companion/command") {
+        if (!this.petAgent) throw new HttpError(503, "宠物命令服务不可用");
+        try {
+          const command = this.petAgent.queueCommand(body.text);
+          json(res, 202, { ok: true, command });
+        } catch (error) {
+          throw new HttpError(error instanceof TypeError || error instanceof RangeError ? 400 : 409, error.message);
+        }
+        return;
+      }
+      if (route === "/api/companion/command/decide") {
+        if (!this.petAgent) throw new HttpError(503, "宠物命令服务不可用");
+        if (typeof body.requestId !== "string" || !["accept", "decline"].includes(body.decision)) {
+          throw new HttpError(400, "requestId 和 accept/decline 决定不能为空");
+        }
+        try {
+          const result = await this.petAgent.decideCommand(body.requestId, body.decision);
+          json(res, 200, { ok: true, ...result });
+        } catch (error) {
+          throw new HttpError(409, error.message);
+        }
         return;
       }
       if (route === "/api/approval/decide") {

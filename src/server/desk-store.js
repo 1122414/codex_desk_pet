@@ -102,6 +102,17 @@ export class DeskStore extends EventEmitter {
     this.previewAnimation = null;
     this.rateLimits = null;
     this.accountUsage = null;
+    this.companion = {
+      status: "idle",
+      mode: null,
+      requestId: null,
+      prompt: null,
+      reply: null,
+      threadId: null,
+      turnId: null,
+      error: null,
+      updatedAt: null,
+    };
   }
 
   get revision() {
@@ -358,6 +369,15 @@ export class DeskStore extends EventEmitter {
     this.#changed("preview");
   }
 
+  setCompanion(patch) {
+    this.companion = {
+      ...this.companion,
+      ...patch,
+      updatedAt: Date.now(),
+    };
+    this.#changed("companion");
+  }
+
   snapshot(now = Date.now()) {
     const threads = [...this.#threads.values()];
     const selected = selectDisplayThread(threads, { now });
@@ -445,12 +465,15 @@ export class DeskStore extends EventEmitter {
       pet: { selectedId: this.selectedPetId },
       approval: serializeApproval(approval),
       userInput: serializeUserInput(this.pendingUserInput),
+      companion: { ...this.companion },
       telemetry: { ...this.telemetry },
       capabilities: {
         approvalDecisions: ["accept", "decline"],
         petSelection: true,
         voice: true,
         sound: true,
+        companionChat: true,
+        companionCommands: true,
         transports: ["usb", "wifi", "ble"],
       },
     };

@@ -553,6 +553,7 @@ export class CodexBridge extends EventEmitter {
       this.store.clearPendingUserInput(params.requestId);
     }
     this.store.handleNotification(method, params);
+    this.emit("notification", method, params);
   }
 
   async #enrichApproval(approval) {
