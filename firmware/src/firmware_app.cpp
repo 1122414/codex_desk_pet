@@ -36,7 +36,10 @@ void FirmwareApp::setup() {
   watchdog_config.timeout_ms = 10'000;
   watchdog_config.idle_core_mask = 0;
   watchdog_config.trigger_panic = true;
-  esp_task_wdt_init(&watchdog_config);
+  const auto watchdog_result = esp_task_wdt_init(&watchdog_config);
+  if (watchdog_result == ESP_ERR_INVALID_STATE) {
+    esp_task_wdt_reconfigure(&watchdog_config);
+  }
 #else
   esp_task_wdt_init(10, true);
 #endif

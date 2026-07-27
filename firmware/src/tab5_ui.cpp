@@ -105,11 +105,6 @@ bool Tab5Ui::begin(
   M5.Display.setBrightness(128);
   M5.Speaker.setVolume(48);
   bundled_pet_ready_ = SPIFFS.begin(false);
-  if (bundled_pet_ready_) {
-    bundled_pet_canvas_.setPsram(true);
-    bundled_pet_canvas_ready_ =
-        bundled_pet_canvas_.createSprite(384, 416) != nullptr;
-  }
   return frame_pixels_ != nullptr;
 }
 
@@ -135,7 +130,7 @@ void Tab5Ui::render(
       }
       return;
     }
-  } else if (now_ms - last_rendered_at_ < 50) {
+  } else if (now_ms - last_rendered_at_ < 100) {
     return;
   }
   last_rendered_at_ = now_ms;
@@ -431,42 +426,20 @@ bool Tab5Ui::drawBundledPet(const std::uint8_t frame_index) {
   const auto variant = frame_index % 8 >= 4 ? 1 : 0;
   char path[40]{};
   snprintf(path, sizeof(path), "/bundled-pet/r%uf%u.png", row, variant);
-  if (
-      bundled_pet_canvas_ready_ &&
-      bundled_pet_cached_path_ == path) {
-    bundled_pet_canvas_.pushSprite(
-        &canvas_, 36, 108, kPetTransparentColor);
-    return true;
-  }
-  auto file = SPIFFS.open(path, FILE_READ);
-  if (!file || file.size() == 0 || file.size() > 96 * 1024) return false;
-  bundled_pet_buffer_.resize(file.size());
-  const auto read = file.read(
-      bundled_pet_buffer_.data(),
-      bundled_pet_buffer_.size());
-  file.close();
-  if (read != bundled_pet_buffer_.size()) return false;
-  if (bundled_pet_canvas_ready_) {
-    bundled_pet_canvas_.fillSprite(kPetTransparentColor);
-    const auto decoded = bundled_pet_canvas_.drawPng(
+  if (bundled_pet_cached_path_ != path) {
+    auto file = SPIFFS.open(path, FILE_READ);
+    if (!file || file.size() == 0 || file.size() > 96 * 1024) return false;
+    bundled_pet_buffer_.resize(file.size());
+    const auto read = file.read(
         bundled_pet_buffer_.data(),
-        bundled_pet_buffer_.size(),
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        2.0F,
-        2.0F);
-    if (!decoded) {
+        bundled_pet_buffer_.size());
+    file.close();
+    if (read != bundled_pet_buffer_.size()) {
+      bundled_pet_buffer_.clear();
       bundled_pet_cached_path_ = "";
       return false;
     }
     bundled_pet_cached_path_ = path;
-    bundled_pet_canvas_.pushSprite(
-        &canvas_, 36, 108, kPetTransparentColor);
-    return true;
   }
   return canvas_.drawPng(
       bundled_pet_buffer_.data(),
