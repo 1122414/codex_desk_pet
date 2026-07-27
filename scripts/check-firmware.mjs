@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { inflateSync } from "node:zlib";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -86,9 +87,16 @@ try {
     throw new Error("Tab5 内置 Pet 必须包含 18 帧 RLE 资源");
   }
   for (const frame of bundledPetFrames) {
-    const data = await readFile(path.join(bundledPetDirectory, frame));
+    const packed = await readFile(path.join(bundledPetDirectory, frame));
     if (
-      data.length < 12 ||
+      packed.length < 16 ||
+      packed.subarray(0, 4).toString("ascii") !== "CPZ1"
+    ) {
+      throw new Error(`Tab5 内置 Pet 压缩帧格式无效：${frame}`);
+    }
+    const data = inflateSync(packed.subarray(8));
+    if (
+      data.length !== packed.readUInt32LE(4) ||
       data.subarray(0, 4).toString("ascii") !== "CPR1" ||
       data.readUInt16LE(4) !== 192 ||
       data.readUInt16LE(6) !== 208 ||

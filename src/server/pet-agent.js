@@ -15,6 +15,12 @@ const COMMAND_INSTRUCTIONS = [
   "不要读取、显示或记录无关秘密。需要额外权限时必须走 App Server 审批，不得规避审批。",
   "最后用简洁中文说明完成结果、验证情况和剩余风险。",
 ].join("\n");
+const VISION_INSTRUCTIONS = [
+  "你是 Codex Desk Buddy 的视觉观察助手。",
+  "只描述图片中清楚可见的环境、人物姿态和物体，不猜测身份、健康、情绪或敏感属性。",
+  "使用简洁自然的中文，通常不超过 80 个汉字。",
+  "不要调用工具、执行命令、修改文件，也不要保留图片内容。",
+].join("\n");
 
 function normalizedPrompt(value) {
   if (typeof value !== "string") throw new TypeError("消息必须是文本");
@@ -109,6 +115,29 @@ export class PetAgent {
       });
       throw error;
     }
+  }
+
+  async observeImage(imagePath, text = "请简洁说说你看到了什么。") {
+    const prompt = normalizedPrompt(text);
+    if (typeof imagePath !== "string" || !path.isAbsolute(imagePath)) {
+      throw new TypeError("视觉图片路径必须是绝对路径");
+    }
+    if (this.bridge.isMock) {
+      return { reply: "我看到了一张来自桌面摄像头的图片。" };
+    }
+    this.#requireConnected();
+    const threadId = await this.#startThread({
+      ephemeral: true,
+      approvalPolicy: "never",
+      sandbox: "read-only",
+      developerInstructions: VISION_INSTRUCTIONS,
+      serviceName: "codex-desk-pet-vision",
+    });
+    const result = await this.#runTurn(threadId, [
+      { type: "text", text: prompt, text_elements: [] },
+      { type: "localImage", path: imagePath, detail: "low" },
+    ]);
+    return { reply: result.reply };
   }
 
   queueCommand(text) {
@@ -266,7 +295,7 @@ export class PetAgent {
     return threadId;
   }
 
-  async #runTurn(threadId, text) {
+  async #runTurn(threadId, input) {
     const entry = {
       turnId: null,
       reply: "",
@@ -287,7 +316,9 @@ export class PetAgent {
     try {
       const response = await this.bridge.client.request("turn/start", {
         threadId,
-        input: [{ type: "text", text, text_elements: [] }],
+        input: Array.isArray(input)
+          ? input
+          : [{ type: "text", text: input, text_elements: [] }],
         effort: "low",
         summary: "none",
       });

@@ -20,6 +20,7 @@ enum class UiActionType : std::uint8_t {
   DeclineApproval,
   VoiceStart,
   VoiceStop,
+  CameraCapture,
   SubmitPairingCode,
 };
 
@@ -40,6 +41,7 @@ class Tab5Ui {
       std::uint8_t transfer_progress);
   bool approvalCanAccept(const Approval& approval) const;
   void setVoiceRecording(bool recording);
+  void setCameraBusy(bool busy);
 
  private:
   UiAction pollTouch(const Snapshot& snapshot, std::uint64_t now_ms, bool paired);
@@ -86,8 +88,9 @@ class Tab5Ui {
   static constexpr Rect kPetSpriteArea{36, 108, 384, 416};
   static constexpr Rect kPreviousPetButton{44, 636, 64, 44};
   static constexpr Rect kNextPetButton{348, 636, 64, 44};
-  static constexpr Rect kVoiceChatButton{116, 626, 108, 56};
-  static constexpr Rect kVoiceCommandButton{236, 626, 108, 56};
+  static constexpr Rect kVoiceChatButton{116, 626, 72, 56};
+  static constexpr Rect kVoiceCommandButton{194, 626, 72, 56};
+  static constexpr Rect kCameraButton{272, 626, 72, 56};
   static constexpr Rect kTaskListArea{464, 288, 758, 390};
   static constexpr Rect kDeclineButton{540, 554, 292, 104};
   static constexpr Rect kAcceptButton{864, 554, 356, 104};
@@ -104,6 +107,7 @@ class Tab5Ui {
   std::uint16_t* frame_pixels_ = nullptr;
   std::uint16_t* region_pixels_ = nullptr;
   std::vector<std::uint8_t> bundled_pet_buffer_;
+  std::vector<std::uint8_t> bundled_pet_compressed_buffer_;
   String bundled_pet_cached_path_;
   bool bundled_pet_ready_ = false;
   AnimationPlayer animation_player_;
@@ -112,7 +116,9 @@ class Tab5Ui {
   bool touch_active_ = false;
   bool task_touch_active_ = false;
   bool voice_touch_active_ = false;
+  bool camera_touch_active_ = false;
   bool voice_recording_ = false;
+  bool camera_busy_ = false;
   std::int16_t task_touch_start_y_ = 0;
   std::int16_t task_scroll_start_pixels_ = 0;
   std::int16_t task_scroll_pixels_ = 0;

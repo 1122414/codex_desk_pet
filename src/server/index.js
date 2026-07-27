@@ -12,6 +12,7 @@ import { SettingsRepository } from "./settings-repository.js";
 import { MacBleDeviceManager } from "./transports/macos-ble-device-manager.js";
 import { UsbDeviceManager } from "./transports/usb-cdc-transport.js";
 import { VoiceAgent } from "./voice-agent.js";
+import { VisionAgent } from "./vision-agent.js";
 
 const mode = process.env.CODEX_DESK_MODE ?? "direct";
 if (!new Set(["direct", "daemon", "mock"]).has(mode)) throw new Error("CODEX_DESK_MODE must be direct, daemon, or mock");
@@ -40,6 +41,7 @@ const credentials = new DeviceCredentialRepository();
 const hookToken = await new HookTokenRepository().loadOrCreate();
 const petAgent = new PetAgent({ bridge, store });
 const voiceAgent = new VoiceAgent({ bridge, store, petAgent });
+const visionAgent = new VisionAgent({ store, petAgent });
 const deviceHub = new DeviceHub({
   store,
   bridge,
@@ -48,6 +50,7 @@ const deviceHub = new DeviceHub({
   credentials,
   voiceAgent,
   petAgent,
+  visionAgent,
 });
 deviceHub.on("diagnostic", (message) => {
   if (process.env.CODEX_DESK_DEBUG === "1") console.warn(`[device] ${message}`);
@@ -104,6 +107,7 @@ async function shutdown() {
   stopping = true;
   hookApprovalBroker.close();
   await voiceAgent.close();
+  visionAgent.close();
   petAgent.close();
   await server.close();
   await deviceServer.close();

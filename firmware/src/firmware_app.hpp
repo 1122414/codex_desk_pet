@@ -5,6 +5,7 @@
 #include "codex_core/model.hpp"
 #include "tab5_ui.hpp"
 #include "device_audio.hpp"
+#include "device_camera.hpp"
 #include "device_config.hpp"
 #include "device_protocol.hpp"
 #include "device_voice.hpp"
@@ -43,6 +44,7 @@ class FirmwareApp {
   DeviceConfigStore config_store_;
   PetStore pet_store_;
   DeviceAudio audio_;
+  DeviceCamera camera_;
   DeviceVoice voice_;
   Tab5Ui ui_;
   UsbTransport usb_transport_;

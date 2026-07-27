@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import path from "node:path";
 import { DeskStore } from "../src/server/desk-store.js";
 import { PetAgent } from "../src/server/pet-agent.js";
 
@@ -88,5 +89,27 @@ test("declining a pet command never starts a Codex thread", async () => {
   assert.equal(result.decision, "decline");
   assert.equal(bridge.calls.length, 0);
   assert.equal(store.snapshot().companion.status, "declined");
+  agent.close();
+});
+
+test("camera observations use one ephemeral read-only multimodal turn", async () => {
+  const store = new DeskStore();
+  const bridge = new FakeBridge();
+  const agent = new PetAgent({ bridge, store, cwd: "/workspace" });
+  const imagePath = path.join(process.cwd(), "test", "camera-frame.jpg");
+
+  const result = await agent.observeImage(imagePath);
+
+  assert.equal(result.reply, "明白，我会陪着你。");
+  assert.equal(bridge.calls[0].method, "thread/start");
+  assert.equal(bridge.calls[0].params.approvalPolicy, "never");
+  assert.equal(bridge.calls[0].params.sandbox, "read-only");
+  assert.equal(bridge.calls[0].params.ephemeral, true);
+  assert.match(bridge.calls[0].params.developerInstructions, /不猜测身份/);
+  assert.deepEqual(bridge.calls[1].params.input[1], {
+    type: "localImage",
+    path: imagePath,
+    detail: "low",
+  });
   agent.close();
 });

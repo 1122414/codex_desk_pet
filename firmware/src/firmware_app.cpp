@@ -115,6 +115,14 @@ void FirmwareApp::loop() {
     ui_.setVoiceRecording(false);
     connection_detail_ = "语音链路中断";
   }
+  const auto camera_was_uploading = camera_.uploading();
+  camera_.poll();
+  if (camera_was_uploading && !camera_.uploading()) {
+    ui_.setCameraBusy(false);
+    connection_detail_ = camera_.lastError().isEmpty()
+        ? "照片已发送，正在观察"
+        : camera_.lastError();
+  }
   updateConnectionState();
   syncClock(now_ms);
   updateTelemetry(now_ms);
@@ -260,6 +268,10 @@ void FirmwareApp::handleProtocolEvent(
     if (payload["ok"] | false) audio_.enqueuePhrase(reply);
   } else if (event == "voice.command.queued") {
     connection_detail_ = "语音命令等待确认";
+  } else if (event == "vision.reply") {
+    const String reply = payload["text"] | "照片分析失败";
+    connection_detail_ = reply;
+    if (payload["ok"] | false) audio_.enqueuePhrase(reply);
   }
 }
 
@@ -297,6 +309,8 @@ void FirmwareApp::handleUiAction(const UiAction& action) {
     case UiActionType::VoiceStart:
       if (client == nullptr) {
         connection_detail_ = "语音需要连接电脑";
+      } else if (camera_.uploading()) {
+        connection_detail_ = "请等待照片发送完成";
       } else if (
           primaryTransport() == TransportKind::Ble) {
         connection_detail_ = "语音需要 USB 或 Wi-Fi";
@@ -318,6 +332,25 @@ void FirmwareApp::handleUiAction(const UiAction& action) {
       }
       audio_.setPaused(false);
       ui_.setVoiceRecording(false);
+      break;
+    case UiActionType::CameraCapture:
+      if (client == nullptr) {
+        connection_detail_ = "拍照需要连接电脑";
+      } else if (voice_.recording()) {
+        connection_detail_ = "请先结束语音";
+      } else if (camera_.uploading()) {
+        connection_detail_ = "照片仍在发送";
+      } else {
+        String error;
+        connection_detail_ = "正在拍照";
+        if (camera_.captureAndQueue(*client, error)) {
+          ui_.setCameraBusy(true);
+          connection_detail_ = "照片正在加密发送";
+        } else {
+          ui_.setCameraBusy(false);
+          connection_detail_ = error;
+        }
+      }
       break;
     case UiActionType::SubmitPairingCode:
       usb_client_.setPairingCode(action.value);

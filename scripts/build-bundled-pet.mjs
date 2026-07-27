@@ -1,5 +1,6 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { deflateSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 
@@ -49,7 +50,12 @@ function encodeFrame(rgba) {
     output.writeUInt16LE(run.color, offset + 2);
     offset += 4;
   }
-  return output;
+  const compressed = deflateSync(output, { level: 9 });
+  const packed = Buffer.allocUnsafe(8 + compressed.length);
+  packed.write("CPZ1", 0, "ascii");
+  packed.writeUInt32LE(output.length, 4);
+  compressed.copy(packed, 8);
+  return packed;
 }
 
 const metadata = await sharp(source).metadata();

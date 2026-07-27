@@ -2,6 +2,7 @@
 
 #include <esp_heap_caps.h>
 #include <SPIFFS.h>
+#include <lgfx/utility/lgfx_miniz.h>
 
 #include <algorithm>
 #include <cmath>
@@ -126,6 +127,7 @@ std::uint64_t renderFingerprint(
     const String& connection_detail,
     const std::uint8_t transfer_progress,
     const bool voice_recording,
+    const bool camera_busy,
     const std::uint64_t minute_bucket) {
   std::uint64_t hash = 1469598103934665603ULL;
   hashValue(hash, snapshot.bridge_connected);
@@ -184,6 +186,7 @@ std::uint64_t renderFingerprint(
   hashString(hash, connection_detail);
   hashValue(hash, transfer_progress);
   hashValue(hash, voice_recording);
+  hashValue(hash, camera_busy);
   hashValue(hash, minute_bucket);
   return hash;
 }
@@ -249,6 +252,7 @@ void Tab5Ui::render(
         connection_detail,
         transfer_progress,
         voice_recording_,
+        camera_busy_,
         minute_bucket);
     if (normal_screen_rendered_ && fingerprint == rendered_fingerprint_) {
       if (!snapshot.approval.present &&
@@ -313,6 +317,12 @@ void Tab5Ui::setVoiceRecording(const bool recording) {
   normal_screen_rendered_ = false;
 }
 
+void Tab5Ui::setCameraBusy(const bool busy) {
+  if (camera_busy_ == busy) return;
+  camera_busy_ = busy;
+  normal_screen_rendered_ = false;
+}
+
 UiAction Tab5Ui::pollTouch(
     const Snapshot& snapshot,
     const std::uint64_t now_ms,
@@ -352,6 +362,18 @@ UiAction Tab5Ui::pollTouch(
         snapshot.approval.present ||
         snapshot.companion.awaitingConfirmation();
     if (!confirmation_visible) {
+      if (pressed && kCameraButton.contains(point)) {
+        input_.cancel();
+        camera_touch_active_ = true;
+        return {};
+      }
+      if (camera_touch_active_) {
+        if (released) {
+          camera_touch_active_ = false;
+          return {UiActionType::CameraCapture, {}};
+        }
+        return {};
+      }
       if (pressed &&
           (kVoiceChatButton.contains(point) ||
            kVoiceCommandButton.contains(point))) {
@@ -418,6 +440,10 @@ UiAction Tab5Ui::pollTouch(
   if (voice_touch_active_) {
     voice_touch_active_ = false;
     return {UiActionType::VoiceStop, {}};
+  }
+  if (camera_touch_active_) {
+    camera_touch_active_ = false;
+    return {UiActionType::CameraCapture, {}};
   }
   const auto confirmation_visible =
       snapshot.approval.present ||
@@ -538,16 +564,25 @@ void Tab5Ui::drawNormal(
       kVoiceCommandButton.x, kVoiceCommandButton.y,
       kVoiceCommandButton.width, kVoiceCommandButton.height, 14,
       voice_recording_ ? kRed : kPanelLight);
+  canvas_.fillRoundRect(
+      kCameraButton.x, kCameraButton.y,
+      kCameraButton.width, kCameraButton.height, 14,
+      camera_busy_ ? kOrange : kPanelLight);
   canvas_.setTextSize(1);
   canvas_.setTextColor(kText, voice_recording_ ? kRed : kPanelLight);
   canvas_.drawString(
-      voice_recording_ ? "松开" : "按住对话",
+      voice_recording_ ? "松开" : "对话",
       kVoiceChatButton.x + kVoiceChatButton.width / 2,
       kVoiceChatButton.y + kVoiceChatButton.height / 2);
   canvas_.drawString(
-      voice_recording_ ? "松开" : "按住命令",
+      voice_recording_ ? "松开" : "命令",
       kVoiceCommandButton.x + kVoiceCommandButton.width / 2,
       kVoiceCommandButton.y + kVoiceCommandButton.height / 2);
+  canvas_.setTextColor(kText, camera_busy_ ? kOrange : kPanelLight);
+  canvas_.drawString(
+      camera_busy_ ? "发送中" : "拍照",
+      kCameraButton.x + kCameraButton.width / 2,
+      kCameraButton.y + kCameraButton.height / 2);
   if (transfer_progress > 0 && transfer_progress < 100) {
     canvas_.setTextColor(kOrange, kPanel);
     canvas_.drawString(
@@ -643,13 +678,42 @@ bool Tab5Ui::drawBundledPet(const std::uint8_t frame_index) {
   snprintf(path, sizeof(path), "/bundled-pet/r%uf%u.rle", row, variant);
   if (bundled_pet_cached_path_ != path) {
     auto file = SPIFFS.open(path, FILE_READ);
-    if (!file || file.size() < 12 || file.size() > 160 * 1024) return false;
-    bundled_pet_buffer_.resize(file.size());
+    if (!file || file.size() < 16 || file.size() > 160 * 1024) return false;
+    bundled_pet_compressed_buffer_.resize(file.size());
     const auto read = file.read(
-        bundled_pet_buffer_.data(),
-        bundled_pet_buffer_.size());
+        bundled_pet_compressed_buffer_.data(),
+        bundled_pet_compressed_buffer_.size());
     file.close();
-    if (read != bundled_pet_buffer_.size()) {
+    if (read != bundled_pet_compressed_buffer_.size()) {
+      bundled_pet_buffer_.clear();
+      bundled_pet_compressed_buffer_.clear();
+      bundled_pet_cached_path_ = "";
+      return false;
+    }
+    const auto* packed = bundled_pet_compressed_buffer_.data();
+    const auto unpacked_size =
+        static_cast<std::uint32_t>(packed[4]) |
+        (static_cast<std::uint32_t>(packed[5]) << 8U) |
+        (static_cast<std::uint32_t>(packed[6]) << 16U) |
+        (static_cast<std::uint32_t>(packed[7]) << 24U);
+    if (
+        memcmp(packed, "CPZ1", 4) != 0 ||
+        unpacked_size < 12 ||
+        unpacked_size > 160U * 1'024U) {
+      bundled_pet_buffer_.clear();
+      bundled_pet_compressed_buffer_.clear();
+      bundled_pet_cached_path_ = "";
+      return false;
+    }
+    bundled_pet_buffer_.resize(unpacked_size);
+    const auto decompressed = lgfx_tinfl_decompress_mem_to_mem(
+        bundled_pet_buffer_.data(),
+        bundled_pet_buffer_.size(),
+        packed + 8,
+        bundled_pet_compressed_buffer_.size() - 8,
+        TINFL_FLAG_PARSE_ZLIB_HEADER);
+    bundled_pet_compressed_buffer_.clear();
+    if (decompressed != bundled_pet_buffer_.size()) {
       bundled_pet_buffer_.clear();
       bundled_pet_cached_path_ = "";
       return false;

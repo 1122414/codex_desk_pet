@@ -456,6 +456,77 @@ bool DeviceProtocolClient::sendVoiceStop() {
   return sendCommand("voice.stop", [](JsonObject) {});
 }
 
+bool DeviceProtocolClient::sendVisionBegin(
+    const String& capture_id,
+    const std::size_t total_bytes,
+    const std::uint16_t width,
+    const std::uint16_t height,
+    const String& sha256) {
+  if (
+      state_ != State::Ready || capture_id.length() != 16 ||
+      total_bytes == 0 || total_bytes > 512U * 1'024U ||
+      width < 160 || height < 90 || sha256.length() != 64) {
+    return false;
+  }
+  return sendEnvelope(
+      "event",
+      [&capture_id, total_bytes, width, height, &sha256](JsonObject payload) {
+        payload["event"] = "vision.capture.begin";
+        payload["captureId"] = capture_id;
+        payload["mimeType"] = "image/jpeg";
+        payload["totalBytes"] = total_bytes;
+        payload["width"] = width;
+        payload["height"] = height;
+        payload["sha256"] = sha256;
+      });
+}
+
+bool DeviceProtocolClient::sendVisionChunk(
+    const String& capture_id,
+    const std::size_t offset,
+    const std::uint8_t* data,
+    const std::size_t byte_count) {
+  if (
+      state_ != State::Ready || capture_id.length() != 16 ||
+      data == nullptr || byte_count == 0 || byte_count > 2'048) {
+    return false;
+  }
+  const auto encoded_capacity = 4U * ((byte_count + 2U) / 3U) + 1U;
+  std::vector<std::uint8_t> encoded(encoded_capacity);
+  std::size_t encoded_length = 0;
+  if (mbedtls_base64_encode(
+          encoded.data(),
+          encoded.size(),
+          &encoded_length,
+          data,
+          byte_count) != 0) {
+    return false;
+  }
+  String payload_data;
+  if (!payload_data.reserve(encoded_length)) return false;
+  for (std::size_t index = 0; index < encoded_length; ++index) {
+    payload_data += static_cast<char>(encoded[index]);
+  }
+  return sendEnvelope(
+      "event",
+      [&capture_id, offset, &payload_data](JsonObject payload) {
+        payload["event"] = "vision.capture.chunk";
+        payload["captureId"] = capture_id;
+        payload["offset"] = offset;
+        payload["data"] = payload_data;
+      });
+}
+
+bool DeviceProtocolClient::sendVisionEnd(const String& capture_id) {
+  if (state_ != State::Ready || capture_id.length() != 16) return false;
+  return sendEnvelope(
+      "event",
+      [&capture_id](JsonObject payload) {
+        payload["event"] = "vision.capture.end";
+        payload["captureId"] = capture_id;
+      });
+}
+
 bool DeviceProtocolClient::sendTelemetry(
     const std::uint8_t battery_percent,
     const bool charging,

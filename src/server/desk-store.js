@@ -121,6 +121,17 @@ export class DeskStore extends EventEmitter {
       deviceId: null,
       updatedAt: null,
     };
+    this.vision = {
+      status: "idle",
+      captureId: null,
+      deviceId: null,
+      width: null,
+      height: null,
+      bytes: null,
+      reply: null,
+      error: null,
+      updatedAt: null,
+    };
   }
 
   get revision() {
@@ -395,6 +406,15 @@ export class DeskStore extends EventEmitter {
     this.#changed("voice");
   }
 
+  setVision(patch) {
+    this.vision = {
+      ...this.vision,
+      ...patch,
+      updatedAt: Date.now(),
+    };
+    this.#changed("vision");
+  }
+
   snapshot(now = Date.now()) {
     const threads = [...this.#threads.values()];
     const selected = selectDisplayThread(threads, { now });
@@ -484,11 +504,13 @@ export class DeskStore extends EventEmitter {
       userInput: serializeUserInput(this.pendingUserInput),
       companion: { ...this.companion },
       voice: { ...this.voice },
+      vision: { ...this.vision },
       telemetry: { ...this.telemetry },
       capabilities: {
         approvalDecisions: ["accept", "decline"],
         petSelection: true,
         voice: true,
+        vision: true,
         sound: true,
         companionChat: true,
         companionCommands: true,

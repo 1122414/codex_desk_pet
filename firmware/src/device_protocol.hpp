@@ -67,6 +67,18 @@ class DeviceProtocolClient {
       std::size_t byte_count,
       std::uint16_t samples_per_channel);
   bool sendVoiceStop();
+  bool sendVisionBegin(
+      const String& capture_id,
+      std::size_t total_bytes,
+      std::uint16_t width,
+      std::uint16_t height,
+      const String& sha256);
+  bool sendVisionChunk(
+      const String& capture_id,
+      std::size_t offset,
+      const std::uint8_t* data,
+      std::size_t byte_count);
+  bool sendVisionEnd(const String& capture_id);
   bool sendTelemetry(
       std::uint8_t battery_percent,
       bool charging,

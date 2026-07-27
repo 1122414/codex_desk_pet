@@ -26,6 +26,7 @@ export class DeviceHub extends EventEmitter {
     maxSessions = 32,
     voiceAgent = null,
     petAgent = null,
+    visionAgent = null,
   } = {}) {
     super();
     if (!store || !bridge || !catalog || !settings || !credentials) {
@@ -41,6 +42,7 @@ export class DeviceHub extends EventEmitter {
     this.maxSessions = maxSessions;
     this.voiceAgent = voiceAgent;
     this.petAgent = petAgent;
+    this.visionAgent = visionAgent;
     this.onStoreChange = (snapshot) => this.#broadcastSnapshot(snapshot);
   }
 
@@ -157,11 +159,14 @@ export class DeviceHub extends EventEmitter {
       });
     });
     session.on("event", (event) => {
-      if (event?.event !== "voice.audio" || !this.voiceAgent) return;
       try {
-        this.voiceAgent.acceptAudio(session, event);
+        if (event?.event === "voice.audio" && this.voiceAgent) {
+          this.voiceAgent.acceptAudio(session, event);
+        } else if (event?.event?.startsWith("vision.") && this.visionAgent) {
+          this.visionAgent.acceptEvent(session, event);
+        }
       } catch (error) {
-        this.emit("diagnostic", `Device voice error (${transport.kind}): ${error.message}`);
+        this.emit("diagnostic", `Device media error (${transport.kind}): ${error.message}`);
       }
     });
     session.on("closed", () => {
@@ -169,6 +174,7 @@ export class DeviceHub extends EventEmitter {
       this.voiceAgent?.disconnect(session).catch((error) => {
         this.emit("diagnostic", `Device voice cleanup failed: ${error.message}`);
       });
+      this.visionAgent?.disconnect(session);
       this.emit("deviceDisconnected", { deviceId: session.deviceId, transport: transport.kind });
     });
     session.on("sessionError", (error) => this.emit("diagnostic", error.message));
