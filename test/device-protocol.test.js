@@ -80,6 +80,24 @@ test("protocol rejects malformed command payloads before they reach the Bridge",
       bridgePort: 0,
     },
   }), /Wi-Fi/);
+  assert.throws(() => createEnvelope({
+    sequence: 4,
+    type: "command",
+    payload: {
+      command: "voice.start",
+      commandId: "command-voice-0001",
+      mode: "execute-now",
+    },
+  }), /voice mode/);
+  assert.doesNotThrow(() => createEnvelope({
+    sequence: 5,
+    type: "command",
+    payload: {
+      command: "voice.start",
+      commandId: "command-voice-0002",
+      mode: "command",
+    },
+  }));
 });
 
 test("Wi-Fi provisioning accepts only bounded device-safe network settings", () => {

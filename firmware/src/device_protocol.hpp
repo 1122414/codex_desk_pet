@@ -60,6 +60,13 @@ class DeviceProtocolClient {
   const String& sessionId() const;
   bool sendPetSelection(const String& pet_id);
   bool sendApprovalDecision(const String& request_id, bool accept);
+  bool sendCompanionDecision(const String& request_id, bool accept);
+  bool sendVoiceStart(const String& mode);
+  bool sendVoiceAudio(
+      const std::uint8_t* pcm,
+      std::size_t byte_count,
+      std::uint16_t samples_per_channel);
+  bool sendVoiceStop();
   bool sendTelemetry(
       std::uint8_t battery_percent,
       bool charging,

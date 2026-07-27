@@ -21,7 +21,7 @@ constexpr std::uint32_t kVoiceDataCrc32 = 0xbe773ce5;
 
 bool DeviceAudio::begin() {
   if (queue_ != nullptr) return voice_ready_;
-  queue_ = xQueueCreate(1, sizeof(AudioCue));
+  queue_ = xQueueCreate(1, sizeof(AudioRequest));
   if (queue_ == nullptr) return false;
 
   voice_ready_ = initializeVoice();
@@ -43,8 +43,28 @@ bool DeviceAudio::begin() {
 }
 
 bool DeviceAudio::enqueue(const AudioCue cue) {
-  if (queue_ == nullptr) return false;
-  return xQueueOverwrite(queue_, &cue) == pdPASS;
+  if (queue_ == nullptr || paused_) return false;
+  AudioRequest request;
+  request.cue = cue;
+  return xQueueOverwrite(queue_, &request) == pdPASS;
+}
+
+bool DeviceAudio::enqueuePhrase(const String& phrase) {
+  if (queue_ == nullptr || paused_ || phrase.isEmpty()) return false;
+  AudioRequest request;
+  request.custom_phrase = true;
+  const auto bytes = std::min<std::size_t>(
+      phrase.length(),
+      request.phrase.size() - 1);
+  std::memcpy(request.phrase.data(), phrase.c_str(), bytes);
+  auto safe_bytes = bytes;
+  while (
+      safe_bytes > 0 && safe_bytes < phrase.length() &&
+      (static_cast<std::uint8_t>(phrase[safe_bytes]) & 0xc0U) == 0x80U) {
+    --safe_bytes;
+  }
+  request.phrase[safe_bytes] = '\0';
+  return safe_bytes > 0 && xQueueOverwrite(queue_, &request) == pdPASS;
 }
 
 void DeviceAudio::taskEntry(void* context) {
@@ -52,11 +72,13 @@ void DeviceAudio::taskEntry(void* context) {
 }
 
 void DeviceAudio::run() {
-  AudioCue cue = AudioCue::Ready;
-  while (xQueueReceive(queue_, &cue, portMAX_DELAY) == pdTRUE) {
-    const auto& plan = audioPlan(cue);
-    if (!voice_ready_ || plan.chinese_phrase == nullptr ||
-        !speak(plan.chinese_phrase)) {
+  AudioRequest request;
+  while (xQueueReceive(queue_, &request, portMAX_DELAY) == pdTRUE) {
+    const auto& plan = audioPlan(request.cue);
+    const auto* phrase = request.custom_phrase
+        ? request.phrase.data()
+        : plan.chinese_phrase;
+    if (!voice_ready_ || phrase == nullptr || !speak(phrase)) {
       playFallback(plan);
     }
   }

@@ -40,7 +40,7 @@ void FirmwareApp::setup() {
   auto config = M5.config();
   config.serial_baudrate = 115200;
   config.internal_spk = true;
-  config.internal_mic = false;
+  config.internal_mic = true;
   config.internal_rtc = true;
   M5.begin(config);
   restartWirelessCoprocessor();
@@ -108,6 +108,13 @@ void FirmwareApp::loop() {
   usb_client_.poll(now_ms);
   wifi_client_.poll(now_ms);
   ble_client_.poll(now_ms);
+  const auto voice_was_recording = voice_.recording();
+  voice_.poll();
+  if (voice_was_recording && !voice_.recording()) {
+    audio_.setPaused(false);
+    ui_.setVoiceRecording(false);
+    connection_detail_ = "语音链路中断";
+  }
   updateConnectionState();
   syncClock(now_ms);
   updateTelemetry(now_ms);
@@ -247,6 +254,12 @@ void FirmwareApp::handleProtocolEvent(
   const String event = payload["event"] | "";
   if (event == "resource.error") {
     connection_detail_ = String("Pet同步失败: ") + (payload["error"] | "unknown");
+  } else if (event == "voice.reply") {
+    const String reply = payload["text"] | "没有听清，请再说一次";
+    connection_detail_ = reply;
+    if (payload["ok"] | false) audio_.enqueuePhrase(reply);
+  } else if (event == "voice.command.queued") {
+    connection_detail_ = "语音命令等待确认";
   }
 }
 
@@ -261,15 +274,50 @@ void FirmwareApp::handleUiAction(const UiAction& action) {
       break;
     case UiActionType::AcceptApproval:
       if (client != nullptr &&
+          model_.snapshot().companion.awaitingConfirmation()) {
+        client->sendCompanionDecision(
+            model_.snapshot().companion.request_id.c_str(),
+            true);
+      } else if (client != nullptr &&
           model_.snapshot().approval.present &&
           model_.snapshot().approval.safe_to_approve) {
         client->sendApprovalDecision(model_.snapshot().approval.request_id.c_str(), true);
       }
       break;
     case UiActionType::DeclineApproval:
-      if (client != nullptr && model_.snapshot().approval.present) {
+      if (client != nullptr &&
+          model_.snapshot().companion.awaitingConfirmation()) {
+        client->sendCompanionDecision(
+            model_.snapshot().companion.request_id.c_str(),
+            false);
+      } else if (client != nullptr && model_.snapshot().approval.present) {
         client->sendApprovalDecision(model_.snapshot().approval.request_id.c_str(), false);
       }
+      break;
+    case UiActionType::VoiceStart:
+      if (client == nullptr) {
+        connection_detail_ = "语音需要连接电脑";
+      } else if (
+          primaryTransport() == TransportKind::Ble) {
+        connection_detail_ = "语音需要 USB 或 Wi-Fi";
+      } else {
+        audio_.setPaused(true);
+        if (voice_.start(*client, action.value)) {
+          ui_.setVoiceRecording(true);
+          connection_detail_ =
+              action.value == "command" ? "正在听取命令" : "正在听";
+        } else {
+          audio_.setPaused(false);
+          connection_detail_ = "麦克风启动失败";
+        }
+      }
+      break;
+    case UiActionType::VoiceStop:
+      if (voice_.stop()) {
+        connection_detail_ = "正在识别";
+      }
+      audio_.setPaused(false);
+      ui_.setVoiceRecording(false);
       break;
     case UiActionType::SubmitPairingCode:
       usb_client_.setPairingCode(action.value);

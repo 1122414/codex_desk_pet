@@ -125,6 +125,7 @@ std::uint64_t renderFingerprint(
     const Snapshot& snapshot,
     const String& connection_detail,
     const std::uint8_t transfer_progress,
+    const bool voice_recording,
     const std::uint64_t minute_bucket) {
   std::uint64_t hash = 1469598103934665603ULL;
   hashValue(hash, snapshot.bridge_connected);
@@ -150,6 +151,12 @@ std::uint64_t renderFingerprint(
   hashString(hash, snapshot.approval.title);
   hashString(hash, snapshot.approval.detail);
   hashString(hash, snapshot.approval.reason);
+  hashString(hash, snapshot.companion.status);
+  hashString(hash, snapshot.companion.mode);
+  hashString(hash, snapshot.companion.request_id);
+  hashString(hash, snapshot.companion.prompt);
+  hashString(hash, snapshot.companion.reply);
+  hashString(hash, snapshot.companion.error);
   hashValue(hash, snapshot.telemetry.battery_percent);
   hashValue(hash, snapshot.telemetry.charging);
   hashValue(hash, snapshot.telemetry.wifi_rssi);
@@ -176,6 +183,7 @@ std::uint64_t renderFingerprint(
   }
   hashString(hash, connection_detail);
   hashValue(hash, transfer_progress);
+  hashValue(hash, voice_recording);
   hashValue(hash, minute_bucket);
   return hash;
 }
@@ -240,9 +248,12 @@ void Tab5Ui::render(
         snapshot,
         connection_detail,
         transfer_progress,
+        voice_recording_,
         minute_bucket);
     if (normal_screen_rendered_ && fingerprint == rendered_fingerprint_) {
-      if (!snapshot.approval.present && !task_touch_active_) {
+      if (!snapshot.approval.present &&
+          !snapshot.companion.awaitingConfirmation() &&
+          !task_touch_active_) {
         const auto frame_index = frameIndex(snapshot, now_ms);
         if (frame_index != rendered_pet_frame_index_) {
           canvas_.fillRect(
@@ -258,6 +269,7 @@ void Tab5Ui::render(
       }
       if (
           !snapshot.approval.present &&
+          !snapshot.companion.awaitingConfirmation() &&
           task_scroll_pixels_ != rendered_task_scroll_pixels_ &&
           (
               !task_touch_active_ ||
@@ -295,6 +307,12 @@ bool Tab5Ui::approvalCanAccept(const Approval& approval) const {
   return std::count(approval.detail.begin(), approval.detail.end(), '\n') <= 2;
 }
 
+void Tab5Ui::setVoiceRecording(const bool recording) {
+  if (voice_recording_ == recording) return;
+  voice_recording_ = recording;
+  normal_screen_rendered_ = false;
+}
+
 UiAction Tab5Ui::pollTouch(
     const Snapshot& snapshot,
     const std::uint64_t now_ms,
@@ -330,7 +348,26 @@ UiAction Tab5Ui::pollTouch(
       pairing_released_at_ = 0;
       return pairingTouch(point, phase);
     }
-    if (!snapshot.approval.present) {
+    const auto confirmation_visible =
+        snapshot.approval.present ||
+        snapshot.companion.awaitingConfirmation();
+    if (!confirmation_visible) {
+      if (pressed &&
+          (kVoiceChatButton.contains(point) ||
+           kVoiceCommandButton.contains(point))) {
+        input_.cancel();
+        voice_touch_active_ = true;
+        return {
+            UiActionType::VoiceStart,
+            kVoiceCommandButton.contains(point) ? "command" : "chat"};
+      }
+      if (voice_touch_active_) {
+        if (released) {
+          voice_touch_active_ = false;
+          return {UiActionType::VoiceStop, {}};
+        }
+        return {};
+      }
       const auto maximum_scroll = std::max<std::int32_t>(
           0,
           static_cast<std::int32_t>(snapshot.tasks.size()) * kTaskRowHeight -
@@ -353,8 +390,9 @@ UiAction Tab5Ui::pollTouch(
         return {};
       }
     }
-    const auto safe = approvalCanAccept(snapshot.approval);
-    if (released && !snapshot.approval.present) {
+    const auto safe = snapshot.companion.awaitingConfirmation() ||
+        approvalCanAccept(snapshot.approval);
+    if (released && !confirmation_visible) {
       if (kPreviousPetButton.contains(point)) {
         input_.cancel();
         return {UiActionType::PreviousPet, {}};
@@ -365,7 +403,7 @@ UiAction Tab5Ui::pollTouch(
       }
     }
     return mapInputAction(input_.onTouch(
-        phase, point, now_ms, snapshot.approval.present, safe));
+        phase, point, now_ms, confirmation_visible, safe));
   }
   if (!touch_active_) return {};
   touch_active_ = false;
@@ -377,8 +415,16 @@ UiAction Tab5Ui::pollTouch(
     task_touch_active_ = false;
     return {};
   }
-  const auto safe = approvalCanAccept(snapshot.approval);
-  if (!snapshot.approval.present) {
+  if (voice_touch_active_) {
+    voice_touch_active_ = false;
+    return {UiActionType::VoiceStop, {}};
+  }
+  const auto confirmation_visible =
+      snapshot.approval.present ||
+      snapshot.companion.awaitingConfirmation();
+  const auto safe = snapshot.companion.awaitingConfirmation() ||
+      approvalCanAccept(snapshot.approval);
+  if (!confirmation_visible) {
     if (kPreviousPetButton.contains(last_touch_)) {
       input_.cancel();
       return {UiActionType::PreviousPet, {}};
@@ -392,7 +438,7 @@ UiAction Tab5Ui::pollTouch(
       TouchPhase::Released,
       last_touch_,
       now_ms,
-      snapshot.approval.present,
+      confirmation_visible,
       safe));
 }
 
@@ -463,6 +509,10 @@ void Tab5Ui::drawNormal(
     drawApproval(snapshot.approval);
     return;
   }
+  if (snapshot.companion.awaitingConfirmation()) {
+    drawCompanionCommand(snapshot.companion);
+    return;
+  }
 
   canvas_.fillRoundRect(kPetArea.x, kPetArea.y, kPetArea.width, kPetArea.height, 20, kPanel);
   drawPet(snapshot, now_ms);
@@ -480,8 +530,24 @@ void Tab5Ui::drawNormal(
   canvas_.setTextColor(kText, kPanelLight);
   drawChevron(kPreviousPetButton, false);
   drawChevron(kNextPetButton, true);
+  canvas_.fillRoundRect(
+      kVoiceChatButton.x, kVoiceChatButton.y,
+      kVoiceChatButton.width, kVoiceChatButton.height, 14,
+      voice_recording_ ? kRed : kPanelLight);
+  canvas_.fillRoundRect(
+      kVoiceCommandButton.x, kVoiceCommandButton.y,
+      kVoiceCommandButton.width, kVoiceCommandButton.height, 14,
+      voice_recording_ ? kRed : kPanelLight);
   canvas_.setTextSize(1);
-  canvas_.drawString("切换宠物", 228, 660);
+  canvas_.setTextColor(kText, voice_recording_ ? kRed : kPanelLight);
+  canvas_.drawString(
+      voice_recording_ ? "松开" : "按住对话",
+      kVoiceChatButton.x + kVoiceChatButton.width / 2,
+      kVoiceChatButton.y + kVoiceChatButton.height / 2);
+  canvas_.drawString(
+      voice_recording_ ? "松开" : "按住命令",
+      kVoiceCommandButton.x + kVoiceCommandButton.width / 2,
+      kVoiceCommandButton.y + kVoiceCommandButton.height / 2);
   if (transfer_progress > 0 && transfer_progress < 100) {
     canvas_.setTextColor(kOrange, kPanel);
     canvas_.drawString(
@@ -700,6 +766,44 @@ void Tab5Ui::drawApproval(const Approval& approval) {
   canvas_.drawString(safe ? "仅允许本次" : "请在电脑确认",
                      kAcceptButton.x + kAcceptButton.width / 2,
                      kAcceptButton.y + kAcceptButton.height / 2);
+  canvas_.setTextSize(1);
+  canvas_.setTextDatum(top_left);
+}
+
+void Tab5Ui::drawCompanionCommand(const Companion& companion) {
+  canvas_.fillRoundRect(48, 100, 1184, 584, 22, kPanel);
+  canvas_.setTextColor(kOrange, kPanel);
+  canvas_.setTextSize(2);
+  canvas_.drawString("执行这条语音命令？", 88, 140);
+  canvas_.setTextSize(1);
+  canvas_.setTextColor(kText, kPanel);
+  drawWrapped(
+      String(companion.prompt.c_str()),
+      88,
+      210,
+      1080,
+      4,
+      42);
+  canvas_.setTextColor(kMuted, kPanel);
+  canvas_.drawString("确认后才会创建 Codex 任务；敏感操作仍需再次审批", 88, 410);
+  canvas_.fillRoundRect(
+      kDeclineButton.x, kDeclineButton.y,
+      kDeclineButton.width, kDeclineButton.height, 14, kPanelLight);
+  canvas_.fillRoundRect(
+      kAcceptButton.x, kAcceptButton.y,
+      kAcceptButton.width, kAcceptButton.height, 14, kGreen);
+  canvas_.setTextDatum(middle_center);
+  canvas_.setTextSize(2);
+  canvas_.setTextColor(kText, kPanelLight);
+  canvas_.drawString(
+      "取消",
+      kDeclineButton.x + kDeclineButton.width / 2,
+      kDeclineButton.y + kDeclineButton.height / 2);
+  canvas_.setTextColor(kBackground, kGreen);
+  canvas_.drawString(
+      "确认执行",
+      kAcceptButton.x + kAcceptButton.width / 2,
+      kAcceptButton.y + kAcceptButton.height / 2);
   canvas_.setTextSize(1);
   canvas_.setTextDatum(top_left);
 }

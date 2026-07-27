@@ -6,6 +6,8 @@
 #include <freertos/queue.h>
 #include <freertos/task.h>
 
+#include <array>
+
 #include "codex_core/audio.hpp"
 #include "esp_tts_compat.hpp"
 
@@ -15,6 +17,8 @@ class DeviceAudio {
  public:
   bool begin();
   bool enqueue(AudioCue cue);
+  bool enqueuePhrase(const String& phrase);
+  void setPaused(bool paused) { paused_ = paused; }
   bool voiceAvailable() const { return voice_ready_; }
 
  private:
@@ -26,6 +30,13 @@ class DeviceAudio {
   bool interrupted() const;
 
   static constexpr std::uint8_t kSpeakerChannel = 0;
+  static constexpr std::size_t kMaximumPhraseBytes = 240;
+
+  struct AudioRequest {
+    AudioCue cue = AudioCue::Ready;
+    bool custom_phrase = false;
+    std::array<char, kMaximumPhraseBytes + 1> phrase{};
+  };
 
   QueueHandle_t queue_ = nullptr;
   TaskHandle_t task_ = nullptr;
@@ -33,6 +44,7 @@ class DeviceAudio {
   esp_tts_handle_t tts_ = nullptr;
   void* voice_data_ = nullptr;
   bool voice_ready_ = false;
+  volatile bool paused_ = false;
 };
 
 }  // namespace codex::firmware

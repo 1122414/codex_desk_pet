@@ -43,6 +43,20 @@ struct Approval {
   std::string reason;
 };
 
+struct Companion {
+  std::string status = "idle";
+  std::string mode;
+  std::string request_id;
+  std::string prompt;
+  std::string reply;
+  std::string error;
+
+  bool awaitingConfirmation() const {
+    return status == "awaiting-confirmation" && mode == "command" &&
+        !request_id.empty() && !prompt.empty();
+  }
+};
+
 struct Telemetry {
   std::uint8_t battery_percent = 100;
   bool charging = false;
@@ -121,6 +135,7 @@ struct Snapshot {
   Quota quota;
   Clock clock;
   Approval approval;
+  Companion companion;
   Telemetry telemetry;
 };
 

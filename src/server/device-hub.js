@@ -24,6 +24,8 @@ export class DeviceHub extends EventEmitter {
     credentials,
     pairingCodes = new PairingCodeManager(),
     maxSessions = 32,
+    voiceAgent = null,
+    petAgent = null,
   } = {}) {
     super();
     if (!store || !bridge || !catalog || !settings || !credentials) {
@@ -37,6 +39,8 @@ export class DeviceHub extends EventEmitter {
     this.pairingCodes = pairingCodes;
     if (!Number.isInteger(maxSessions) || maxSessions < 1) throw new RangeError("Device session limit must be positive");
     this.maxSessions = maxSessions;
+    this.voiceAgent = voiceAgent;
+    this.petAgent = petAgent;
     this.onStoreChange = (snapshot) => this.#broadcastSnapshot(snapshot);
   }
 
@@ -152,8 +156,19 @@ export class DeviceHub extends EventEmitter {
         session.sendEvent({ event: "resource.error", petId: request.petId, error: error.message });
       });
     });
+    session.on("event", (event) => {
+      if (event?.event !== "voice.audio" || !this.voiceAgent) return;
+      try {
+        this.voiceAgent.acceptAudio(session, event);
+      } catch (error) {
+        this.emit("diagnostic", `Device voice error (${transport.kind}): ${error.message}`);
+      }
+    });
     session.on("closed", () => {
       this.#sessions.delete(session);
+      this.voiceAgent?.disconnect(session).catch((error) => {
+        this.emit("diagnostic", `Device voice cleanup failed: ${error.message}`);
+      });
       this.emit("deviceDisconnected", { deviceId: session.deviceId, transport: transport.kind });
     });
     session.on("sessionError", (error) => this.emit("diagnostic", error.message));
@@ -221,6 +236,12 @@ export class DeviceHub extends EventEmitter {
         }
         await this.bridge.decideApproval(payload.requestId, payload.decision);
         return { requestId: payload.requestId, decision: payload.decision };
+      case "companion.command.decide":
+        if (!this.petAgent) throw new Error("宠物命令服务不可用");
+        if (typeof payload.requestId !== "string" || !["accept", "decline"].includes(payload.decision)) {
+          throw new Error("宠物命令请求和决定无效");
+        }
+        return this.petAgent.decideCommand(payload.requestId, payload.decision);
       case "telemetry.update":
         if (!Number.isFinite(payload.batteryPercent) || payload.batteryPercent < 0 || payload.batteryPercent > 100) {
           throw new Error("Battery percentage is invalid");
@@ -233,6 +254,12 @@ export class DeviceHub extends EventEmitter {
           deviceId: session.deviceId,
         });
         return { accepted: true };
+      case "voice.start":
+        if (!this.voiceAgent) throw new Error("语音服务不可用");
+        return this.voiceAgent.start(session, { mode: payload.mode });
+      case "voice.stop":
+        if (!this.voiceAgent) throw new Error("语音服务不可用");
+        return this.voiceAgent.stop(session.deviceId);
       case "state.preview":
         this.store.setPreviewAnimation(payload.animation ?? null);
         return { animation: payload.animation ?? null };

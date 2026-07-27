@@ -7,6 +7,7 @@
 #include "device_audio.hpp"
 #include "device_config.hpp"
 #include "device_protocol.hpp"
+#include "device_voice.hpp"
 #include "pet_store.hpp"
 #include "transports/ble_transport.hpp"
 #include "transports/usb_transport.hpp"
@@ -42,6 +43,7 @@ class FirmwareApp {
   DeviceConfigStore config_store_;
   PetStore pet_store_;
   DeviceAudio audio_;
+  DeviceVoice voice_;
   Tab5Ui ui_;
   UsbTransport usb_transport_;
   WifiTransport wifi_transport_;

@@ -18,6 +18,8 @@ enum class UiActionType : std::uint8_t {
   NextPet,
   AcceptApproval,
   DeclineApproval,
+  VoiceStart,
+  VoiceStop,
   SubmitPairingCode,
 };
 
@@ -37,6 +39,7 @@ class Tab5Ui {
       const String& connection_detail,
       std::uint8_t transfer_progress);
   bool approvalCanAccept(const Approval& approval) const;
+  void setVoiceRecording(bool recording);
 
  private:
   UiAction pollTouch(const Snapshot& snapshot, std::uint64_t now_ms, bool paired);
@@ -54,6 +57,7 @@ class Tab5Ui {
   bool drawBundledPet(std::uint8_t frame_index);
   void drawFallbackPet(Animation animation, std::uint8_t frame);
   void drawApproval(const Approval& approval);
+  void drawCompanionCommand(const Companion& companion);
   void drawStatus(
       const Snapshot& snapshot,
       std::uint64_t now_ms,
@@ -82,6 +86,8 @@ class Tab5Ui {
   static constexpr Rect kPetSpriteArea{36, 108, 384, 416};
   static constexpr Rect kPreviousPetButton{44, 636, 64, 44};
   static constexpr Rect kNextPetButton{348, 636, 64, 44};
+  static constexpr Rect kVoiceChatButton{116, 626, 108, 56};
+  static constexpr Rect kVoiceCommandButton{236, 626, 108, 56};
   static constexpr Rect kTaskListArea{464, 288, 758, 390};
   static constexpr Rect kDeclineButton{540, 554, 292, 104};
   static constexpr Rect kAcceptButton{864, 554, 356, 104};
@@ -105,6 +111,8 @@ class Tab5Ui {
   Point last_touch_{};
   bool touch_active_ = false;
   bool task_touch_active_ = false;
+  bool voice_touch_active_ = false;
+  bool voice_recording_ = false;
   std::int16_t task_touch_start_y_ = 0;
   std::int16_t task_scroll_start_pixels_ = 0;
   std::int16_t task_scroll_pixels_ = 0;

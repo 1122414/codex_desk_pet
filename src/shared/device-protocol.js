@@ -49,7 +49,10 @@ export const MESSAGE_TYPES = Object.freeze([
 export const DEVICE_COMMANDS = Object.freeze([
   "pet.select",
   "approval.decide",
+  "companion.command.decide",
   "telemetry.update",
+  "voice.start",
+  "voice.stop",
   "state.preview",
   "wifi.provision",
 ]);
@@ -301,6 +304,12 @@ function validatePayload(type, payload) {
         throw new ProtocolError("approval decision is invalid");
       }
     }
+    if (payload.command === "companion.command.decide") {
+      requireString(payload.requestId, "requestId");
+      if (payload.requestId.length > 128 || !["accept", "decline"].includes(payload.decision)) {
+        throw new ProtocolError("companion command decision is invalid");
+      }
+    }
     if (payload.command === "telemetry.update") {
       if (!Number.isFinite(payload.batteryPercent) || payload.batteryPercent < 0 || payload.batteryPercent > 100) {
         throw new ProtocolError("batteryPercent is invalid");
@@ -313,6 +322,9 @@ function validatePayload(type, payload) {
       )) {
         throw new ProtocolError("wifiRssi is invalid");
       }
+    }
+    if (payload.command === "voice.start" && !["chat", "command"].includes(payload.mode)) {
+      throw new ProtocolError("voice mode is invalid");
     }
     if (payload.command === "state.preview" && (
       payload.animation !== null &&

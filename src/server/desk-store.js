@@ -113,6 +113,14 @@ export class DeskStore extends EventEmitter {
       error: null,
       updatedAt: null,
     };
+    this.voice = {
+      status: "idle",
+      mode: null,
+      transcript: null,
+      error: null,
+      deviceId: null,
+      updatedAt: null,
+    };
   }
 
   get revision() {
@@ -378,6 +386,15 @@ export class DeskStore extends EventEmitter {
     this.#changed("companion");
   }
 
+  setVoice(patch) {
+    this.voice = {
+      ...this.voice,
+      ...patch,
+      updatedAt: Date.now(),
+    };
+    this.#changed("voice");
+  }
+
   snapshot(now = Date.now()) {
     const threads = [...this.#threads.values()];
     const selected = selectDisplayThread(threads, { now });
@@ -466,6 +483,7 @@ export class DeskStore extends EventEmitter {
       approval: serializeApproval(approval),
       userInput: serializeUserInput(this.pendingUserInput),
       companion: { ...this.companion },
+      voice: { ...this.voice },
       telemetry: { ...this.telemetry },
       capabilities: {
         approvalDecisions: ["accept", "decline"],

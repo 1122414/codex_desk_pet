@@ -395,6 +395,67 @@ bool DeviceProtocolClient::sendApprovalDecision(
       });
 }
 
+bool DeviceProtocolClient::sendCompanionDecision(
+    const String& request_id,
+    const bool accept) {
+  if (request_id.isEmpty() || request_id.length() > 128) return false;
+  return sendCommand(
+      "companion.command.decide",
+      [&request_id, accept](JsonObject payload) {
+        payload["requestId"] = request_id;
+        payload["decision"] = accept ? "accept" : "decline";
+      });
+}
+
+bool DeviceProtocolClient::sendVoiceStart(const String& mode) {
+  if (mode != "chat" && mode != "command") return false;
+  return sendCommand(
+      "voice.start",
+      [&mode](JsonObject payload) { payload["mode"] = mode; });
+}
+
+bool DeviceProtocolClient::sendVoiceAudio(
+    const std::uint8_t* pcm,
+    const std::size_t byte_count,
+    const std::uint16_t samples_per_channel) {
+  if (
+      state_ != State::Ready || pcm == nullptr || byte_count == 0 ||
+      byte_count > 2'048 || samples_per_channel == 0 ||
+      samples_per_channel > 1'024) {
+    return false;
+  }
+  const auto encoded_capacity = 4U * ((byte_count + 2U) / 3U) + 1U;
+  std::vector<std::uint8_t> encoded(encoded_capacity);
+  std::size_t encoded_length = 0;
+  if (mbedtls_base64_encode(
+          encoded.data(),
+          encoded.size(),
+          &encoded_length,
+          pcm,
+          byte_count) != 0) {
+    return false;
+  }
+  String data;
+  if (!data.reserve(encoded_length)) return false;
+  for (std::size_t index = 0; index < encoded_length; ++index) {
+    data += static_cast<char>(encoded[index]);
+  }
+  return sendEnvelope(
+      "event",
+      [&data, samples_per_channel](JsonObject payload) {
+        payload["event"] = "voice.audio";
+        payload["data"] = data;
+        payload["sampleRate"] = 16'000;
+        payload["numChannels"] = 1;
+        payload["samplesPerChannel"] = samples_per_channel;
+      },
+      false);
+}
+
+bool DeviceProtocolClient::sendVoiceStop() {
+  return sendCommand("voice.stop", [](JsonObject) {});
+}
+
 bool DeviceProtocolClient::sendTelemetry(
     const std::uint8_t battery_percent,
     const bool charging,
@@ -837,6 +898,21 @@ void DeviceProtocolClient::handleSnapshot(const JsonObjectConst payload) {
             snapshot.approval.detail.begin(),
             snapshot.approval.detail.end(),
             '\n') <= 2;
+  }
+  if (payload["companion"].is<JsonObjectConst>()) {
+    const auto companion = payload["companion"].as<JsonObjectConst>();
+    snapshot.companion.status =
+        boundedString(companion["status"] | "idle", 32);
+    snapshot.companion.mode =
+        boundedString(companion["mode"] | "", 16);
+    snapshot.companion.request_id =
+        boundedString(companion["requestId"] | "", 128);
+    snapshot.companion.prompt =
+        boundedString(companion["prompt"] | "", 240);
+    snapshot.companion.reply =
+        boundedString(companion["reply"] | "", 240);
+    snapshot.companion.error =
+        boundedString(companion["error"] | "", 160);
   }
   snapshot.telemetry.battery_percent =
       std::min<int>(payload["telemetry"]["batteryPercent"] | 100, 100);
