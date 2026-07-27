@@ -26,8 +26,9 @@ constexpr std::int16_t kKeyWidth = 208;
 constexpr std::int16_t kKeyHeight = 88;
 constexpr std::int16_t kTaskRowHeight = 72;
 constexpr std::uint8_t kVisibleTaskRows = 5;
-constexpr std::int16_t kRegionChunkRows = 24;
+constexpr std::int16_t kRegionChunkRows = 64;
 constexpr std::int16_t kRegionBufferWidth = 808;
+constexpr std::uint64_t kTaskScrollFrameIntervalMs = 33;
 constexpr std::uint16_t kBundledPetWidth = 192;
 constexpr std::uint16_t kBundledPetHeight = 208;
 constexpr std::size_t kBundledPetPixels =
@@ -241,7 +242,7 @@ void Tab5Ui::render(
         transfer_progress,
         minute_bucket);
     if (normal_screen_rendered_ && fingerprint == rendered_fingerprint_) {
-      if (!snapshot.approval.present) {
+      if (!snapshot.approval.present && !task_touch_active_) {
         const auto frame_index = frameIndex(snapshot, now_ms);
         if (frame_index != rendered_pet_frame_index_) {
           canvas_.fillRect(
@@ -257,10 +258,15 @@ void Tab5Ui::render(
       }
       if (
           !snapshot.approval.present &&
-          task_scroll_pixels_ != rendered_task_scroll_pixels_) {
+          task_scroll_pixels_ != rendered_task_scroll_pixels_ &&
+          (
+              !task_touch_active_ ||
+              now_ms - last_task_scroll_render_at_ms_ >=
+                  kTaskScrollFrameIntervalMs)) {
         drawTaskList(snapshot, now_ms);
         pushCanvasRegion({464, 288, 780, 390});
         rendered_task_scroll_pixels_ = task_scroll_pixels_;
+        last_task_scroll_render_at_ms_ = now_ms;
       }
       return;
     }
@@ -272,6 +278,7 @@ void Tab5Ui::render(
     drawNormal(snapshot, now_ms, connection_detail, transfer_progress);
     normal_screen_rendered_ = true;
     rendered_task_scroll_pixels_ = task_scroll_pixels_;
+    last_task_scroll_render_at_ms_ = now_ms;
   } else {
     normal_screen_rendered_ = false;
     drawPairing(connection_detail);
