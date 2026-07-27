@@ -62,6 +62,9 @@ export class JsonLineTransport extends EventEmitter {
       try {
         this.emit("message", parseEnvelope(line, this.kind));
       } catch (error) {
+        const bytes = Buffer.from(line, "utf8");
+        error.message +=
+          ` (${bytes.length} bytes, prefix ${bytes.subarray(0, 24).toString("hex")})`;
         this.emit("error", error);
       }
     }
