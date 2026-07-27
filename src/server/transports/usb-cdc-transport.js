@@ -68,6 +68,8 @@ export class UsbCdcTransport extends JsonLineTransport {
 
   close() {
     if (!this.open) return;
+    this.readableStream.on("error", () => {});
+    this.writableStream.on("error", () => {});
     super.close();
     this.readableStream.destroy();
     this.writableStream.destroy();

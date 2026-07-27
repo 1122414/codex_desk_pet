@@ -63,7 +63,7 @@ export class DeviceSession extends EventEmitter {
     nonceFactory = createHandshakeNonce,
     heartbeatIntervalMs = HEARTBEAT_INTERVAL_MS,
     connectionTimeoutMs = CONNECTION_TIMEOUT_MS,
-    handshakeTimeoutMs = 10_000,
+    handshakeTimeoutMs = 30_000,
     maxReliableInFlight = DEFAULT_RELIABLE_WINDOWS[transport?.kind] ?? 16,
     maxQueuedReliable = 8_192,
     retry = {},

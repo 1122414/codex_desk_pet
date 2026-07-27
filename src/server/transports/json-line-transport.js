@@ -32,7 +32,13 @@ export class JsonLineTransport extends EventEmitter {
   }
 
   send(envelope) {
-    if (this.#closed || this.writable.writable === false) throw new Error(`${this.kind} transport is closed`);
+    if (
+      this.#closed ||
+      this.writable.destroyed === true ||
+      this.writable.writable === false
+    ) {
+      throw new Error(`${this.kind} transport is closed`);
+    }
     const line = `${serializeEnvelope(envelope, this.kind)}\n`;
     this.writable.write(line);
   }

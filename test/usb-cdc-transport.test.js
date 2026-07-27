@@ -74,6 +74,21 @@ test("USB transport writes wake byte through the open device handle", async () =
   transport.close();
 });
 
+test("USB transport absorbs late stream errors while closing", async () => {
+  const readable = new PassThrough();
+  const writable = new PassThrough();
+  const transport = new UsbCdcTransport({
+    handle: 123,
+    readable,
+    writable,
+    devicePath: "/dev/cu.usbmodem-test",
+    closeHandle: () => {},
+  });
+
+  transport.close();
+  writable.emit("error", new Error("late write"));
+});
+
 test("USB device manager attaches each configured CDC port once and reconnects after close", async (t) => {
   const attached = [];
   const opened = [];
