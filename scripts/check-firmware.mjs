@@ -60,8 +60,12 @@ try {
   ) {
     throw new Error("Tab5 必须使用 PSRAM 双缓冲整帧提交，避免可见闪烁");
   }
-  if (!tab5Ui.includes("now_ms - last_rendered_at_ < 200")) {
-    throw new Error("Tab5 双缓冲刷新必须限制为最高 5 FPS");
+  if (
+    !tab5Ui.includes(
+      "normal_screen_rendered_ && fingerprint == rendered_fingerprint_",
+    )
+  ) {
+    throw new Error("Tab5 必须跳过内容未变化的整屏提交，避免周期性闪烁");
   }
   const bundledPetDirectory = path.join(
     root,

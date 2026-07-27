@@ -90,6 +90,95 @@ const char* shortStateLabel(const PresentationState state) {
   return "最近";
 }
 
+void hashBytes(
+    std::uint64_t& hash,
+    const void* data,
+    const std::size_t length) {
+  const auto* bytes = static_cast<const std::uint8_t*>(data);
+  for (std::size_t index = 0; index < length; ++index) {
+    hash ^= bytes[index];
+    hash *= 1099511628211ULL;
+  }
+}
+
+template <typename T>
+void hashValue(std::uint64_t& hash, const T& value) {
+  hashBytes(hash, &value, sizeof(value));
+}
+
+void hashString(std::uint64_t& hash, const std::string& value) {
+  hashBytes(hash, value.data(), value.size());
+  constexpr std::uint8_t separator = 0xff;
+  hashValue(hash, separator);
+}
+
+void hashString(std::uint64_t& hash, const String& value) {
+  hashBytes(hash, value.c_str(), value.length());
+  constexpr std::uint8_t separator = 0xfe;
+  hashValue(hash, separator);
+}
+
+std::uint64_t renderFingerprint(
+    const Snapshot& snapshot,
+    const String& connection_detail,
+    const std::uint8_t transfer_progress,
+    const std::uint8_t task_scroll_offset,
+    const std::uint64_t minute_bucket) {
+  std::uint64_t hash = 1469598103934665603ULL;
+  hashValue(hash, snapshot.bridge_connected);
+  hashValue(hash, snapshot.state);
+  hashString(hash, snapshot.task_id);
+  hashString(hash, snapshot.task_title);
+  hashString(hash, snapshot.selected_pet_id);
+  hashValue(hash, snapshot.tokens.total);
+  hashValue(hash, snapshot.tokens.level);
+  hashValue(hash, snapshot.tokens.current);
+  hashValue(hash, snapshot.tokens.target);
+  hashValue(hash, snapshot.account_tokens.lifetime);
+  hashValue(hash, snapshot.account_tokens.today);
+  hashValue(hash, snapshot.account_tokens.today_available);
+  hashValue(hash, snapshot.quota.available);
+  hashValue(hash, snapshot.quota.used_percent);
+  hashValue(hash, snapshot.quota.resets_at);
+  hashValue(hash, snapshot.quota.window_minutes);
+  hashString(hash, snapshot.quota.name);
+  hashValue(hash, snapshot.approval.present);
+  hashValue(hash, snapshot.approval.safe_to_approve);
+  hashString(hash, snapshot.approval.request_id);
+  hashString(hash, snapshot.approval.title);
+  hashString(hash, snapshot.approval.detail);
+  hashString(hash, snapshot.approval.reason);
+  hashValue(hash, snapshot.telemetry.battery_percent);
+  hashValue(hash, snapshot.telemetry.charging);
+  hashValue(hash, snapshot.telemetry.wifi_rssi);
+  hashValue(hash, snapshot.telemetry.transport);
+  hashValue(hash, snapshot.task_counts.total);
+  hashValue(hash, snapshot.task_counts.active);
+  hashValue(hash, snapshot.task_counts.visible);
+  for (const auto& task : snapshot.tasks) {
+    hashString(hash, task.id);
+    hashString(hash, task.title);
+    hashValue(hash, task.state);
+    hashValue(hash, task.updated_at);
+    hashValue(hash, task.tokens);
+    hashValue(hash, task.progress.known);
+    hashValue(hash, task.progress.completed);
+    hashValue(hash, task.progress.total);
+    hashValue(hash, task.progress.percent);
+  }
+  for (const auto& pet : snapshot.pets) {
+    hashString(hash, pet.id);
+    hashString(hash, pet.display_name);
+    hashValue(hash, pet.sprite_version);
+    hashValue(hash, pet.builtin);
+  }
+  hashString(hash, connection_detail);
+  hashValue(hash, transfer_progress);
+  hashValue(hash, task_scroll_offset);
+  hashValue(hash, minute_bucket);
+  return hash;
+}
+
 }  // namespace
 
 bool Tab5Ui::begin(
@@ -135,20 +224,22 @@ void Tab5Ui::render(
       }
       return;
     }
-  } else if (now_ms - last_rendered_at_ < 200) {
-    return;
+  } else {
+    const auto minute_bucket = currentUnixSeconds(snapshot, now_ms) / 60;
+    const auto fingerprint = renderFingerprint(
+        snapshot,
+        connection_detail,
+        transfer_progress,
+        task_scroll_offset_,
+        minute_bucket);
+    if (normal_screen_rendered_ && fingerprint == rendered_fingerprint_) return;
+    rendered_fingerprint_ = fingerprint;
   }
-  last_rendered_at_ = now_ms;
-  const auto clear_background = paired
-      ? !normal_screen_rendered_ ||
-          rendered_approval_present_ != snapshot.approval.present
-      : !pairing_screen_rendered_;
-  if (clear_background) canvas_.fillScreen(kBackground);
+  canvas_.fillScreen(kBackground);
   if (paired) {
     pairing_screen_rendered_ = false;
     drawNormal(snapshot, now_ms, connection_detail, transfer_progress);
     normal_screen_rendered_ = true;
-    rendered_approval_present_ = snapshot.approval.present;
   } else {
     normal_screen_rendered_ = false;
     drawPairing(connection_detail);
