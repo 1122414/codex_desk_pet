@@ -18,6 +18,7 @@ class UsbTransport final : public TextTransport {
   static constexpr std::size_t kMaximumLineBytes = 8U * 1024U;
   String receive_buffer_;
   bool wake_requested_ = false;
+  bool host_activity_ = false;
 };
 
 }  // namespace codex::firmware

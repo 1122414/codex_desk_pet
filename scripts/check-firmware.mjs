@@ -29,9 +29,9 @@ try {
       "USB CDC 发送缓冲必须容纳完整协议帧，避免握手 JSON 被截断",
     );
   }
-  if (!usbTransport.includes("return Serial.isConnected()")) {
+  if (!usbTransport.includes("host_activity_ || Serial.isConnected()")) {
     throw new Error(
-      "ESP32-P4 USB 协议必须等待 CDC 真正连接后握手，避免首包在主机打开端口前被截断",
+      "ESP32-P4 USB 协议必须结合实际主机流量判断 CDC 已连接",
     );
   }
   if (

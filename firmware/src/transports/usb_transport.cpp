@@ -14,7 +14,7 @@ const char* UsbTransport::kind() const {
 }
 
 bool UsbTransport::connected() const {
-  return Serial.isConnected();
+  return host_activity_ || Serial.isConnected();
 }
 
 void UsbTransport::poll(const MessageHandler& handler) {
@@ -23,6 +23,7 @@ void UsbTransport::poll(const MessageHandler& handler) {
     if (value < 0) {
       break;
     }
+    host_activity_ = true;
     const auto character = static_cast<char>(value);
     if (character == '\n') {
       receive_buffer_.trim();
@@ -59,6 +60,7 @@ bool UsbTransport::sendText(const String& message) {
 void UsbTransport::close() {
   receive_buffer_ = "";
   wake_requested_ = false;
+  host_activity_ = false;
 }
 
 }  // namespace codex::firmware
