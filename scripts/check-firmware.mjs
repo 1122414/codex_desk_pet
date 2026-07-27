@@ -112,6 +112,9 @@ try {
   ) {
     throw new Error("Tab5 收到 USB 唤醒时必须允许重置旧认证会话");
   }
+  if (!deviceProtocol.includes('type != "ack" &&\n      type != "error"')) {
+    throw new Error("Tab5 认证前不得对错误报文再次回复错误");
+  }
   const sources = (await readdir(coreDirectory))
     .filter((file) => file.endsWith(".cpp"))
     .sort()

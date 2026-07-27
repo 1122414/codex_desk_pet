@@ -348,7 +348,11 @@ export class DeviceSession extends EventEmitter {
       envelope = decryptEnvelopePayload(envelope, this.#encryptionContext("incoming"));
     } else if (isEncryptedEnvelope(envelope)) {
       throw new ProtocolError("Encryption is not available before authentication", "INVALID_ENCRYPTION_STATE");
-    } else if (!this.ready && !handshake && envelope.type !== "ack") {
+    } else if (
+      !this.ready &&
+      !handshake &&
+      !["ack", "error"].includes(envelope.type)
+    ) {
       this.#send("error", { code: "AUTHENTICATION_REQUIRED" }, false);
       return;
     }

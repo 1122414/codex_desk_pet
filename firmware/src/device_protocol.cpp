@@ -500,7 +500,10 @@ void DeviceProtocolClient::onTransportMessage(const String& message) {
   } else if (encrypted) {
     return;
   } else if (
-      state_ != State::Ready && !handshake && type != "ack") {
+      state_ != State::Ready &&
+      !handshake &&
+      type != "ack" &&
+      type != "error") {
     sendError("AUTHENTICATION_REQUIRED");
     return;
   }

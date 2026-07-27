@@ -288,6 +288,27 @@ test("an idle unauthenticated transport is closed after the handshake deadline",
   assert.equal(transports.left.open, false);
 });
 
+test("an unauthenticated error is not answered with another error", async (t) => {
+  const transports = createMemoryTransportPair();
+  const bridge = new DeviceSession({
+    role: "bridge",
+    transport: transports.left,
+    secretResolver: async () => null,
+  });
+  t.after(() => bridge.close());
+  const replies = [];
+  transports.right.on("message", (message) => replies.push(message));
+  bridge.start({ autoTick: false });
+
+  transports.right.send(createEnvelope({
+    sequence: 1,
+    type: "error",
+    payload: { code: "AUTHENTICATION_REQUIRED" },
+  }));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(replies, []);
+});
+
 test("an idle USB bridge keeps one transport open and periodically wakes the device", () => {
   const clock = { value: 1_000 };
   const transports = createMemoryTransportPair({ kind: "usb" });
