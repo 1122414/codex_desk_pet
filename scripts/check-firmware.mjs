@@ -54,19 +54,14 @@ try {
       "Tab5 内置 Pet 必须使用预解码友好的 RLE 帧，避免 PNG 解码阻塞主循环",
     );
   }
-  if (tab5Ui.includes("M5Canvas") || tab5Ui.includes("pushSprite(")) {
-    throw new Error(
-      "Tab5 不能通过全屏离屏画布刷新，避免 1280x720 PSRAM 拷贝阻塞触摸与看门狗",
-    );
-  }
   if (
-    !tab5Ui.includes("M5.Display.startWrite()") ||
-    !tab5Ui.includes("M5.Display.endWrite()")
+    !tab5Ui.includes("canvas_.setPsram(true)") ||
+    !tab5Ui.includes("canvas_.pushSprite(0, 0)")
   ) {
-    throw new Error("Tab5 原生帧缓冲绘制必须合并为单次显示事务");
+    throw new Error("Tab5 必须使用 PSRAM 双缓冲整帧提交，避免可见闪烁");
   }
-  if (!tab5Ui.includes("if (clear_background) M5.Display.fillScreen")) {
-    throw new Error("Tab5 不能在每个动画帧清空整屏");
+  if (!tab5Ui.includes("now_ms - last_rendered_at_ < 200")) {
+    throw new Error("Tab5 双缓冲刷新必须限制为最高 5 FPS");
   }
   const bundledPetDirectory = path.join(
     root,

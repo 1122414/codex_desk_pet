@@ -99,7 +99,9 @@ bool Tab5Ui::begin(
   pet_store_ = &pet_store;
   device_id_ = device_id;
   setup_code_ = setup_code;
-  M5.Display.setFont(&fonts::efontCN_16);
+  canvas_.setPsram(true);
+  if (canvas_.createSprite(kScreenWidth, kScreenHeight) == nullptr) return false;
+  canvas_.setFont(&fonts::efontCN_16);
   frame_pixels_ = static_cast<std::uint16_t*>(heap_caps_malloc(
       kPetFrameBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   if (frame_pixels_ == nullptr) {
@@ -141,8 +143,7 @@ void Tab5Ui::render(
       ? !normal_screen_rendered_ ||
           rendered_approval_present_ != snapshot.approval.present
       : !pairing_screen_rendered_;
-  M5.Display.startWrite();
-  if (clear_background) M5.Display.fillScreen(kBackground);
+  if (clear_background) canvas_.fillScreen(kBackground);
   if (paired) {
     pairing_screen_rendered_ = false;
     drawNormal(snapshot, now_ms, connection_detail, transfer_progress);
@@ -155,7 +156,7 @@ void Tab5Ui::render(
     rendered_pairing_code_ = pairing_code_;
     rendered_connection_detail_ = connection_detail;
   }
-  M5.Display.endWrite();
+  canvas_.pushSprite(0, 0);
 }
 
 bool Tab5Ui::approvalCanAccept(const Approval& approval) const {
@@ -335,65 +336,65 @@ void Tab5Ui::drawNormal(
     return;
   }
 
-  M5.Display.fillRoundRect(kPetArea.x, kPetArea.y, kPetArea.width, kPetArea.height, 20, kPanel);
+  canvas_.fillRoundRect(kPetArea.x, kPetArea.y, kPetArea.width, kPetArea.height, 20, kPanel);
   drawPet(snapshot, now_ms);
   drawQuota(snapshot);
   drawTokenSummary(snapshot);
   drawTaskList(snapshot, now_ms);
 
-  M5.Display.fillRoundRect(
+  canvas_.fillRoundRect(
       kPreviousPetButton.x, kPreviousPetButton.y,
       kPreviousPetButton.width, kPreviousPetButton.height, 14, kPanelLight);
-  M5.Display.fillRoundRect(
+  canvas_.fillRoundRect(
       kNextPetButton.x, kNextPetButton.y,
       kNextPetButton.width, kNextPetButton.height, 14, kPanelLight);
-  M5.Display.setTextDatum(middle_center);
-  M5.Display.setTextColor(kText, kPanelLight);
+  canvas_.setTextDatum(middle_center);
+  canvas_.setTextColor(kText, kPanelLight);
   drawChevron(kPreviousPetButton, false);
   drawChevron(kNextPetButton, true);
-  M5.Display.setTextSize(1);
-  M5.Display.drawString("切换宠物", 228, 660);
+  canvas_.setTextSize(1);
+  canvas_.drawString("切换宠物", 228, 660);
   if (transfer_progress > 0 && transfer_progress < 100) {
-    M5.Display.setTextColor(kOrange, kPanel);
-    M5.Display.drawString(
+    canvas_.setTextColor(kOrange, kPanel);
+    canvas_.drawString(
         "同步 " + String(transfer_progress) + "%",
         228,
         606);
   }
-  M5.Display.setTextSize(1);
-  M5.Display.setTextDatum(top_left);
+  canvas_.setTextSize(1);
+  canvas_.setTextDatum(top_left);
 }
 
 void Tab5Ui::drawPairing(const String& connection_detail) {
-  M5.Display.setTextDatum(top_center);
-  M5.Display.setTextColor(kText, kBackground);
-  M5.Display.setTextSize(3);
-  M5.Display.drawString("Codex Desk 配对", kScreenWidth / 2, 52);
-  M5.Display.setTextSize(1);
-  M5.Display.setTextColor(kMuted, kBackground);
-  M5.Display.drawString("先用 USB-C 数据线连接电脑，在电脑端生成 6 位配对码", kScreenWidth / 2, 118);
-  M5.Display.fillRoundRect(430, 150, 420, 48, 12, kPanel);
-  M5.Display.setTextColor(kOrange, kPanel);
-  M5.Display.setTextSize(2);
-  M5.Display.drawString(pairing_code_, kScreenWidth / 2, 160);
+  canvas_.setTextDatum(top_center);
+  canvas_.setTextColor(kText, kBackground);
+  canvas_.setTextSize(3);
+  canvas_.drawString("Codex Desk 配对", kScreenWidth / 2, 52);
+  canvas_.setTextSize(1);
+  canvas_.setTextColor(kMuted, kBackground);
+  canvas_.drawString("先用 USB-C 数据线连接电脑，在电脑端生成 6 位配对码", kScreenWidth / 2, 118);
+  canvas_.fillRoundRect(430, 150, 420, 48, 12, kPanel);
+  canvas_.setTextColor(kOrange, kPanel);
+  canvas_.setTextSize(2);
+  canvas_.drawString(pairing_code_, kScreenWidth / 2, 160);
   static constexpr const char* keys[12] = {
       "1", "2", "3", "4", "5", "6", "7", "8", "9", "清空", "0", "确定"};
   for (int row = 0; row < 4; ++row) {
     for (int column = 0; column < 3; ++column) {
       const auto x = kKeyX + column * kKeyWidth;
       const auto y = kKeyY + row * kKeyHeight;
-      M5.Display.fillRoundRect(x + 5, y + 5, kKeyWidth - 10, kKeyHeight - 10, 12, kPanelLight);
-      M5.Display.setTextColor(kText, kPanelLight);
-      M5.Display.setTextSize(2);
-      M5.Display.drawString(keys[row * 3 + column], x + kKeyWidth / 2, y + 26);
+      canvas_.fillRoundRect(x + 5, y + 5, kKeyWidth - 10, kKeyHeight - 10, 12, kPanelLight);
+      canvas_.setTextColor(kText, kPanelLight);
+      canvas_.setTextSize(2);
+      canvas_.drawString(keys[row * 3 + column], x + kKeyWidth / 2, y + 26);
     }
   }
-  M5.Display.setTextColor(kMuted, kBackground);
-  M5.Display.setTextSize(1);
-  M5.Display.setTextDatum(bottom_center);
-  M5.Display.drawString("设备 " + device_id_ + " · Wi-Fi 在 USB 配对后由电脑端设置", kScreenWidth / 2, 680);
+  canvas_.setTextColor(kMuted, kBackground);
+  canvas_.setTextSize(1);
+  canvas_.setTextDatum(bottom_center);
+  canvas_.drawString("设备 " + device_id_ + " · Wi-Fi 在 USB 配对后由电脑端设置", kScreenWidth / 2, 680);
   if (!connection_detail.isEmpty()) drawTruncated(connection_detail, 120, 636, 1040);
-  M5.Display.setTextDatum(top_left);
+  canvas_.setTextDatum(top_left);
 }
 
 void Tab5Ui::drawPet(const Snapshot& snapshot, const std::uint64_t now_ms) {
@@ -405,7 +406,7 @@ void Tab5Ui::drawPet(const Snapshot& snapshot, const std::uint64_t now_ms) {
           static_cast<std::size_t>(kPetFrameWidth) * kPetFrameHeight, error);
   auto drawn = custom;
   if (drawn) {
-    M5.Display.pushImage(36, 108, kPetFrameWidth, kPetFrameHeight, frame_pixels_, kPetTransparentColor);
+    canvas_.pushImage(36, 108, kPetFrameWidth, kPetFrameHeight, frame_pixels_, kPetTransparentColor);
   } else if (
       snapshot.selected_pet_id == "chibi-skadi" &&
       drawBundledPet(index)) {
@@ -421,14 +422,14 @@ void Tab5Ui::drawPet(const Snapshot& snapshot, const std::uint64_t now_ms) {
   if (selected != snapshot.pets.end() && !selected->display_name.empty()) {
     pet_name = String(selected->display_name.c_str());
   }
-  M5.Display.setTextColor(kText, kPanel);
-  M5.Display.setTextSize(1);
-  M5.Display.setTextDatum(top_left);
+  canvas_.setTextColor(kText, kPanel);
+  canvas_.setTextSize(1);
+  canvas_.setTextDatum(top_left);
   drawTruncated(pet_name, 62, 546, 332);
-  M5.Display.setTextColor(stateColor(snapshot.state), kPanel);
-  M5.Display.setTextDatum(middle_center);
-  M5.Display.drawString(stateLabel(snapshot.state), 228, 590);
-  M5.Display.setTextDatum(top_left);
+  canvas_.setTextColor(stateColor(snapshot.state), kPanel);
+  canvas_.setTextDatum(middle_center);
+  canvas_.drawString(stateLabel(snapshot.state), 228, 590);
+  canvas_.setTextDatum(top_left);
 }
 
 bool Tab5Ui::drawBundledPet(const std::uint8_t frame_index) {
@@ -492,7 +493,7 @@ bool Tab5Ui::drawBundledPet(const std::uint8_t frame_index) {
     }
     bundled_pet_cached_path_ = path;
   }
-  M5.Display.pushImage(
+  canvas_.pushImage(
       36,
       108,
       kPetFrameWidth,
@@ -507,75 +508,75 @@ void Tab5Ui::drawFallbackPet(const Animation animation, const std::uint8_t frame
       (animation == Animation::Jumping ? -42 : 0) + (frame % 2 == 0 ? 0 : -8));
   const auto cx = 228;
   const auto cy = 320 + bob;
-  M5.Display.fillCircle(cx, cy, 128, kPanelLight);
-  M5.Display.fillTriangle(cx - 106, cy - 78, cx - 54, cy - 164, cx - 12, cy - 104, kPanelLight);
-  M5.Display.fillTriangle(cx + 106, cy - 78, cx + 54, cy - 164, cx + 12, cy - 104, kPanelLight);
+  canvas_.fillCircle(cx, cy, 128, kPanelLight);
+  canvas_.fillTriangle(cx - 106, cy - 78, cx - 54, cy - 164, cx - 12, cy - 104, kPanelLight);
+  canvas_.fillTriangle(cx + 106, cy - 78, cx + 54, cy - 164, cx + 12, cy - 104, kPanelLight);
   const auto eye_dx = look_until_ > millis()
       ? static_cast<std::int16_t>(std::cos(look_degrees_ * 3.14159265F / 180.0F) * 12)
       : 0;
   const auto eye_dy = look_until_ > millis()
       ? static_cast<std::int16_t>(std::sin(look_degrees_ * 3.14159265F / 180.0F) * 12)
       : 0;
-  M5.Display.fillCircle(cx - 48 + eye_dx, cy - 16 + eye_dy, 14, kText);
-  M5.Display.fillCircle(cx + 48 + eye_dx, cy - 16 + eye_dy, 14, kText);
+  canvas_.fillCircle(cx - 48 + eye_dx, cy - 16 + eye_dy, 14, kText);
+  canvas_.fillCircle(cx + 48 + eye_dx, cy - 16 + eye_dy, 14, kText);
   if (animation == Animation::Failed) {
-    M5.Display.drawLine(cx - 26, cy + 58, cx + 26, cy + 40, kRed);
+    canvas_.drawLine(cx - 26, cy + 58, cx + 26, cy + 40, kRed);
   } else {
-    M5.Display.drawArc(cx, cy + 30, 42, 31, 20, 160, kGreen);
+    canvas_.drawArc(cx, cy + 30, 42, 31, 20, 160, kGreen);
   }
-  M5.Display.fillRoundRect(cx - 120, cy + 116, 240, 54, 26, kPanelLight);
-  M5.Display.setTextDatum(middle_center);
-  M5.Display.setTextColor(
+  canvas_.fillRoundRect(cx - 120, cy + 116, 240, 54, 26, kPanelLight);
+  canvas_.setTextDatum(middle_center);
+  canvas_.setTextColor(
       stateColor(animation == Animation::Failed ? PresentationState::Blocked : PresentationState::Ready),
       kPanelLight);
-  M5.Display.setTextSize(2);
-  M5.Display.drawString("CODEX", cx, cy + 143);
-  M5.Display.setTextSize(1);
-  M5.Display.setTextDatum(top_left);
+  canvas_.setTextSize(2);
+  canvas_.drawString("CODEX", cx, cy + 143);
+  canvas_.setTextSize(1);
+  canvas_.setTextDatum(top_left);
 }
 
 void Tab5Ui::drawApproval(const Approval& approval) {
-  M5.Display.fillRoundRect(48, 100, 1184, 584, 22, kPanel);
-  M5.Display.setTextColor(kOrange, kPanel);
-  M5.Display.setTextSize(2);
-  M5.Display.drawString(String(approval.title.c_str()), 88, 140);
-  M5.Display.setTextSize(1);
-  M5.Display.setTextColor(kText, kPanel);
+  canvas_.fillRoundRect(48, 100, 1184, 584, 22, kPanel);
+  canvas_.setTextColor(kOrange, kPanel);
+  canvas_.setTextSize(2);
+  canvas_.drawString(String(approval.title.c_str()), 88, 140);
+  canvas_.setTextSize(1);
+  canvas_.setTextColor(kText, kPanel);
   drawWrapped(String(approval.detail.c_str()), 88, 210, 1080, 2, 38);
-  M5.Display.setTextColor(kMuted, kPanel);
+  canvas_.setTextColor(kMuted, kPanel);
   drawWrapped(String(approval.reason.c_str()), 88, 304, 1080, 2, 34);
-  M5.Display.fillRoundRect(
+  canvas_.fillRoundRect(
       kDeclineButton.x, kDeclineButton.y,
       kDeclineButton.width, kDeclineButton.height, 14, kPanelLight);
   const auto safe = approvalCanAccept(approval);
-  M5.Display.fillRoundRect(
+  canvas_.fillRoundRect(
       kAcceptButton.x, kAcceptButton.y,
       kAcceptButton.width, kAcceptButton.height, 14, safe ? kGreen : kPanelLight);
-  M5.Display.setTextDatum(middle_center);
-  M5.Display.setTextSize(2);
-  M5.Display.setTextColor(kText, kPanelLight);
-  M5.Display.drawString("拒绝", kDeclineButton.x + kDeclineButton.width / 2,
+  canvas_.setTextDatum(middle_center);
+  canvas_.setTextSize(2);
+  canvas_.setTextColor(kText, kPanelLight);
+  canvas_.drawString("拒绝", kDeclineButton.x + kDeclineButton.width / 2,
                      kDeclineButton.y + kDeclineButton.height / 2);
-  M5.Display.setTextColor(safe ? kBackground : kMuted, safe ? kGreen : kPanelLight);
-  M5.Display.drawString(safe ? "仅允许本次" : "请在电脑确认",
+  canvas_.setTextColor(safe ? kBackground : kMuted, safe ? kGreen : kPanelLight);
+  canvas_.drawString(safe ? "仅允许本次" : "请在电脑确认",
                      kAcceptButton.x + kAcceptButton.width / 2,
                      kAcceptButton.y + kAcceptButton.height / 2);
-  M5.Display.setTextSize(1);
-  M5.Display.setTextDatum(top_left);
+  canvas_.setTextSize(1);
+  canvas_.setTextDatum(top_left);
 }
 
 void Tab5Ui::drawStatus(
     const Snapshot& snapshot,
     const std::uint64_t now_ms,
     const String& connection_detail) {
-  M5.Display.fillRect(0, 0, kScreenWidth, 72, kPanel);
-  M5.Display.fillCircle(32, 36, 12, snapshot.bridge_connected ? kGreen : kRed);
-  M5.Display.setTextColor(stateColor(snapshot.state), kPanel);
-  M5.Display.setTextSize(2);
-  M5.Display.setTextDatum(middle_left);
-  M5.Display.drawString(stateLabel(snapshot.state), 62, 36);
-  M5.Display.setTextColor(kMuted, kPanel);
-  M5.Display.setTextSize(1);
+  canvas_.fillRect(0, 0, kScreenWidth, 72, kPanel);
+  canvas_.fillCircle(32, 36, 12, snapshot.bridge_connected ? kGreen : kRed);
+  canvas_.setTextColor(stateColor(snapshot.state), kPanel);
+  canvas_.setTextSize(2);
+  canvas_.setTextDatum(middle_left);
+  canvas_.drawString(stateLabel(snapshot.state), 62, 36);
+  canvas_.setTextColor(kMuted, kPanel);
+  canvas_.setTextSize(1);
   drawTruncated(connection_detail, 210, 28, 650);
 
   const auto unix_seconds = currentUnixSeconds(snapshot, now_ms);
@@ -598,59 +599,59 @@ void Tab5Ui::drawStatus(
   }
 
   const auto transport_x = 900;
-  M5.Display.setTextColor(snapshot.bridge_connected ? kBlue : kMuted, kPanel);
+  canvas_.setTextColor(snapshot.bridge_connected ? kBlue : kMuted, kPanel);
   if (snapshot.telemetry.transport == TransportKind::Wifi) {
-    M5.Display.drawArc(transport_x, 37, 20, 17, 210, 330, kBlue);
-    M5.Display.drawArc(transport_x, 37, 12, 9, 215, 325, kBlue);
-    M5.Display.fillCircle(transport_x, 43, 3, kBlue);
+    canvas_.drawArc(transport_x, 37, 20, 17, 210, 330, kBlue);
+    canvas_.drawArc(transport_x, 37, 12, 9, 215, 325, kBlue);
+    canvas_.fillCircle(transport_x, 43, 3, kBlue);
   } else {
-    M5.Display.drawLine(transport_x - 18, 38, transport_x + 10, 38, kBlue);
-    M5.Display.drawLine(transport_x + 10, 38, transport_x + 18, 30, kBlue);
-    M5.Display.drawLine(transport_x + 10, 38, transport_x + 18, 46, kBlue);
-    M5.Display.drawLine(transport_x + 18, 30, transport_x + 18, 24, kBlue);
-    M5.Display.fillCircle(transport_x + 18, 47, 3, kBlue);
+    canvas_.drawLine(transport_x - 18, 38, transport_x + 10, 38, kBlue);
+    canvas_.drawLine(transport_x + 10, 38, transport_x + 18, 30, kBlue);
+    canvas_.drawLine(transport_x + 10, 38, transport_x + 18, 46, kBlue);
+    canvas_.drawLine(transport_x + 18, 30, transport_x + 18, 24, kBlue);
+    canvas_.fillCircle(transport_x + 18, 47, 3, kBlue);
   }
-  M5.Display.setTextDatum(middle_left);
-  M5.Display.setTextColor(kMuted, kPanel);
-  M5.Display.drawString(time_text, 940, 36);
+  canvas_.setTextDatum(middle_left);
+  canvas_.setTextColor(kMuted, kPanel);
+  canvas_.drawString(time_text, 940, 36);
 
   const auto battery = std::min<std::uint8_t>(snapshot.telemetry.battery_percent, 100);
-  M5.Display.drawRoundRect(1178, 25, 42, 22, 4, kMuted);
-  M5.Display.fillRect(1220, 31, 4, 10, kMuted);
-  M5.Display.fillRoundRect(
+  canvas_.drawRoundRect(1178, 25, 42, 22, 4, kMuted);
+  canvas_.fillRect(1220, 31, 4, 10, kMuted);
+  canvas_.fillRoundRect(
       1181,
       28,
       36 * battery / 100,
       16,
       2,
       snapshot.telemetry.charging ? kGreen : kBlue);
-  M5.Display.setTextDatum(middle_right);
-  M5.Display.drawString(String(battery) + "%", 1264, 36);
-  M5.Display.setTextDatum(top_left);
-  M5.Display.setTextSize(1);
+  canvas_.setTextDatum(middle_right);
+  canvas_.drawString(String(battery) + "%", 1264, 36);
+  canvas_.setTextDatum(top_left);
+  canvas_.setTextSize(1);
 }
 
 void Tab5Ui::drawQuota(const Snapshot& snapshot) {
   constexpr Rect panel{448, 88, 390, 130};
-  M5.Display.fillRoundRect(panel.x, panel.y, panel.width, panel.height, 16, kPanel);
-  M5.Display.setTextDatum(top_left);
-  M5.Display.setTextColor(kMuted, kPanel);
-  M5.Display.setTextSize(1);
-  M5.Display.drawString("本周额度", 470, 106);
+  canvas_.fillRoundRect(panel.x, panel.y, panel.width, panel.height, 16, kPanel);
+  canvas_.setTextDatum(top_left);
+  canvas_.setTextColor(kMuted, kPanel);
+  canvas_.setTextSize(1);
+  canvas_.drawString("本周额度", 470, 106);
   const auto used = snapshot.quota.available ? snapshot.quota.used_percent : 0;
   const auto remaining = snapshot.quota.available ? 100 - used : 0;
-  M5.Display.setTextColor(snapshot.quota.available ? kText : kMuted, kPanel);
-  M5.Display.setTextSize(2);
-  M5.Display.drawString(
+  canvas_.setTextColor(snapshot.quota.available ? kText : kMuted, kPanel);
+  canvas_.setTextSize(2);
+  canvas_.drawString(
       snapshot.quota.available
           ? String(remaining) + "%"
           : "--",
       470,
       136);
-  M5.Display.setTextSize(1);
-  M5.Display.setTextColor(kMuted, kPanel);
+  canvas_.setTextSize(1);
+  canvas_.setTextColor(kMuted, kPanel);
   if (snapshot.quota.available) {
-    M5.Display.drawString(
+    canvas_.drawString(
         "剩余 · 已用 " + String(used) + "%",
         578,
         146);
@@ -672,34 +673,34 @@ void Tab5Ui::drawQuota(const Snapshot& snapshot) {
         local.tm_min);
     reset_text = text;
   }
-  M5.Display.drawString(reset_text, 470, 178);
-  M5.Display.drawRoundRect(470, 198, 344, 10, 5, kPanelLight);
-  M5.Display.fillRoundRect(472, 200, 340 * used / 100, 6, 3, used >= 90 ? kRed : kBlue);
+  canvas_.drawString(reset_text, 470, 178);
+  canvas_.drawRoundRect(470, 198, 344, 10, 5, kPanelLight);
+  canvas_.fillRoundRect(472, 200, 340 * used / 100, 6, 3, used >= 90 ? kRed : kBlue);
 }
 
 void Tab5Ui::drawTokenSummary(const Snapshot& snapshot) {
   constexpr Rect panel{854, 88, 402, 130};
-  M5.Display.fillRoundRect(panel.x, panel.y, panel.width, panel.height, 16, kPanel);
-  M5.Display.setTextDatum(top_left);
-  M5.Display.setTextColor(kMuted, kPanel);
-  M5.Display.setTextSize(1);
-  M5.Display.drawString("TOKEN", 876, 106);
+  canvas_.fillRoundRect(panel.x, panel.y, panel.width, panel.height, 16, kPanel);
+  canvas_.setTextDatum(top_left);
+  canvas_.setTextColor(kMuted, kPanel);
+  canvas_.setTextSize(1);
+  canvas_.drawString("TOKEN", 876, 106);
   const auto task_tokens = !snapshot.tasks.empty()
       ? snapshot.tasks.front().tokens
       : snapshot.tokens.total;
-  M5.Display.setTextColor(kText, kPanel);
-  M5.Display.setTextSize(2);
-  M5.Display.drawString(compactNumber(task_tokens), 876, 136);
-  M5.Display.setTextSize(1);
-  M5.Display.setTextColor(kMuted, kPanel);
-  M5.Display.drawString("当前任务", 1000, 146);
-  M5.Display.drawString(
+  canvas_.setTextColor(kText, kPanel);
+  canvas_.setTextSize(2);
+  canvas_.drawString(compactNumber(task_tokens), 876, 136);
+  canvas_.setTextSize(1);
+  canvas_.setTextColor(kMuted, kPanel);
+  canvas_.drawString("当前任务", 1000, 146);
+  canvas_.drawString(
       snapshot.account_tokens.today_available
           ? "今日 " + compactNumber(snapshot.account_tokens.today)
           : "今日 --",
       876,
       184);
-  M5.Display.drawString(
+  canvas_.drawString(
       "累计 " + compactNumber(snapshot.account_tokens.lifetime),
       1060,
       184);
@@ -709,24 +710,24 @@ void Tab5Ui::drawTaskList(
     const Snapshot& snapshot,
     const std::uint64_t now_ms) {
   constexpr Rect panel{448, 234, 808, 462};
-  M5.Display.fillRoundRect(panel.x, panel.y, panel.width, panel.height, 16, kPanel);
-  M5.Display.setTextDatum(top_left);
-  M5.Display.setTextColor(kText, kPanel);
-  M5.Display.setTextSize(1);
-  M5.Display.drawString("任务", 470, 252);
-  M5.Display.setTextColor(kBlue, kPanel);
-  M5.Display.drawString(
+  canvas_.fillRoundRect(panel.x, panel.y, panel.width, panel.height, 16, kPanel);
+  canvas_.setTextDatum(top_left);
+  canvas_.setTextColor(kText, kPanel);
+  canvas_.setTextSize(1);
+  canvas_.drawString("任务", 470, 252);
+  canvas_.setTextColor(kBlue, kPanel);
+  canvas_.drawString(
       String(snapshot.task_counts.active) + " 个进行中",
       536,
       252);
-  M5.Display.setTextDatum(top_right);
-  M5.Display.setTextColor(kMuted, kPanel);
-  M5.Display.drawString(
+  canvas_.setTextDatum(top_right);
+  canvas_.setTextColor(kMuted, kPanel);
+  canvas_.drawString(
       "显示 " + String(snapshot.task_counts.visible) + "/" +
           String(snapshot.task_counts.total),
       1218,
       252);
-  M5.Display.setTextDatum(top_left);
+  canvas_.setTextDatum(top_left);
 
   const auto maximum_scroll = snapshot.tasks.size() > kVisibleTaskRows
       ? snapshot.tasks.size() - kVisibleTaskRows
@@ -734,10 +735,10 @@ void Tab5Ui::drawTaskList(
   task_scroll_offset_ = static_cast<std::uint8_t>(
       std::min<std::size_t>(task_scroll_offset_, maximum_scroll));
   if (snapshot.tasks.empty()) {
-    M5.Display.setTextColor(kMuted, kPanel);
-    M5.Display.setTextDatum(middle_center);
-    M5.Display.drawString("暂无任务 · Bridge 已连接", 840, 476);
-    M5.Display.setTextDatum(top_left);
+    canvas_.setTextColor(kMuted, kPanel);
+    canvas_.setTextDatum(middle_center);
+    canvas_.drawString("暂无任务 · Bridge 已连接", 840, 476);
+    canvas_.setTextDatum(top_left);
     return;
   }
 
@@ -750,15 +751,15 @@ void Tab5Ui::drawTaskList(
     const auto row = static_cast<std::int16_t>(index - task_scroll_offset_);
     const auto y = kTaskListArea.y + row * kTaskRowHeight;
     const auto background = row % 2 == 0 ? kPanelLight : kPanel;
-    M5.Display.fillRoundRect(464, y, 758, 64, 10, background);
-    M5.Display.fillCircle(482, y + 22, 6, stateColor(task.state));
-    M5.Display.setTextColor(kText, background);
-    M5.Display.setTextSize(1);
+    canvas_.fillRoundRect(464, y, 758, 64, 10, background);
+    canvas_.fillCircle(482, y + 22, 6, stateColor(task.state));
+    canvas_.setTextColor(kText, background);
+    canvas_.setTextSize(1);
     drawTruncated(String(task.title.c_str()), 500, y + 10, 500);
-    M5.Display.setTextDatum(top_right);
-    M5.Display.setTextColor(stateColor(task.state), background);
-    M5.Display.drawString(shortStateLabel(task.state), 1202, y + 10);
-    M5.Display.setTextColor(kMuted, background);
+    canvas_.setTextDatum(top_right);
+    canvas_.setTextColor(stateColor(task.state), background);
+    canvas_.drawString(shortStateLabel(task.state), 1202, y + 10);
+    canvas_.setTextColor(kMuted, background);
     String recency = "--";
     if (now_seconds > 0 && task.updated_at > 0) {
       const auto age = now_seconds > task.updated_at
@@ -769,23 +770,23 @@ void Tab5Ui::drawTaskList(
       else if (age < 86400) recency = String(age / 3600) + " 小时前";
       else recency = String(age / 86400) + " 天前";
     }
-    M5.Display.drawString(recency, 1202, y + 36);
-    M5.Display.setTextDatum(top_left);
-    M5.Display.drawString(compactNumber(task.tokens) + " tok", 500, y + 36);
+    canvas_.drawString(recency, 1202, y + 36);
+    canvas_.setTextDatum(top_left);
+    canvas_.drawString(compactNumber(task.tokens) + " tok", 500, y + 36);
     if (task.progress.known) {
-      M5.Display.drawRoundRect(684, y + 43, 270, 8, 4, kMuted);
-      M5.Display.fillRoundRect(
+      canvas_.drawRoundRect(684, y + 43, 270, 8, 4, kMuted);
+      canvas_.fillRoundRect(
           686,
           y + 45,
           266 * task.progress.percent / 100,
           4,
           2,
           kBlue);
-      M5.Display.drawString(String(task.progress.percent) + "%", 964, y + 36);
+      canvas_.drawString(String(task.progress.percent) + "%", 964, y + 36);
     } else if (task.state == PresentationState::Running) {
       const auto phase = static_cast<std::int16_t>((now_ms / 40) % 210);
-      M5.Display.drawRoundRect(684, y + 43, 270, 8, 4, kMuted);
-      M5.Display.fillRoundRect(686 + phase, y + 45, 54, 4, 2, kBlue);
+      canvas_.drawRoundRect(684, y + 43, 270, 8, 4, kMuted);
+      canvas_.fillRoundRect(686 + phase, y + 45, 54, 4, 2, kBlue);
     }
   }
 
@@ -798,8 +799,8 @@ void Tab5Ui::drawTaskList(
     const auto travel = track_height - thumb_height;
     const auto thumb_y = track_y +
         travel * task_scroll_offset_ / std::max<std::size_t>(maximum_scroll, 1);
-    M5.Display.fillRoundRect(1236, track_y, 6, track_height, 3, kPanelLight);
-    M5.Display.fillRoundRect(1236, thumb_y, 6, thumb_height, 3, kBlue);
+    canvas_.fillRoundRect(1236, track_y, 6, track_height, 3, kPanelLight);
+    canvas_.fillRoundRect(1236, thumb_y, 6, thumb_height, 3, kBlue);
   }
 }
 
@@ -807,8 +808,8 @@ void Tab5Ui::drawChevron(const Rect& bounds, const bool points_right) {
   const auto cx = bounds.x + bounds.width / 2;
   const auto cy = bounds.y + bounds.height / 2;
   const auto direction = points_right ? 1 : -1;
-  M5.Display.drawLine(cx - 8 * direction, cy - 11, cx + 6 * direction, cy, kText);
-  M5.Display.drawLine(cx + 6 * direction, cy, cx - 8 * direction, cy + 11, kText);
+  canvas_.drawLine(cx - 8 * direction, cy - 11, cx + 6 * direction, cy, kText);
+  canvas_.drawLine(cx + 6 * direction, cy, cx - 8 * direction, cy + 11, kText);
 }
 
 std::uint64_t Tab5Ui::currentUnixSeconds(
@@ -833,9 +834,9 @@ void Tab5Ui::drawTruncated(
     const std::int16_t x,
     const std::int16_t y,
     const std::int16_t width) {
-  M5.Display.setClipRect(x, y, width, M5.Display.fontHeight());
-  M5.Display.drawString(text, x, y);
-  M5.Display.clearClipRect();
+  canvas_.setClipRect(x, y, width, canvas_.fontHeight());
+  canvas_.drawString(text, x, y);
+  canvas_.clearClipRect();
 }
 
 void Tab5Ui::drawWrapped(
@@ -852,15 +853,15 @@ void Tab5Ui::drawWrapped(
     const auto character = text.substring(index, index + bytes);
     index += bytes;
     if (character == "\n") {
-      M5.Display.drawString(line, x, y);
+      canvas_.drawString(line, x, y);
       line = "";
       y += line_height;
       if (++line_count >= maximum_lines) return;
       continue;
     }
     const auto candidate = line + character;
-    if (!line.isEmpty() && M5.Display.textWidth(candidate) > width) {
-      M5.Display.drawString(line, x, y);
+    if (!line.isEmpty() && canvas_.textWidth(candidate) > width) {
+      canvas_.drawString(line, x, y);
       line = character;
       y += line_height;
       if (++line_count >= maximum_lines) return;
@@ -869,7 +870,7 @@ void Tab5Ui::drawWrapped(
     }
   }
   if (!line.isEmpty() && line_count < maximum_lines) {
-    M5.Display.drawString(line, x, y);
+    canvas_.drawString(line, x, y);
   }
 }
 
