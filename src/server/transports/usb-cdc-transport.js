@@ -50,10 +50,16 @@ export class UsbCdcTransport extends JsonLineTransport {
     if (!info.isCharacterDevice()) throw new Error("USB CDC path is not a character device");
     await configure(devicePath);
     const handle = await open(devicePath, "r+");
-    await handle.write("\n");
     const readable = handle.createReadStream({ autoClose: false });
     const writable = handle.createWriteStream({ autoClose: false });
-    return new UsbCdcTransport({ handle, readable, writable, devicePath });
+    const transport = new UsbCdcTransport({ handle, readable, writable, devicePath });
+    try {
+      await handle.write("\n");
+      return transport;
+    } catch (error) {
+      transport.close();
+      throw error;
+    }
   }
 
   wakeDevice() {
@@ -120,7 +126,6 @@ export class UsbDeviceManager extends EventEmitter {
         this.#transports.set(devicePath, transport);
         transport.once("close", () => this.#transports.delete(devicePath));
         this.hub.attachTransport(transport);
-        transport.wakeDevice?.();
         this.emit("attached", devicePath);
       } catch (error) {
         this.emit("diagnostic", `${devicePath}: ${error.message}`);

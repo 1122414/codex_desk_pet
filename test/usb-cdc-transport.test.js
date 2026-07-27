@@ -89,7 +89,7 @@ test("USB transport absorbs late stream errors while closing", async () => {
   writable.emit("error", new Error("late write"));
 });
 
-test("USB device manager attaches each configured CDC port once and reconnects after close", async (t) => {
+test("USB device manager attaches each configured CDC port without sending a second wake", async (t) => {
   const attached = [];
   const opened = [];
   const hub = {
@@ -109,7 +109,7 @@ test("USB device manager attaches each configured CDC port once and reconnects a
   t.after(() => manager.close());
   await manager.start();
   assert.deepEqual(opened, ["/dev/cu.usbmodem-test", "/dev/ttyACM0"]);
-  assert.deepEqual(attached.map((transport) => transport.wakeCount), [1, 1]);
+  assert.deepEqual(attached.map((transport) => transport.wakeCount), [0, 0]);
   await manager.scan();
   assert.equal(opened.length, 2);
   attached[0].close();
