@@ -709,6 +709,33 @@ void DeviceProtocolClient::handleSnapshot(const JsonObjectConst payload) {
     snapshot.task_title =
         boundedString(payload["task"]["title"] | "", 120);
   }
+  if (payload["tasks"].is<JsonArrayConst>()) {
+    const auto tasks = payload["tasks"].as<JsonArrayConst>();
+    const auto count = std::min<std::size_t>(tasks.size(), 12);
+    snapshot.tasks.reserve(count);
+    for (std::size_t index = 0; index < count; ++index) {
+      const auto value = tasks[index].as<JsonObjectConst>();
+      TaskSummary task;
+      task.id = boundedString(value["id"] | "", 128);
+      task.title = boundedString(value["title"] | "", 72);
+      parsePresentationState(
+          boundedString(value["state"] | "ready", 32),
+          task.state);
+      task.updated_at = value["updatedAt"].as<std::uint64_t>();
+      task.tokens = value["tokens"].as<std::uint64_t>();
+      if (value["progress"].is<JsonObjectConst>()) {
+        const auto progress = value["progress"].as<JsonObjectConst>();
+        task.progress.known = progress["known"] | false;
+        task.progress.completed = progress["completed"] | 0;
+        task.progress.total = progress["total"] | 0;
+        task.progress.percent = std::min<int>(progress["percent"] | 0, 100);
+      }
+      if (!task.id.empty()) snapshot.tasks.push_back(std::move(task));
+    }
+  }
+  snapshot.task_counts.total = payload["taskCounts"]["total"] | 0;
+  snapshot.task_counts.active = payload["taskCounts"]["active"] | 0;
+  snapshot.task_counts.visible = payload["taskCounts"]["visible"] | 0;
   snapshot.selected_pet_id =
       boundedString(payload["pet"]["selectedId"] | "codex-core", 64);
   snapshot.pets.clear();
@@ -734,6 +761,23 @@ void DeviceProtocolClient::handleSnapshot(const JsonObjectConst payload) {
   snapshot.tokens.level = payload["tokens"]["level"]["level"] | 1;
   snapshot.tokens.current = payload["tokens"]["level"]["current"] | 0;
   snapshot.tokens.target = payload["tokens"]["level"]["target"] | 50'000;
+  snapshot.account_tokens.lifetime =
+      payload["accountTokens"]["lifetime"].as<std::uint64_t>();
+  snapshot.account_tokens.today =
+      payload["accountTokens"]["today"].as<std::uint64_t>();
+  snapshot.quota.available = payload["quota"]["available"] | false;
+  snapshot.quota.used_percent =
+      std::min<int>(payload["quota"]["usedPercent"] | 0, 100);
+  snapshot.quota.resets_at =
+      payload["quota"]["resetsAt"].as<std::uint64_t>();
+  snapshot.quota.window_minutes =
+      payload["quota"]["windowMinutes"] | 0;
+  snapshot.quota.name =
+      boundedString(payload["quota"]["name"] | "Codex", 32);
+  snapshot.clock.unix_ms =
+      payload["clock"]["unixMs"].as<std::uint64_t>();
+  snapshot.clock.utc_offset_minutes =
+      std::clamp<int>(payload["clock"]["utcOffsetMinutes"] | 0, -720, 840);
   if (payload["approval"].is<JsonObjectConst>()) {
     const auto approval = payload["approval"].as<JsonObjectConst>();
     snapshot.approval.present = true;

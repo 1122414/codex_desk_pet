@@ -64,6 +64,46 @@ struct PetSummary {
   bool builtin = false;
 };
 
+struct TaskProgress {
+  bool known = false;
+  std::uint32_t completed = 0;
+  std::uint32_t total = 0;
+  std::uint8_t percent = 0;
+};
+
+struct TaskSummary {
+  std::string id;
+  std::string title;
+  PresentationState state = PresentationState::Ready;
+  std::uint64_t updated_at = 0;
+  std::uint64_t tokens = 0;
+  TaskProgress progress;
+};
+
+struct TaskCounts {
+  std::uint16_t total = 0;
+  std::uint16_t active = 0;
+  std::uint16_t visible = 0;
+};
+
+struct Quota {
+  bool available = false;
+  std::uint8_t used_percent = 0;
+  std::uint64_t resets_at = 0;
+  std::uint32_t window_minutes = 0;
+  std::string name = "Codex";
+};
+
+struct AccountTokens {
+  std::uint64_t lifetime = 0;
+  std::uint64_t today = 0;
+};
+
+struct Clock {
+  std::uint64_t unix_ms = 0;
+  std::int16_t utc_offset_minutes = 0;
+};
+
 struct Snapshot {
   std::uint64_t revision = 0;
   bool bridge_connected = false;
@@ -71,9 +111,14 @@ struct Snapshot {
   Animation animation = Animation::Idle;
   std::string task_id;
   std::string task_title;
+  std::vector<TaskSummary> tasks;
+  TaskCounts task_counts;
   std::string selected_pet_id = "codex-core";
   std::vector<PetSummary> pets{{"codex-core", "Codex Core", 2, true}};
   TokenLevel tokens;
+  AccountTokens account_tokens;
+  Quota quota;
+  Clock clock;
   Approval approval;
   Telemetry telemetry;
 };

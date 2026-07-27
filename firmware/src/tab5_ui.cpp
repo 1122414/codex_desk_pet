@@ -1,6 +1,7 @@
 #include "tab5_ui.hpp"
 
 #include <esp_heap_caps.h>
+#include <SPIFFS.h>
 
 #include <algorithm>
 #include <cmath>
@@ -22,6 +23,8 @@ constexpr std::int16_t kKeyX = 330;
 constexpr std::int16_t kKeyY = 204;
 constexpr std::int16_t kKeyWidth = 208;
 constexpr std::int16_t kKeyHeight = 88;
+constexpr std::int16_t kTaskRowHeight = 72;
+constexpr std::uint8_t kVisibleTaskRows = 5;
 
 const char* stateLabel(const PresentationState state) {
   switch (state) {
@@ -56,6 +59,32 @@ std::size_t utf8CharacterLength(const char value) {
   return 1;
 }
 
+String compactNumber(const std::uint64_t value) {
+  char text[24]{};
+  if (value >= 1'000'000'000ULL) {
+    snprintf(text, sizeof(text), "%.2fB", static_cast<double>(value) / 1'000'000'000.0);
+  } else if (value >= 1'000'000ULL) {
+    snprintf(text, sizeof(text), "%.2fM", static_cast<double>(value) / 1'000'000.0);
+  } else if (value >= 1'000ULL) {
+    snprintf(text, sizeof(text), "%.1fK", static_cast<double>(value) / 1'000.0);
+  } else {
+    snprintf(text, sizeof(text), "%llu", static_cast<unsigned long long>(value));
+  }
+  return String(text);
+}
+
+const char* shortStateLabel(const PresentationState state) {
+  switch (state) {
+    case PresentationState::Running: return "运行";
+    case PresentationState::NeedsInput: return "待确认";
+    case PresentationState::Reviewing: return "审查";
+    case PresentationState::Completed: return "完成";
+    case PresentationState::Blocked: return "阻塞";
+    case PresentationState::Ready: return "最近";
+  }
+  return "最近";
+}
+
 }  // namespace
 
 bool Tab5Ui::begin(
@@ -74,7 +103,8 @@ bool Tab5Ui::begin(
     frame_pixels_ = static_cast<std::uint16_t*>(malloc(kPetFrameBytes));
   }
   M5.Display.setBrightness(128);
-  M5.Speaker.setVolume(96);
+  M5.Speaker.setVolume(48);
+  bundled_pet_ready_ = SPIFFS.begin(false);
   return frame_pixels_ != nullptr;
 }
 
@@ -158,6 +188,31 @@ UiAction Tab5Ui::pollTouch(
       pairing_released_at_ = 0;
       return pairingTouch(point, phase);
     }
+    if (!snapshot.approval.present) {
+      const auto maximum_scroll = snapshot.tasks.size() > kVisibleTaskRows
+          ? snapshot.tasks.size() - kVisibleTaskRows
+          : 0;
+      if (pressed && kTaskListArea.contains(point)) {
+        input_.cancel();
+        task_touch_active_ = true;
+        task_touch_start_y_ = point.y;
+        task_scroll_start_ = std::min<std::size_t>(
+            task_scroll_offset_, maximum_scroll);
+        return {};
+      }
+      if (task_touch_active_) {
+        const auto delta = task_touch_start_y_ - point.y;
+        const auto rows = delta >= 0
+            ? (delta + kTaskRowHeight / 2) / kTaskRowHeight
+            : -((-delta + kTaskRowHeight / 2) / kTaskRowHeight);
+        task_scroll_offset_ = static_cast<std::uint8_t>(std::clamp<int>(
+            static_cast<int>(task_scroll_start_) + rows,
+            0,
+            static_cast<int>(maximum_scroll)));
+        if (released) task_touch_active_ = false;
+        return {};
+      }
+    }
     const auto safe = approvalCanAccept(snapshot.approval);
     if (released && !snapshot.approval.present) {
       if (kPreviousPetButton.contains(point)) {
@@ -176,6 +231,10 @@ UiAction Tab5Ui::pollTouch(
   touch_active_ = false;
   if (!paired) {
     pairing_released_at_ = now_ms;
+    return {};
+  }
+  if (task_touch_active_) {
+    task_touch_active_ = false;
     return {};
   }
   const auto safe = approvalCanAccept(snapshot.approval);
@@ -259,7 +318,7 @@ void Tab5Ui::drawNormal(
     const std::uint64_t now_ms,
     const String& connection_detail,
     const std::uint8_t transfer_progress) {
-  drawStatus(snapshot, connection_detail);
+  drawStatus(snapshot, now_ms, connection_detail);
   if (snapshot.approval.present) {
     drawApproval(snapshot.approval);
     return;
@@ -267,34 +326,9 @@ void Tab5Ui::drawNormal(
 
   canvas_.fillRoundRect(kPetArea.x, kPetArea.y, kPetArea.width, kPetArea.height, 20, kPanel);
   drawPet(snapshot, now_ms);
-
-  canvas_.fillRoundRect(540, 104, 680, 184, 18, kPanel);
-  canvas_.setTextColor(kMuted, kPanel);
-  canvas_.setTextSize(1);
-  canvas_.drawString("最近运行", 568, 130);
-  canvas_.setTextColor(kText, kPanel);
-  canvas_.setTextSize(2);
-  drawTruncated(String(snapshot.task_title.c_str()), 568, 164, 620);
-  canvas_.setTextSize(1);
-  canvas_.setTextColor(stateColor(snapshot.state), kPanel);
-  canvas_.drawString(stateLabel(snapshot.state), 568, 236);
-
-  canvas_.fillRoundRect(540, 320, 680, 194, 18, kPanel);
-  canvas_.setTextColor(kMuted, kPanel);
-  canvas_.drawString("Codex 进度", 568, 348);
-  canvas_.setTextColor(kText, kPanel);
-  canvas_.setTextSize(2);
-  canvas_.drawString("Lv." + String(snapshot.tokens.level), 568, 382);
-  canvas_.setTextSize(1);
-  canvas_.drawString(String(snapshot.tokens.total) + " tokens", 568, 434);
-  const auto target = std::max<std::uint32_t>(snapshot.tokens.target, 1);
-  const auto current = std::min(snapshot.tokens.current, target);
-  canvas_.drawRoundRect(800, 398, 370, 18, 9, kMuted);
-  canvas_.fillRoundRect(802, 400, 366 * current / target, 14, 7, kBlue);
-  if (transfer_progress > 0 && transfer_progress < 100) {
-    canvas_.setTextColor(kMuted, kPanel);
-    canvas_.drawString("Pet 同步 " + String(transfer_progress) + "%", 800, 444);
-  }
+  drawQuota(snapshot);
+  drawTokenSummary(snapshot);
+  drawTaskList(snapshot, now_ms);
 
   canvas_.fillRoundRect(
       kPreviousPetButton.x, kPreviousPetButton.y,
@@ -304,11 +338,17 @@ void Tab5Ui::drawNormal(
       kNextPetButton.width, kNextPetButton.height, 14, kPanelLight);
   canvas_.setTextDatum(middle_center);
   canvas_.setTextColor(kText, kPanelLight);
-  canvas_.setTextSize(2);
-  canvas_.drawString("‹ 上一个", kPreviousPetButton.x + kPreviousPetButton.width / 2,
-                     kPreviousPetButton.y + kPreviousPetButton.height / 2);
-  canvas_.drawString("下一个 ›", kNextPetButton.x + kNextPetButton.width / 2,
-                     kNextPetButton.y + kNextPetButton.height / 2);
+  drawChevron(kPreviousPetButton, false);
+  drawChevron(kNextPetButton, true);
+  canvas_.setTextSize(1);
+  canvas_.drawString("切换宠物", 228, 660);
+  if (transfer_progress > 0 && transfer_progress < 100) {
+    canvas_.setTextColor(kOrange, kPanel);
+    canvas_.drawString(
+        "同步 " + String(transfer_progress) + "%",
+        228,
+        606);
+  }
   canvas_.setTextSize(1);
   canvas_.setTextDatum(top_left);
 }
@@ -352,18 +392,66 @@ void Tab5Ui::drawPet(const Snapshot& snapshot, const std::uint64_t now_ms) {
       pet_store_->loadFrame(
           snapshot.selected_pet_id.c_str(), index, frame_pixels_,
           static_cast<std::size_t>(kPetFrameWidth) * kPetFrameHeight, error);
-  if (custom) {
-    canvas_.pushImage(80, 144, kPetFrameWidth, kPetFrameHeight, frame_pixels_, kPetTransparentColor);
-  } else {
+  auto drawn = custom;
+  if (drawn) {
+    canvas_.pushImage(36, 108, kPetFrameWidth, kPetFrameHeight, frame_pixels_, kPetTransparentColor);
+  } else if (
+      snapshot.selected_pet_id == "chibi-skadi" &&
+      drawBundledPet(index)) {
+    drawn = true;
+  }
+  if (!drawn) {
     drawFallbackPet(snapshot.animation, index % 8);
   }
+  String pet_name(snapshot.selected_pet_id.c_str());
+  const auto selected = std::find_if(
+      snapshot.pets.begin(), snapshot.pets.end(),
+      [&snapshot](const PetSummary& pet) { return pet.id == snapshot.selected_pet_id; });
+  if (selected != snapshot.pets.end() && !selected->display_name.empty()) {
+    pet_name = String(selected->display_name.c_str());
+  }
+  canvas_.setTextColor(kText, kPanel);
+  canvas_.setTextSize(1);
+  canvas_.setTextDatum(top_left);
+  drawTruncated(pet_name, 62, 546, 332);
+  canvas_.setTextColor(stateColor(snapshot.state), kPanel);
+  canvas_.setTextDatum(middle_center);
+  canvas_.drawString(stateLabel(snapshot.state), 228, 590);
+  canvas_.setTextDatum(top_left);
+}
+
+bool Tab5Ui::drawBundledPet(const std::uint8_t frame_index) {
+  if (!bundled_pet_ready_) return false;
+  const auto row = std::min<std::uint8_t>(frame_index / 8, 8);
+  const auto variant = frame_index % 8 >= 4 ? 1 : 0;
+  char path[40]{};
+  snprintf(path, sizeof(path), "/bundled-pet/r%uf%u.png", row, variant);
+  auto file = SPIFFS.open(path, FILE_READ);
+  if (!file || file.size() == 0 || file.size() > 96 * 1024) return false;
+  bundled_pet_buffer_.resize(file.size());
+  const auto read = file.read(
+      bundled_pet_buffer_.data(),
+      bundled_pet_buffer_.size());
+  file.close();
+  if (read != bundled_pet_buffer_.size()) return false;
+  return canvas_.drawPng(
+      bundled_pet_buffer_.data(),
+      bundled_pet_buffer_.size(),
+      36,
+      108,
+      0,
+      0,
+      0,
+      0,
+      2.0F,
+      2.0F);
 }
 
 void Tab5Ui::drawFallbackPet(const Animation animation, const std::uint8_t frame) {
   const auto bob = static_cast<std::int16_t>(
       (animation == Animation::Jumping ? -42 : 0) + (frame % 2 == 0 ? 0 : -8));
-  const auto cx = 272;
-  const auto cy = 352 + bob;
+  const auto cx = 228;
+  const auto cy = 320 + bob;
   canvas_.fillCircle(cx, cy, 128, kPanelLight);
   canvas_.fillTriangle(cx - 106, cy - 78, cx - 54, cy - 164, cx - 12, cy - 104, kPanelLight);
   canvas_.fillTriangle(cx + 106, cy - 78, cx + 54, cy - 164, cx + 12, cy - 104, kPanelLight);
@@ -421,7 +509,10 @@ void Tab5Ui::drawApproval(const Approval& approval) {
   canvas_.setTextDatum(top_left);
 }
 
-void Tab5Ui::drawStatus(const Snapshot& snapshot, const String& connection_detail) {
+void Tab5Ui::drawStatus(
+    const Snapshot& snapshot,
+    const std::uint64_t now_ms,
+    const String& connection_detail) {
   canvas_.fillRect(0, 0, kScreenWidth, 72, kPanel);
   canvas_.fillCircle(32, 36, 12, snapshot.bridge_connected ? kGreen : kRed);
   canvas_.setTextColor(stateColor(snapshot.state), kPanel);
@@ -430,21 +521,246 @@ void Tab5Ui::drawStatus(const Snapshot& snapshot, const String& connection_detai
   canvas_.drawString(stateLabel(snapshot.state), 62, 36);
   canvas_.setTextColor(kMuted, kPanel);
   canvas_.setTextSize(1);
-  canvas_.drawString(connection_detail, 250, 36);
-  std::time_t now = std::time(nullptr);
+  drawTruncated(connection_detail, 210, 28, 650);
+
+  const auto unix_seconds = currentUnixSeconds(snapshot, now_ms);
+  std::time_t now = static_cast<std::time_t>(
+      unix_seconds + snapshot.clock.utc_offset_minutes * 60);
   std::tm local{};
-  localtime_r(&now, &local);
-  char time_text[8]{};
-  if (now > 1'700'000'000) {
-    snprintf(time_text, sizeof(time_text), "%02d:%02d", local.tm_hour, local.tm_min);
+  gmtime_r(&now, &local);
+  char time_text[24]{};
+  if (unix_seconds > 1'700'000'000) {
+    snprintf(
+        time_text,
+        sizeof(time_text),
+        "%02d/%02d  %02d:%02d",
+        local.tm_mon + 1,
+        local.tm_mday,
+        local.tm_hour,
+        local.tm_min);
   } else {
-    snprintf(time_text, sizeof(time_text), "--:--");
+    snprintf(time_text, sizeof(time_text), "--/--  --:--");
   }
+
+  const auto transport_x = 900;
+  canvas_.setTextColor(snapshot.bridge_connected ? kBlue : kMuted, kPanel);
+  if (snapshot.telemetry.transport == TransportKind::Wifi) {
+    canvas_.drawArc(transport_x, 37, 20, 17, 210, 330, kBlue);
+    canvas_.drawArc(transport_x, 37, 12, 9, 215, 325, kBlue);
+    canvas_.fillCircle(transport_x, 43, 3, kBlue);
+  } else {
+    canvas_.drawLine(transport_x - 18, 38, transport_x + 10, 38, kBlue);
+    canvas_.drawLine(transport_x + 10, 38, transport_x + 18, 30, kBlue);
+    canvas_.drawLine(transport_x + 10, 38, transport_x + 18, 46, kBlue);
+    canvas_.drawLine(transport_x + 18, 30, transport_x + 18, 24, kBlue);
+    canvas_.fillCircle(transport_x + 18, 47, 3, kBlue);
+  }
+  canvas_.setTextDatum(middle_left);
+  canvas_.setTextColor(kMuted, kPanel);
+  canvas_.drawString(time_text, 940, 36);
+
   const auto battery = std::min<std::uint8_t>(snapshot.telemetry.battery_percent, 100);
+  canvas_.drawRoundRect(1178, 25, 42, 22, 4, kMuted);
+  canvas_.fillRect(1220, 31, 4, 10, kMuted);
+  canvas_.fillRoundRect(
+      1181,
+      28,
+      36 * battery / 100,
+      16,
+      2,
+      snapshot.telemetry.charging ? kGreen : kBlue);
   canvas_.setTextDatum(middle_right);
-  canvas_.drawString(String(battery) + "%  " + time_text, 1240, 36);
+  canvas_.drawString(String(battery) + "%", 1264, 36);
   canvas_.setTextDatum(top_left);
   canvas_.setTextSize(1);
+}
+
+void Tab5Ui::drawQuota(const Snapshot& snapshot) {
+  constexpr Rect panel{448, 88, 390, 130};
+  canvas_.fillRoundRect(panel.x, panel.y, panel.width, panel.height, 16, kPanel);
+  canvas_.setTextDatum(top_left);
+  canvas_.setTextColor(kMuted, kPanel);
+  canvas_.setTextSize(1);
+  canvas_.drawString("本周额度", 470, 106);
+  canvas_.setTextColor(snapshot.quota.available ? kText : kMuted, kPanel);
+  canvas_.setTextSize(2);
+  canvas_.drawString(
+      snapshot.quota.available
+          ? String(snapshot.quota.used_percent) + "%"
+          : "--",
+      470,
+      136);
+  canvas_.setTextSize(1);
+  canvas_.setTextColor(kMuted, kPanel);
+  String reset_text = "等待 Bridge 同步";
+  if (snapshot.quota.available && snapshot.quota.resets_at > 0) {
+    auto reset = static_cast<std::time_t>(
+        snapshot.quota.resets_at + snapshot.clock.utc_offset_minutes * 60);
+    std::tm local{};
+    gmtime_r(&reset, &local);
+    char text[32]{};
+    snprintf(
+        text,
+        sizeof(text),
+        "刷新 %02d/%02d %02d:%02d",
+        local.tm_mon + 1,
+        local.tm_mday,
+        local.tm_hour,
+        local.tm_min);
+    reset_text = text;
+  }
+  canvas_.drawString(reset_text, 578, 146);
+  canvas_.drawRoundRect(470, 184, 344, 12, 6, kPanelLight);
+  const auto used = snapshot.quota.available ? snapshot.quota.used_percent : 0;
+  canvas_.fillRoundRect(472, 186, 340 * used / 100, 8, 4, used >= 90 ? kRed : kBlue);
+}
+
+void Tab5Ui::drawTokenSummary(const Snapshot& snapshot) {
+  constexpr Rect panel{854, 88, 402, 130};
+  canvas_.fillRoundRect(panel.x, panel.y, panel.width, panel.height, 16, kPanel);
+  canvas_.setTextDatum(top_left);
+  canvas_.setTextColor(kMuted, kPanel);
+  canvas_.setTextSize(1);
+  canvas_.drawString("TOKEN", 876, 106);
+  const auto task_tokens = !snapshot.tasks.empty()
+      ? snapshot.tasks.front().tokens
+      : snapshot.tokens.total;
+  canvas_.setTextColor(kText, kPanel);
+  canvas_.setTextSize(2);
+  canvas_.drawString(compactNumber(task_tokens), 876, 136);
+  canvas_.setTextSize(1);
+  canvas_.setTextColor(kMuted, kPanel);
+  canvas_.drawString("当前任务", 1000, 146);
+  canvas_.drawString(
+      "今日 " + compactNumber(snapshot.account_tokens.today),
+      876,
+      184);
+  canvas_.drawString(
+      "累计 " + compactNumber(snapshot.account_tokens.lifetime),
+      1060,
+      184);
+}
+
+void Tab5Ui::drawTaskList(
+    const Snapshot& snapshot,
+    const std::uint64_t now_ms) {
+  constexpr Rect panel{448, 234, 808, 462};
+  canvas_.fillRoundRect(panel.x, panel.y, panel.width, panel.height, 16, kPanel);
+  canvas_.setTextDatum(top_left);
+  canvas_.setTextColor(kText, kPanel);
+  canvas_.setTextSize(1);
+  canvas_.drawString("任务", 470, 252);
+  canvas_.setTextColor(kBlue, kPanel);
+  canvas_.drawString(
+      String(snapshot.task_counts.active) + " 个进行中",
+      536,
+      252);
+  canvas_.setTextDatum(top_right);
+  canvas_.setTextColor(kMuted, kPanel);
+  canvas_.drawString(
+      String(snapshot.task_counts.total) + " 个任务",
+      1218,
+      252);
+  canvas_.setTextDatum(top_left);
+
+  const auto maximum_scroll = snapshot.tasks.size() > kVisibleTaskRows
+      ? snapshot.tasks.size() - kVisibleTaskRows
+      : 0;
+  task_scroll_offset_ = static_cast<std::uint8_t>(
+      std::min<std::size_t>(task_scroll_offset_, maximum_scroll));
+  if (snapshot.tasks.empty()) {
+    canvas_.setTextColor(kMuted, kPanel);
+    canvas_.setTextDatum(middle_center);
+    canvas_.drawString("暂无任务 · Bridge 已连接", 840, 476);
+    canvas_.setTextDatum(top_left);
+    return;
+  }
+
+  const auto now_seconds = currentUnixSeconds(snapshot, now_ms);
+  const auto end = std::min<std::size_t>(
+      snapshot.tasks.size(),
+      task_scroll_offset_ + kVisibleTaskRows);
+  for (std::size_t index = task_scroll_offset_; index < end; ++index) {
+    const auto& task = snapshot.tasks[index];
+    const auto row = static_cast<std::int16_t>(index - task_scroll_offset_);
+    const auto y = kTaskListArea.y + row * kTaskRowHeight;
+    const auto background = row % 2 == 0 ? kPanelLight : kPanel;
+    canvas_.fillRoundRect(464, y, 758, 64, 10, background);
+    canvas_.fillCircle(482, y + 22, 6, stateColor(task.state));
+    canvas_.setTextColor(kText, background);
+    canvas_.setTextSize(1);
+    drawTruncated(String(task.title.c_str()), 500, y + 10, 500);
+    canvas_.setTextDatum(top_right);
+    canvas_.setTextColor(stateColor(task.state), background);
+    canvas_.drawString(shortStateLabel(task.state), 1202, y + 10);
+    canvas_.setTextColor(kMuted, background);
+    String recency = "--";
+    if (now_seconds > 0 && task.updated_at > 0) {
+      const auto age = now_seconds > task.updated_at
+          ? now_seconds - task.updated_at
+          : 0;
+      if (age < 60) recency = "刚刚";
+      else if (age < 3600) recency = String(age / 60) + " 分钟前";
+      else if (age < 86400) recency = String(age / 3600) + " 小时前";
+      else recency = String(age / 86400) + " 天前";
+    }
+    canvas_.drawString(recency, 1202, y + 36);
+    canvas_.setTextDatum(top_left);
+    canvas_.drawString(compactNumber(task.tokens) + " tok", 500, y + 36);
+    if (task.progress.known) {
+      canvas_.drawRoundRect(684, y + 43, 270, 8, 4, kMuted);
+      canvas_.fillRoundRect(
+          686,
+          y + 45,
+          266 * task.progress.percent / 100,
+          4,
+          2,
+          kBlue);
+      canvas_.drawString(String(task.progress.percent) + "%", 964, y + 36);
+    } else if (task.state == PresentationState::Running) {
+      const auto phase = static_cast<std::int16_t>((now_ms / 40) % 210);
+      canvas_.drawRoundRect(684, y + 43, 270, 8, 4, kMuted);
+      canvas_.fillRoundRect(686 + phase, y + 45, 54, 4, 2, kBlue);
+    }
+  }
+
+  if (maximum_scroll > 0) {
+    constexpr std::int16_t track_y = 290;
+    constexpr std::int16_t track_height = 360;
+    const auto thumb_height = std::max<std::int16_t>(
+        48,
+        track_height * kVisibleTaskRows / snapshot.tasks.size());
+    const auto travel = track_height - thumb_height;
+    const auto thumb_y = track_y +
+        travel * task_scroll_offset_ / std::max<std::size_t>(maximum_scroll, 1);
+    canvas_.fillRoundRect(1236, track_y, 6, track_height, 3, kPanelLight);
+    canvas_.fillRoundRect(1236, thumb_y, 6, thumb_height, 3, kBlue);
+  }
+}
+
+void Tab5Ui::drawChevron(const Rect& bounds, const bool points_right) {
+  const auto cx = bounds.x + bounds.width / 2;
+  const auto cy = bounds.y + bounds.height / 2;
+  const auto direction = points_right ? 1 : -1;
+  canvas_.drawLine(cx - 8 * direction, cy - 11, cx + 6 * direction, cy, kText);
+  canvas_.drawLine(cx + 6 * direction, cy, cx - 8 * direction, cy + 11, kText);
+}
+
+std::uint64_t Tab5Ui::currentUnixSeconds(
+    const Snapshot& snapshot,
+    const std::uint64_t now_ms) {
+  if (snapshot.clock.unix_ms != 0 &&
+      snapshot.clock.unix_ms != last_clock_unix_ms_) {
+    last_clock_unix_ms_ = snapshot.clock.unix_ms;
+    clock_received_at_ms_ = now_ms;
+  }
+  if (last_clock_unix_ms_ > 0) {
+    return (last_clock_unix_ms_ +
+            (now_ms >= clock_received_at_ms_ ? now_ms - clock_received_at_ms_ : 0)) /
+        1000;
+  }
+  const auto local = std::time(nullptr);
+  return local > 1'700'000'000 ? static_cast<std::uint64_t>(local) : 0;
 }
 
 void Tab5Ui::drawTruncated(
