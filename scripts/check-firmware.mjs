@@ -101,6 +101,17 @@ try {
   if (firmwareApp.includes("esp_task_wdt_add(nullptr)")) {
     throw new Error("Tab5 UI 主循环不能订阅会触发循环重启的任务看门狗");
   }
+  const deviceProtocol = await readFile(
+    path.join(root, "firmware", "src", "device_protocol.cpp"),
+    "utf8",
+  );
+  if (
+    deviceProtocol.includes(
+      "wake_requested &&\n      connected &&\n      state_ != State::Ready",
+    )
+  ) {
+    throw new Error("Tab5 收到 USB 唤醒时必须允许重置旧认证会话");
+  }
   const sources = (await readdir(coreDirectory))
     .filter((file) => file.endsWith(".cpp"))
     .sort()

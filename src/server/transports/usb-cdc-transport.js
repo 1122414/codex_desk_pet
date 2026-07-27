@@ -50,6 +50,7 @@ export class UsbCdcTransport extends JsonLineTransport {
     if (!info.isCharacterDevice()) throw new Error("USB CDC path is not a character device");
     await configure(devicePath);
     const handle = await open(devicePath, "r+");
+    await handle.write("\n");
     const readable = handle.createReadStream({ autoClose: false });
     const writable = handle.createWriteStream({ autoClose: false });
     return new UsbCdcTransport({ handle, readable, writable, devicePath });
