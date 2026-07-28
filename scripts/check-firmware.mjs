@@ -78,6 +78,13 @@ try {
     throw new Error("Tab5 必须在慢帧错过 wasPressed 时恢复首次触摸");
   }
   if (
+    !tab5Ui.includes("pet_button_touch_active_") ||
+    !tab5Ui.includes("pet_button_release_blocked_") ||
+    !tab5Ui.includes("pet_button_quiet_polls_")
+  ) {
+    throw new Error("Tab5 宠物切换键必须锁定一次触摸，避免释放事件重复切换");
+  }
+  if (
     !tab5Ui.includes(
       "normal_screen_rendered_ && fingerprint == rendered_fingerprint_",
     )

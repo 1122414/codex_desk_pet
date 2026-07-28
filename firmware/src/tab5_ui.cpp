@@ -370,6 +370,39 @@ UiAction Tab5Ui::pollTouch(
         snapshot.approval.present ||
         snapshot.companion.awaitingConfirmation();
     if (!confirmation_visible) {
+      if (
+          pet_button_release_blocked_ &&
+          (kPreviousPetButton.contains(point) ||
+           kNextPetButton.contains(point))) {
+        input_.cancel();
+        return {};
+      }
+      if (
+          pressed &&
+          (kPreviousPetButton.contains(point) ||
+           kNextPetButton.contains(point))) {
+        input_.cancel();
+        pet_button_touch_active_ = true;
+        pet_button_touch_action_ =
+            kPreviousPetButton.contains(point)
+                ? UiActionType::PreviousPet
+                : UiActionType::NextPet;
+        return {};
+      }
+      if (pet_button_touch_active_) {
+        if (!released) return {};
+        const auto action = pet_button_touch_action_;
+        const auto same_button =
+            action == UiActionType::PreviousPet
+                ? kPreviousPetButton.contains(point)
+                : kNextPetButton.contains(point);
+        pet_button_touch_active_ = false;
+        pet_button_touch_action_ = UiActionType::None;
+        pet_button_release_blocked_ = true;
+        pet_button_quiet_polls_ = 0;
+        input_.cancel();
+        return same_button ? UiAction{action, {}} : UiAction{};
+      }
       if (pressed && kCameraButton.contains(point)) {
         input_.cancel();
         camera_touch_active_ = true;
@@ -429,15 +462,39 @@ UiAction Tab5Ui::pollTouch(
     if (released && !confirmation_visible) {
       if (kPreviousPetButton.contains(point)) {
         input_.cancel();
+        pet_button_release_blocked_ = true;
+        pet_button_quiet_polls_ = 0;
         return {UiActionType::PreviousPet, {}};
       }
       if (kNextPetButton.contains(point)) {
         input_.cancel();
+        pet_button_release_blocked_ = true;
+        pet_button_quiet_polls_ = 0;
         return {UiActionType::NextPet, {}};
       }
     }
     return mapInputAction(input_.onTouch(
         phase, point, now_ms, confirmation_visible, safe));
+  }
+  if (pet_button_touch_active_) {
+    const auto action = pet_button_touch_action_;
+    const auto same_button =
+        action == UiActionType::PreviousPet
+            ? kPreviousPetButton.contains(last_touch_)
+            : kNextPetButton.contains(last_touch_);
+    pet_button_touch_active_ = false;
+    pet_button_touch_action_ = UiActionType::None;
+    pet_button_release_blocked_ = true;
+    pet_button_quiet_polls_ = 0;
+    touch_active_ = false;
+    input_.cancel();
+    return paired && same_button ? UiAction{action, {}} : UiAction{};
+  }
+  if (pet_button_release_blocked_) {
+    if (++pet_button_quiet_polls_ >= 2) {
+      pet_button_release_blocked_ = false;
+      pet_button_quiet_polls_ = 0;
+    }
   }
   if (!touch_active_) return {};
   touch_active_ = false;
@@ -465,10 +522,14 @@ UiAction Tab5Ui::pollTouch(
   if (!confirmation_visible) {
     if (kPreviousPetButton.contains(last_touch_)) {
       input_.cancel();
+      pet_button_release_blocked_ = true;
+      pet_button_quiet_polls_ = 0;
       return {UiActionType::PreviousPet, {}};
     }
     if (kNextPetButton.contains(last_touch_)) {
       input_.cancel();
+      pet_button_release_blocked_ = true;
+      pet_button_quiet_polls_ = 0;
       return {UiActionType::NextPet, {}};
     }
   }
