@@ -100,6 +100,15 @@ try {
   ) {
     throw new Error("Tab5 动画帧必须局部提交，不能被静态界面缓存跳过");
   }
+  if (
+    !tab5Ui.includes("kTaskScrollFrameIntervalMs = 33") ||
+    !tab5Ui.includes("pushCanvasRegion({464, 288, 780, 390})")
+  ) {
+    throw new Error("Tab5 任务滚动必须以约 30 FPS 局部提交，不能重绘整屏");
+  }
+  if (!tab5Ui.includes("drawTruncated(detail, detail_x, 28, 872 - detail_x)")) {
+    throw new Error("Tab5 顶部任务详情必须按剩余宽度截断，不能覆盖时钟");
+  }
   const bundledPetDirectory = path.join(
     root,
     "firmware",
