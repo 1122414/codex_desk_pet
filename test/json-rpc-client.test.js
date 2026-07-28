@@ -49,10 +49,12 @@ class FakeChild extends EventEmitter {
 
 test("JSON-RPC client can restart cleanly and marks deliberate exits", async () => {
   const children = [];
+  const launches = [];
   const client = new JsonRpcClient({
-    spawnProcess: () => {
+    spawnProcess: (command, args) => {
       const child = new FakeChild();
       children.push(child);
+      launches.push({ command, args });
       return child;
     },
   });
@@ -67,5 +69,33 @@ test("JSON-RPC client can restart cleanly and marks deliberate exits", async () 
   await client.start();
   assert.equal(client.running, true);
   assert.equal(children.length, 2);
+  assert.deepEqual(launches, [
+    {
+      command: "codex",
+      args: ["app-server", "--enable", "realtime_conversation", "--stdio"],
+    },
+    {
+      command: "codex",
+      args: ["app-server", "--enable", "realtime_conversation", "--stdio"],
+    },
+  ]);
+  await client.stop();
+});
+
+test("JSON-RPC daemon mode keeps using the proxy entrypoint", async () => {
+  let launch;
+  const client = new JsonRpcClient({
+    mode: "daemon",
+    spawnProcess: (command, args) => {
+      launch = { command, args };
+      return new FakeChild();
+    },
+  });
+
+  await client.start();
+  assert.deepEqual(launch, {
+    command: "codex",
+    args: ["app-server", "proxy"],
+  });
   await client.stop();
 });

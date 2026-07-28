@@ -53,7 +53,7 @@ export class JsonRpcClient extends EventEmitter {
     this.#decoder.reset();
     const args = this.mode === "daemon"
       ? ["app-server", "proxy"]
-      : ["app-server", "--stdio"];
+      : ["app-server", "--enable", "realtime_conversation", "--stdio"];
     const child = this.spawnProcess(this.command, args, {
       stdio: ["pipe", "pipe", "pipe"],
       env: process.env,
