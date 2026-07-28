@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 const MAX_IMAGE_BYTES = 512 * 1024;
 const MAX_CHUNK_BYTES = 3 * 1024;
 const CAPTURE_TIMEOUT_MS = 30_000;
+const MAX_ACTIVE_DEVICES = 4;
 const CAPTURE_ID = /^[a-f0-9]{16,64}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 
@@ -15,6 +16,7 @@ function validInteger(value, minimum, maximum) {
 
 export class VisionAgent {
   #captures = new Map();
+  #busyDevices = new Set();
 
   constructor({
     store,
@@ -52,12 +54,14 @@ export class VisionAgent {
       if (capture.session !== session) continue;
       clearTimeout(capture.timer);
       this.#captures.delete(key);
+      this.#busyDevices.delete(capture.session.deviceId);
     }
   }
 
   close() {
     for (const capture of this.#captures.values()) clearTimeout(capture.timer);
     this.#captures.clear();
+    this.#busyDevices.clear();
   }
 
   #begin(session, event) {
@@ -75,6 +79,12 @@ export class VisionAgent {
     }
     const key = `${session.deviceId}:${event.captureId}`;
     if (this.#captures.has(key)) throw new Error("视觉图片传输已存在");
+    if (this.#busyDevices.has(session.deviceId)) {
+      throw new Error("该设备的上一张照片仍在处理");
+    }
+    if (this.#busyDevices.size >= MAX_ACTIVE_DEVICES) {
+      throw new Error("摄像头处理队列已满，请稍后再试");
+    }
     const capture = {
       key,
       session,
@@ -89,6 +99,7 @@ export class VisionAgent {
     };
     capture.timer = setTimeout(() => {
       this.#captures.delete(key);
+      this.#busyDevices.delete(capture.session.deviceId);
       this.store.setVision({
         status: "failed",
         captureId: capture.captureId,
@@ -97,6 +108,7 @@ export class VisionAgent {
     }, this.timeoutMs);
     capture.timer.unref?.();
     this.#captures.set(key, capture);
+    this.#busyDevices.add(session.deviceId);
     this.store.setVision({
       status: "receiving",
       captureId: capture.captureId,
@@ -144,14 +156,17 @@ export class VisionAgent {
       this.#discard(capture);
       throw new Error("视觉图片完整性校验失败");
     }
-    this.#discard(capture);
-    this.#analyze(capture).catch((error) => this.#fail(capture, error));
+    this.#discard(capture, { releaseDevice: false });
+    this.#analyze(capture)
+      .catch((error) => this.#fail(capture, error))
+      .finally(() => this.#busyDevices.delete(capture.session.deviceId));
     return true;
   }
 
-  #discard(capture) {
+  #discard(capture, { releaseDevice = true } = {}) {
     this.#captures.delete(capture.key);
     clearTimeout(capture.timer);
+    if (releaseDevice) this.#busyDevices.delete(capture.session.deviceId);
   }
 
   #captureFor(session, captureId) {
@@ -167,10 +182,14 @@ export class VisionAgent {
 
   async #analyze(capture) {
     await mkdir(this.root, { recursive: true, mode: 0o700 });
-    const imagePath = path.join(this.root, `${capture.captureId}.jpg`);
-    await writeFile(imagePath, capture.buffer, { mode: 0o600 });
-    this.store.setVision({ status: "analyzing", error: null });
+    const temporary = await mkdtemp(path.join(this.root, "capture-"));
+    const imagePath = path.join(temporary, "frame.jpg");
     try {
+      await writeFile(imagePath, capture.buffer, {
+        flag: "wx",
+        mode: 0o600,
+      });
+      this.store.setVision({ status: "analyzing", error: null });
       const result = await this.petAgent.observeImage(imagePath);
       const reply = this.#boundedText(result.reply);
       this.store.setVision({ status: "completed", reply, error: null });
@@ -180,7 +199,7 @@ export class VisionAgent {
         text: reply,
       });
     } finally {
-      await rm(imagePath, { force: true });
+      await rm(temporary, { recursive: true, force: true });
     }
   }
 

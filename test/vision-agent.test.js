@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { DeskStore } from "../src/server/desk-store.js";
@@ -67,6 +67,7 @@ test("camera JPEG is authenticated, reassembled, analyzed, and removed", async (
     text: "我看到桌面前有一个人。",
   }]);
   assert.equal(store.snapshot().vision.status, "completed");
+  assert.deepEqual(await readdir(root), []);
 });
 
 test("camera transfer rejects BLE and out-of-order chunks", () => {
@@ -105,4 +106,62 @@ test("camera transfer rejects BLE and out-of-order chunks", () => {
     data: jpeg.toString("base64"),
   }), /分块无效/);
   agent.close();
+});
+
+test("camera accepts only one in-flight capture per authenticated device", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codex-desk-vision-limit-"));
+  let releaseObservation;
+  const observation = new Promise((resolve) => {
+    releaseObservation = resolve;
+  });
+  const agent = new VisionAgent({
+    store: new DeskStore(),
+    petAgent: {
+      observeImage: async () => {
+        await observation;
+        return { reply: "完成" };
+      },
+    },
+    root,
+  });
+  t.after(() => agent.close());
+  const session = {
+    ready: true,
+    deviceId: "tab5-vision-limit",
+    transport: { kind: "usb" },
+    sendEvent: () => {},
+  };
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+  const begin = (captureId) => ({
+    event: "vision.capture.begin",
+    captureId,
+    mimeType: "image/jpeg",
+    totalBytes: jpeg.length,
+    width: 1_280,
+    height: 720,
+    sha256: createHash("sha256").update(jpeg).digest("hex"),
+  });
+  agent.acceptEvent(session, begin("1111111111111111"));
+  agent.acceptEvent(session, {
+    event: "vision.capture.chunk",
+    captureId: "1111111111111111",
+    offset: 0,
+    data: jpeg.toString("base64"),
+  });
+  agent.acceptEvent(session, {
+    event: "vision.capture.end",
+    captureId: "1111111111111111",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.throws(
+    () => agent.acceptEvent(session, begin("2222222222222222")),
+    /上一张照片仍在处理/,
+  );
+  releaseObservation();
+  await settle();
+  assert.equal(
+    agent.acceptEvent(session, begin("3333333333333333")),
+    true,
+  );
 });

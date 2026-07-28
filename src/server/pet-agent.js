@@ -43,6 +43,7 @@ function publicInteraction(interaction) {
 export class PetAgent {
   #pendingCommand = null;
   #chatThreadId = null;
+  #chatActive = false;
   #turns = new Map();
 
   constructor({
@@ -66,6 +67,16 @@ export class PetAgent {
 
   async chat(text) {
     const prompt = normalizedPrompt(text);
+    if (this.#chatActive) throw new Error("宠物正在回复上一条消息");
+    this.#chatActive = true;
+    try {
+      return await this.#chat(prompt);
+    } finally {
+      this.#chatActive = false;
+    }
+  }
+
+  async #chat(prompt) {
     if (this.bridge.isMock) {
       const reply = `收到：${prompt}`;
       this.store.setCompanion({

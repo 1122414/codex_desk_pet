@@ -6,11 +6,13 @@ import { DeskStore } from "../src/server/desk-store.js";
 import { PetAgent } from "../src/server/pet-agent.js";
 
 class FakeBridge extends EventEmitter {
-  constructor() {
+  constructor({ autoComplete = true } = {}) {
     super();
     this.isMock = false;
     this.calls = [];
     this.nextThread = 1;
+    this.autoComplete = autoComplete;
+    this.pendingCompletions = [];
     this.client = {
       running: true,
       request: async (method, params) => {
@@ -21,7 +23,7 @@ class FakeBridge extends EventEmitter {
         if (method === "thread/name/set") return {};
         if (method === "turn/start") {
           const turnId = `turn-${this.calls.length}`;
-          queueMicrotask(() => {
+          const complete = () => {
             this.emit("notification", "item/completed", {
               threadId: params.threadId,
               turnId,
@@ -35,12 +37,18 @@ class FakeBridge extends EventEmitter {
                 items: [{ type: "agentMessage", text: "明白，我会陪着你。" }],
               },
             });
-          });
+          };
+          if (this.autoComplete) queueMicrotask(complete);
+          else this.pendingCompletions.push(complete);
           return { turn: { id: turnId, status: "inProgress" } };
         }
         throw new Error(`Unexpected request: ${method}`);
       },
     };
+  }
+
+  completeNext() {
+    this.pendingCompletions.shift()?.();
   }
 }
 
@@ -58,6 +66,19 @@ test("pet chat runs in an ephemeral read-only Codex thread", async () => {
   assert.equal(bridge.calls[0].params.ephemeral, true);
   assert.match(bridge.calls[0].params.developerInstructions, /不要调用工具/);
   assert.equal(store.snapshot().companion.status, "completed");
+  agent.close();
+});
+
+test("pet chat rejects overlap instead of losing the first reply", async () => {
+  const store = new DeskStore();
+  const bridge = new FakeBridge({ autoComplete: false });
+  const agent = new PetAgent({ bridge, store, cwd: "/workspace" });
+  const first = agent.chat("第一句话");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  await assert.rejects(agent.chat("第二句话"), /正在回复上一条消息/);
+  bridge.completeNext();
+  assert.equal((await first).reply, "明白，我会陪着你。");
   agent.close();
 });
 
