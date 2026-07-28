@@ -1,5 +1,59 @@
 #import <CoreBluetooth/CoreBluetooth.h>
 #import <Foundation/Foundation.h>
+#include <errno.h>
+#include <signal.h>
+#include <spawn.h>
+#include <string.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+extern char **environ;
+
+static volatile sig_atomic_t SupervisedChildPid = -1;
+static volatile sig_atomic_t PendingSignal = 0;
+
+static void ForwardSignal(int signalNumber) {
+  PendingSignal = signalNumber;
+  if (SupervisedChildPid > 0) kill(SupervisedChildPid, signalNumber);
+}
+
+static int SuperviseBridge(const char *nodePath, const char *entryPath) {
+  struct sigaction action = {};
+  action.sa_handler = ForwardSignal;
+  sigemptyset(&action.sa_mask);
+  if (sigaction(SIGINT, &action, NULL) != 0 ||
+      sigaction(SIGTERM, &action, NULL) != 0 ||
+      sigaction(SIGHUP, &action, NULL) != 0) {
+    fprintf(stderr, "Codex Desk signal setup failed: %s\n", strerror(errno));
+    return EXIT_FAILURE;
+  }
+
+  pid_t child = -1;
+  char *const arguments[] = {
+    (char *)nodePath,
+    (char *)entryPath,
+    NULL,
+  };
+  const int spawnResult =
+      posix_spawn(&child, nodePath, NULL, NULL, arguments, environ);
+  if (spawnResult != 0) {
+    fprintf(stderr, "Codex Desk Bridge launch failed: %s\n", strerror(spawnResult));
+    return EXIT_FAILURE;
+  }
+  SupervisedChildPid = child;
+  if (PendingSignal != 0) kill(child, PendingSignal);
+
+  int status = 0;
+  while (waitpid(child, &status, 0) < 0) {
+    if (errno == EINTR) continue;
+    fprintf(stderr, "Codex Desk Bridge wait failed: %s\n", strerror(errno));
+    return EXIT_FAILURE;
+  }
+  SupervisedChildPid = -1;
+  if (WIFEXITED(status)) return WEXITSTATUS(status);
+  if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+  return EXIT_FAILURE;
+}
 
 static CBUUID *ServiceUUID(void) {
   return [CBUUID UUIDWithString:@"7C4B1000-8F3A-4D6B-9C2E-4F5A6B7C8D90"];
@@ -342,8 +396,15 @@ static void Emit(NSDictionary<NSString *, id> *payload) {
 
 @end
 
-int main(void) {
+int main(int argc, const char *argv[]) {
   @autoreleasepool {
+    if (argc == 4 && strcmp(argv[1], "--supervise") == 0) {
+      return SuperviseBridge(argv[2], argv[3]);
+    }
+    if (argc != 1) {
+      fprintf(stderr, "Codex Desk Bluetooth helper arguments are invalid\n");
+      return EXIT_FAILURE;
+    }
     CodexBluetoothBridge *bridge = [[CodexBluetoothBridge alloc] init];
     if (bridge == nil) return EXIT_FAILURE;
     [[NSRunLoop mainRunLoop] run];

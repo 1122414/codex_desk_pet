@@ -15,6 +15,7 @@ import { constants as fsConstants } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { buildMacBleHelper } from "./transports/macos-ble-device-manager.js";
 
 export const MACOS_LAUNCH_AGENT_LABEL = "com.codex-desk.bridge";
 
@@ -47,6 +48,7 @@ function servicePath(nodePath, codexPath) {
 export function buildMacosLaunchAgent({
   nodePath,
   codexPath,
+  launcherPath,
   projectDirectory,
   logDirectory,
   homeDirectory = homedir(),
@@ -56,6 +58,7 @@ export function buildMacosLaunchAgent({
   for (const [name, value] of Object.entries({
     nodePath,
     codexPath,
+    launcherPath,
     projectDirectory,
     logDirectory,
   })) {
@@ -72,8 +75,14 @@ export function buildMacosLaunchAgent({
     '<plist version="1.0">',
     "<dict>",
     stringEntry("Label", label),
+    "    <key>AssociatedBundleIdentifiers</key>",
+    "    <array>",
+    "      <string>com.codex-desk.bridge.bluetooth</string>",
+    "    </array>",
     "    <key>ProgramArguments</key>",
     "    <array>",
+    `      <string>${xml(launcherPath)}</string>`,
+    "      <string>--supervise</string>",
     `      <string>${xml(nodePath)}</string>`,
     `      <string>${xml(bridgeEntry)}</string>`,
     "    </array>",
@@ -222,6 +231,7 @@ export async function installMacosLaunchAgent({
   start = true,
   copyApplicationRuntime = true,
   platform = process.platform,
+  buildHelper = buildMacBleHelper,
 } = {}) {
   if (platform !== "darwin") {
     throw new Error("macOS LaunchAgent installation is supported only on macOS");
@@ -246,9 +256,13 @@ export async function installMacosLaunchAgent({
   const runtimeDirectory = copyApplicationRuntime
     ? await copyRuntime(resolvedProject, applicationSupportDirectory)
     : resolvedProject;
+  const launcherPath = await buildHelper({
+    cacheRoot: join(homeDirectory, ".codex-desk", "bin"),
+  });
   const plist = buildMacosLaunchAgent({
     nodePath: resolve(nodePath),
     codexPath: resolvedCodex,
+    launcherPath,
     projectDirectory: runtimeDirectory,
     logDirectory,
     homeDirectory,
@@ -267,6 +281,7 @@ export async function installMacosLaunchAgent({
     runtimeDirectory,
     nodePath: resolve(nodePath),
     codexPath: resolvedCodex,
+    launcherPath,
   };
 }
 
