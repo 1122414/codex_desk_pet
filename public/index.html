@@ -105,6 +105,20 @@
             </div>
           </section>
 
+          <section class="panel-section thread-section" aria-labelledby="thread-section-title">
+            <div class="section-title-row">
+              <div>
+                <span class="section-label">RECENT THREADS</span>
+                <h2 id="thread-section-title">项目与对话</h2>
+              </div>
+              <span id="thread-count" class="thread-count">0 条</span>
+            </div>
+            <p class="field-help">项目带工作区标记，纯对话使用气泡卡片；点击即可查看最近对话。</p>
+            <div id="thread-list" class="thread-list">
+              <span class="thread-empty">正在读取最近记录…</span>
+            </div>
+          </section>
+
           <section class="panel-section">
             <div class="section-title-row">
               <div>
@@ -199,6 +213,22 @@
         <div class="approval-dialog-actions">
           <button id="approval-dialog-cancel" class="dialog-cancel" value="cancel" type="submit">返回检查</button>
           <button id="approval-dialog-accept" class="primary-button" value="accept" type="button">确认允许一次</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="thread-dialog" class="thread-dialog">
+      <form method="dialog">
+        <header class="thread-dialog-header">
+          <div>
+            <span id="thread-dialog-kind" class="thread-kind-badge">对话</span>
+            <h2 id="thread-dialog-title">会话详情</h2>
+            <p id="thread-dialog-meta">最近消息</p>
+          </div>
+          <button class="thread-dialog-close" value="cancel" type="submit" aria-label="关闭会话详情">×</button>
+        </header>
+        <div id="thread-dialog-messages" class="thread-messages" aria-live="polite">
+          <p class="thread-loading">正在读取会话…</p>
         </div>
       </form>
     </dialog>

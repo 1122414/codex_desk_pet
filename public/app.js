@@ -41,6 +41,8 @@ const elements = Object.fromEntries([
   "wifi-device-id", "wifi-ssid", "wifi-password", "bridge-host", "bridge-port", "provision-wifi",
   "companion-reply", "companion-input", "companion-chat", "companion-command",
   "companion-confirm", "companion-command-text", "companion-decline", "companion-accept",
+  "thread-list", "thread-count", "thread-dialog", "thread-dialog-kind",
+  "thread-dialog-title", "thread-dialog-meta", "thread-dialog-messages",
 ].map((id) => [id, document.getElementById(id)]));
 
 let csrfToken = "";
@@ -53,6 +55,8 @@ let dialogApprovalId = null;
 let soundEnabled = localStorage.getItem("codex-desk-sound") === "true";
 let voiceEnabled = localStorage.getItem("codex-desk-voice") === "true";
 let audioContext = null;
+let openThreadId = null;
+let threadRequestSequence = 0;
 
 function commandId() {
   return crypto.randomUUID();
@@ -258,10 +262,23 @@ function currentPet() {
   return pets.find((pet) => pet.id === snapshot?.pet.selectedId) ?? pets[0] ?? null;
 }
 
+function isSkadiPetId(petId) {
+  return petId === "chibi-skadi" || petId?.startsWith("chibi-skadi-");
+}
+
 function formatTokens(value) {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}m tk`;
   if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 10_000 ? 0 : 1)}k tk`;
   return `${value} tk`;
+}
+
+function formatThreadRecency(updatedAt) {
+  const seconds = Math.max(0, Math.floor(Date.now() / 1_000) - Number(updatedAt || 0));
+  if (!updatedAt) return "时间未知";
+  if (seconds < 60) return "刚刚";
+  if (seconds < 3_600) return `${Math.floor(seconds / 60)} 分钟前`;
+  if (seconds < 86_400) return `${Math.floor(seconds / 3_600)} 小时前`;
+  return `${Math.floor(seconds / 86_400)} 天前`;
 }
 
 function updateClock() {
@@ -272,6 +289,9 @@ async function render(nextSnapshot) {
   const oldState = snapshot?.presentation.state;
   const oldPetId = snapshot?.pet.selectedId;
   snapshot = nextSnapshot;
+  document.body.dataset.theme = isSkadiPetId(snapshot.pet.selectedId)
+    ? "chibi-skadi"
+    : "default";
   if (oldPetId && oldPetId !== snapshot.pet.selectedId) resetLocalLookState();
   const connected = snapshot.connection.status === "connected";
   const connectionLabels = {
@@ -323,10 +343,127 @@ async function render(nextSnapshot) {
 
   renderApproval(snapshot.approval);
   renderCompanion(snapshot.companion);
+  renderThreadList(snapshot.tasks ?? [], snapshot.task?.id);
   elements["mock-tools"].hidden = snapshot.connection.mode !== "mock";
   document.querySelectorAll(".animation-button").forEach((button) => button.classList.toggle("active", button.dataset.animation === snapshot.presentation.animation && localLookDegree === null));
 
   if (oldState && oldState !== snapshot.presentation.state) announceState(snapshot.presentation.state);
+}
+
+function renderThreadList(threads, selectedId) {
+  elements["thread-count"].textContent = `${threads.length} 条`;
+  if (!threads.length) {
+    const empty = document.createElement("span");
+    empty.className = "thread-empty";
+    empty.textContent = "暂无项目或对话";
+    elements["thread-list"].replaceChildren(empty);
+    return;
+  }
+  elements["thread-list"].replaceChildren(...threads.map((thread) => {
+    const kind = thread.kind === "project" ? "project" : "conversation";
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = `thread-card thread-${kind}`;
+    card.classList.toggle("selected", thread.id === selectedId);
+    card.setAttribute(
+      "aria-label",
+      `打开${kind === "project" ? "项目" : "对话"}：${thread.title}`,
+    );
+
+    const icon = document.createElement("span");
+    icon.className = "thread-card-icon";
+    icon.setAttribute("aria-hidden", "true");
+    const content = document.createElement("span");
+    content.className = "thread-card-content";
+    const heading = document.createElement("span");
+    heading.className = "thread-card-heading";
+    const badge = document.createElement("span");
+    badge.className = "thread-card-badge";
+    badge.textContent = kind === "project" ? "项目" : "对话";
+    const title = document.createElement("strong");
+    title.textContent = thread.title || "未命名会话";
+    heading.append(badge, title);
+
+    const meta = document.createElement("span");
+    meta.className = "thread-card-meta";
+    meta.textContent = [
+      kind === "project" && thread.workspace ? thread.workspace : null,
+      formatThreadRecency(thread.updatedAt),
+      formatTokens(Number(thread.tokens || 0)),
+    ].filter(Boolean).join(" · ");
+    content.append(heading, meta);
+
+    const state = document.createElement("span");
+    state.className = `thread-card-state state-${thread.state || "ready"}`;
+    state.textContent = STATE_LABELS[thread.state] || thread.state || "待命";
+    card.append(icon, content, state);
+    card.addEventListener("click", () => openThread(thread));
+    return card;
+  }));
+}
+
+async function openThread(thread) {
+  const requestSequence = ++threadRequestSequence;
+  openThreadId = thread.id;
+  const project = thread.kind === "project";
+  elements["thread-dialog"].classList.toggle("thread-dialog-project", project);
+  elements["thread-dialog"].classList.toggle("thread-dialog-conversation", !project);
+  elements["thread-dialog-kind"].textContent = project ? "项目" : "纯对话";
+  elements["thread-dialog-title"].textContent = thread.title || "未命名会话";
+  elements["thread-dialog-meta"].textContent =
+    project && thread.workspace ? thread.workspace : "最近消息";
+  const loading = document.createElement("p");
+  loading.className = "thread-loading";
+  loading.textContent = "正在读取会话…";
+  elements["thread-dialog-messages"].replaceChildren(loading);
+  if (!elements["thread-dialog"].open) elements["thread-dialog"].showModal();
+
+  try {
+    const detail = await fetchJson(
+      `/api/threads/${encodeURIComponent(thread.id)}/conversation`,
+    );
+    if (requestSequence !== threadRequestSequence || openThreadId !== thread.id) return;
+    renderThreadConversation(detail);
+  } catch (error) {
+    if (requestSequence !== threadRequestSequence || openThreadId !== thread.id) return;
+    const failure = document.createElement("p");
+    failure.className = "thread-error";
+    failure.textContent = `读取失败：${error.message}`;
+    elements["thread-dialog-messages"].replaceChildren(failure);
+  }
+}
+
+function renderThreadConversation(detail) {
+  const project = detail.kind === "project";
+  elements["thread-dialog"].classList.toggle("thread-dialog-project", project);
+  elements["thread-dialog"].classList.toggle("thread-dialog-conversation", !project);
+  elements["thread-dialog-kind"].textContent = project ? "项目" : "纯对话";
+  elements["thread-dialog-title"].textContent = detail.title || "未命名会话";
+  const visible = detail.messages?.length ?? 0;
+  elements["thread-dialog-meta"].textContent = [
+    project && detail.workspace ? detail.workspace : null,
+    `最近 ${visible}/${detail.totalMessages ?? visible} 条`,
+    detail.truncated ? "长内容已精简" : null,
+  ].filter(Boolean).join(" · ");
+
+  if (!visible) {
+    const empty = document.createElement("p");
+    empty.className = "thread-empty";
+    empty.textContent = "这个会话还没有可显示的消息";
+    elements["thread-dialog-messages"].replaceChildren(empty);
+    return;
+  }
+  elements["thread-dialog-messages"].replaceChildren(...detail.messages.map((message) => {
+    const user = message.role === "user";
+    const bubble = document.createElement("article");
+    bubble.className = `thread-message ${user ? "thread-message-user" : "thread-message-assistant"}`;
+    const role = document.createElement("strong");
+    role.textContent = user ? "YOU // 指挥官" : "SKADI // CODEX";
+    const text = document.createElement("p");
+    text.textContent = message.text;
+    bubble.append(role, text);
+    return bubble;
+  }));
 }
 
 function renderCompanion(companion) {
@@ -719,6 +856,10 @@ function bindInteractions() {
       event.preventDefault();
       sendCompanionChat();
     }
+  });
+  elements["thread-dialog"].addEventListener("close", () => {
+    openThreadId = null;
+    threadRequestSequence += 1;
   });
 
   elements["sound-toggle"].addEventListener("click", () => {

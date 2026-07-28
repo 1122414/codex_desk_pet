@@ -5,6 +5,7 @@ import {
   parseLiveTab5Arguments,
   verifyLiveTab5,
 } from "../scripts/verify-live-tab5.mjs";
+import { DEVICE_FIRMWARE_VERSION } from "../src/shared/device-protocol.js";
 
 function fixture() {
   return {
@@ -18,7 +19,7 @@ function fixture() {
         compatibility: { compatible: true },
         deviceInfo: {
           boardId: "m5stack-tab5-k145",
-          firmwareVersion: "0.2.0",
+          firmwareVersion: DEVICE_FIRMWARE_VERSION,
           capabilities: {
             touch: true,
             speaker: true,

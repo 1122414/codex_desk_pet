@@ -91,7 +91,23 @@ test("HTTP API requires a same-origin session for state changes", async (t) => {
   const page = await fetch(base);
   assert.equal(page.status, 200);
   assert.match(page.headers.get("content-security-policy"), /script-src 'self'/);
-  assert.match(await page.text(), /Codex Desk Buddy/);
+  const pageHtml = await page.text();
+  assert.match(pageHtml, /Codex Desk Buddy/);
+  assert.match(pageHtml, /id="thread-list"/);
+  assert.match(pageHtml, /id="thread-dialog"/);
+
+  const browserApp = await fetch(`${base}/app.js`);
+  assert.equal(browserApp.status, 200);
+  const browserAppSource = await browserApp.text();
+  assert.match(browserAppSource, /renderThreadConversation/);
+  assert.match(browserAppSource, /detail\.kind === "project"/);
+
+  const browserStyles = await fetch(`${base}/app.css`);
+  assert.equal(browserStyles.status, 200);
+  const browserCss = await browserStyles.text();
+  assert.match(browserCss, /data-theme="chibi-skadi"/);
+  assert.match(browserCss, /\.thread-project/);
+  assert.match(browserCss, /\.thread-conversation/);
 
   const sharedModule = await fetch(`${base}/shared/pet-spec.js`);
   assert.equal(sharedModule.status, 200);
