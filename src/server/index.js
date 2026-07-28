@@ -79,10 +79,13 @@ const bleManager = new MacBleDeviceManager({
   enabled: process.platform === "darwin" && process.env.CODEX_DESK_BLE !== "0",
 });
 bleManager.on("diagnostic", (message) => {
-  if (process.env.CODEX_DESK_DEBUG === "1") console.warn(`[ble] ${message}`);
+  console.warn(`[ble] ${message}`);
+});
+bleManager.on("state", (state) => {
+  console.log(`[ble] state ${state}`);
 });
 bleManager.on("attached", ({ id, name }) => {
-  if (process.env.CODEX_DESK_DEBUG === "1") console.warn(`[ble] attached ${name} (${id})`);
+  console.log(`[ble] attached ${name} (${id})`);
 });
 await bleManager.start();
 

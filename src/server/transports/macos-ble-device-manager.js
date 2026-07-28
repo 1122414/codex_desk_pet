@@ -7,6 +7,7 @@ import {
   readFile,
   rename,
   rm,
+  writeFile,
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -15,6 +16,9 @@ import { fileURLToPath } from "node:url";
 import { BleGattTransport } from "./ble-gatt-transport.js";
 
 const helperSource = fileURLToPath(new URL("./macos-core-bluetooth-helper.m", import.meta.url));
+const helperBundleName = "CodexDeskBluetooth.app";
+const helperExecutableName = "CodexDeskBluetooth";
+const helperBundleIdentifier = "com.codex-desk.bridge.bluetooth";
 
 function encodeCommand(command) {
   return `${JSON.stringify(command)}\n`;
@@ -69,10 +73,72 @@ async function runCompiler(source, target) {
   });
 }
 
+function helperInfoPlist(token) {
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    '<plist version="1.0">',
+    "<dict>",
+    "  <key>CFBundleDevelopmentRegion</key>",
+    "  <string>zh_CN</string>",
+    "  <key>CFBundleExecutable</key>",
+    `  <string>${helperExecutableName}</string>`,
+    "  <key>CFBundleIdentifier</key>",
+    `  <string>${helperBundleIdentifier}</string>`,
+    "  <key>CFBundleInfoDictionaryVersion</key>",
+    "  <string>6.0</string>",
+    "  <key>CFBundleName</key>",
+    "  <string>Codex Desk Bluetooth</string>",
+    "  <key>CFBundlePackageType</key>",
+    "  <string>APPL</string>",
+    "  <key>CFBundleShortVersionString</key>",
+    "  <string>1.0</string>",
+    "  <key>CFBundleVersion</key>",
+    `  <string>${token}</string>`,
+    "  <key>LSUIElement</key>",
+    "  <true/>",
+    "  <key>NSBluetoothAlwaysUsageDescription</key>",
+    "  <string>Codex Desk 需要通过蓝牙连接桌面宠物设备。</string>",
+    "</dict>",
+    "</plist>",
+    "",
+  ].join("\n");
+}
+
+async function runCodesign(bundle) {
+  await new Promise((resolve, reject) => {
+    const signer = spawn(
+      "/usr/bin/codesign",
+      [
+        "--force",
+        "--sign",
+        "-",
+        "--identifier",
+        helperBundleIdentifier,
+        bundle,
+      ],
+      { stdio: ["ignore", "ignore", "pipe"] },
+    );
+    let errorOutput = "";
+    signer.stderr.setEncoding("utf8");
+    signer.stderr.on("data", (chunk) => {
+      errorOutput += chunk;
+    });
+    signer.once("error", reject);
+    signer.once("exit", (code, signal) => {
+      if (code === 0) resolve();
+      else reject(new Error(
+        `macOS BLE helper signing failed (${signal ?? code}): ${errorOutput.trim()}`,
+      ));
+    });
+  });
+}
+
 export async function buildMacBleHelper({
   source = helperSource,
   cacheRoot = path.join(os.homedir(), ".codex-desk", "bin"),
   compile = runCompiler,
+  signBundle = runCodesign,
 } = {}) {
   const contents = await readFile(source);
   const token = createHash("sha256")
@@ -80,18 +146,59 @@ export async function buildMacBleHelper({
     .update(process.arch)
     .digest("hex")
     .slice(0, 16);
-  const binary = path.join(cacheRoot, `codex-desk-ble-${token}`);
-  if (await exists(binary)) return binary;
-
-  await mkdir(cacheRoot, { recursive: true, mode: 0o700 });
-  const temporary = `${binary}.${process.pid}.tmp`;
-  await rm(temporary, { force: true });
+  const bundle = path.join(cacheRoot, helperBundleName);
+  const binary = path.join(bundle, "Contents", "MacOS", helperExecutableName);
+  const marker = path.join(bundle, "Contents", "Resources", "source-hash");
   try {
-    await compile(source, temporary);
-    await chmod(temporary, 0o700);
-    await rename(temporary, binary);
+    if (await exists(binary) && (await readFile(marker, "utf8")).trim() === token) {
+      return binary;
+    }
+  } catch {
+    // Rebuild incomplete or stale helper bundles.
+  }
+  await mkdir(cacheRoot, { recursive: true, mode: 0o700 });
+  const stagingBundle = path.join(
+    cacheRoot,
+    `.${helperBundleName}.${process.pid}.${token}.tmp`,
+  );
+  const backupBundle = path.join(cacheRoot, `.${helperBundleName}.previous`);
+  const stagingContents = path.join(stagingBundle, "Contents");
+  const stagingBinary = path.join(stagingContents, "MacOS", helperExecutableName);
+  await rm(stagingBundle, { recursive: true, force: true });
+  try {
+    await mkdir(path.dirname(stagingBinary), { recursive: true, mode: 0o700 });
+    await mkdir(path.join(stagingContents, "Resources"), {
+      recursive: true,
+      mode: 0o700,
+    });
+    await compile(source, stagingBinary);
+    await chmod(stagingBinary, 0o700);
+    await writeFile(
+      path.join(stagingContents, "Info.plist"),
+      helperInfoPlist(token),
+      { mode: 0o600 },
+    );
+    await writeFile(
+      path.join(stagingContents, "Resources", "source-hash"),
+      `${token}\n`,
+      { mode: 0o600 },
+    );
+    await signBundle(stagingBundle);
+    await rm(backupBundle, { recursive: true, force: true });
+    try {
+      await rename(bundle, backupBundle);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    try {
+      await rename(stagingBundle, bundle);
+    } catch (error) {
+      await rename(backupBundle, bundle).catch(() => {});
+      throw error;
+    }
+    await rm(backupBundle, { recursive: true, force: true });
   } catch (error) {
-    await rm(temporary, { force: true });
+    await rm(stagingBundle, { recursive: true, force: true });
     throw error;
   }
   return binary;
