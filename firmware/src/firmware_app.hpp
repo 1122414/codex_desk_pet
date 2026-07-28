@@ -31,6 +31,7 @@ class FirmwareApp {
   void handleSnapshot(const Snapshot& snapshot);
   void handleProtocolEvent(const String& type, JsonObjectConst payload);
   void handleUiAction(const UiAction& action);
+  void capturePendingPhoto();
   void updateTelemetry(std::uint64_t now_ms);
   void syncClock(std::uint64_t now_ms);
   void requestSelectedPet(std::uint64_t now_ms);
@@ -66,6 +67,7 @@ class FirmwareApp {
   bool ntp_started_ = false;
   bool rtc_synced_ = false;
   bool have_local_telemetry_ = false;
+  bool camera_capture_pending_ = false;
   std::uint64_t wifi_reboot_at_ = 0;
 };
 

@@ -379,6 +379,9 @@ UiAction Tab5Ui::pollTouch(
            kVoiceCommandButton.contains(point))) {
         input_.cancel();
         voice_touch_active_ = true;
+        if (voice_recording_) {
+          return {UiActionType::VoiceStop, {}};
+        }
         return {
             UiActionType::VoiceStart,
             kVoiceCommandButton.contains(point) ? "command" : "chat"};
@@ -386,7 +389,6 @@ UiAction Tab5Ui::pollTouch(
       if (voice_touch_active_) {
         if (released) {
           voice_touch_active_ = false;
-          return {UiActionType::VoiceStop, {}};
         }
         return {};
       }
@@ -439,7 +441,7 @@ UiAction Tab5Ui::pollTouch(
   }
   if (voice_touch_active_) {
     voice_touch_active_ = false;
-    return {UiActionType::VoiceStop, {}};
+    return {};
   }
   if (camera_touch_active_) {
     camera_touch_active_ = false;
@@ -571,11 +573,11 @@ void Tab5Ui::drawNormal(
   canvas_.setTextSize(1);
   canvas_.setTextColor(kText, voice_recording_ ? kRed : kPanelLight);
   canvas_.drawString(
-      voice_recording_ ? "松开" : "对话",
+      voice_recording_ ? "结束" : "对话",
       kVoiceChatButton.x + kVoiceChatButton.width / 2,
       kVoiceChatButton.y + kVoiceChatButton.height / 2);
   canvas_.drawString(
-      voice_recording_ ? "松开" : "命令",
+      voice_recording_ ? "结束" : "命令",
       kVoiceCommandButton.x + kVoiceCommandButton.width / 2,
       kVoiceCommandButton.y + kVoiceCommandButton.height / 2);
   canvas_.setTextColor(kText, camera_busy_ ? kOrange : kPanelLight);

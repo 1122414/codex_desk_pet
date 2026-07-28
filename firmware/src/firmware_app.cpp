@@ -108,6 +108,7 @@ void FirmwareApp::loop() {
   usb_client_.poll(now_ms);
   wifi_client_.poll(now_ms);
   ble_client_.poll(now_ms);
+  capturePendingPhoto();
   const auto voice_was_recording = voice_.recording();
   voice_.poll();
   if (voice_was_recording && !voice_.recording()) {
@@ -319,7 +320,9 @@ void FirmwareApp::handleUiAction(const UiAction& action) {
         if (voice_.start(*client, action.value)) {
           ui_.setVoiceRecording(true);
           connection_detail_ =
-              action.value == "command" ? "正在听取命令" : "正在听";
+              action.value == "command"
+                  ? "正在听取命令，再点一次结束"
+                  : "正在听，再点一次结束";
         } else {
           audio_.setPaused(false);
           connection_detail_ = "麦克风启动失败";
@@ -338,18 +341,14 @@ void FirmwareApp::handleUiAction(const UiAction& action) {
         connection_detail_ = "拍照需要连接电脑";
       } else if (voice_.recording()) {
         connection_detail_ = "请先结束语音";
-      } else if (camera_.uploading()) {
+      } else if (camera_capture_pending_ || camera_.uploading()) {
         connection_detail_ = "照片仍在发送";
+      } else if (primaryTransport() == TransportKind::Ble) {
+        connection_detail_ = "拍照需要 USB 或 Wi-Fi";
       } else {
-        String error;
-        connection_detail_ = "正在拍照";
-        if (camera_.captureAndQueue(*client, error)) {
-          ui_.setCameraBusy(true);
-          connection_detail_ = "照片正在加密发送";
-        } else {
-          ui_.setCameraBusy(false);
-          connection_detail_ = error;
-        }
+        camera_capture_pending_ = true;
+        ui_.setCameraBusy(true);
+        connection_detail_ = "正在拍照，请稍候";
       }
       break;
     case UiActionType::SubmitPairingCode:
@@ -361,6 +360,26 @@ void FirmwareApp::handleUiAction(const UiAction& action) {
     case UiActionType::None:
       break;
   }
+}
+
+void FirmwareApp::capturePendingPhoto() {
+  if (!camera_capture_pending_) return;
+  camera_capture_pending_ = false;
+  auto* client = primaryClient();
+  if (
+      client == nullptr ||
+      primaryTransport() == TransportKind::Ble) {
+    ui_.setCameraBusy(false);
+    connection_detail_ = "拍照需要 USB 或 Wi-Fi";
+    return;
+  }
+  String error;
+  if (camera_.captureAndQueue(*client, error)) {
+    connection_detail_ = "照片正在加密发送";
+    return;
+  }
+  ui_.setCameraBusy(false);
+  connection_detail_ = error;
 }
 
 void FirmwareApp::updateTelemetry(const std::uint64_t now_ms) {

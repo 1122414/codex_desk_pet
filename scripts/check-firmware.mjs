@@ -131,6 +131,18 @@ try {
   if (!firmwareApp.includes('pet_id == "chibi-skadi"')) {
     throw new Error("Tab5 内置 Pet 不得重复请求外部素材包");
   }
+  if (
+    !firmwareApp.includes("camera_capture_pending_ = true;") ||
+    !firmwareApp.includes('connection_detail_ = "正在拍照，请稍候";')
+  ) {
+    throw new Error("Tab5 拍照必须先刷新触摸反馈，再执行同步采集");
+  }
+  if (
+    tab5Ui.includes('voice_recording_ ? "松开"') ||
+    !tab5Ui.includes('voice_recording_ ? "结束"')
+  ) {
+    throw new Error("Tab5 语音必须采用单击开始、再次单击结束的触摸交互");
+  }
   const deviceProtocol = await readFile(
     path.join(root, "firmware", "src", "device_protocol.cpp"),
     "utf8",
