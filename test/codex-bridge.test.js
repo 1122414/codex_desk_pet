@@ -122,6 +122,55 @@ test("bridge loads official weekly quota, account usage, and thread goals", asyn
   await bridge.stop();
 });
 
+test("bridge aggregates live daily tokens from every readable session", async () => {
+  const store = new DeskStore();
+  const client = new FakeAppServerClient();
+  const now = new Date();
+  const dateKey = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("-");
+  client.threadList = [
+    {
+      id: "thread-a",
+      path: "/sessions/a.jsonl",
+      name: "任务 A",
+      updatedAt: Date.now() / 1_000,
+      status: { type: "notLoaded" },
+    },
+    {
+      id: "thread-b",
+      path: "/sessions/b.jsonl",
+      name: "任务 B",
+      updatedAt: Date.now() / 1_000,
+      status: { type: "notLoaded" },
+    },
+  ];
+  const bridge = new CodexBridge({
+    store,
+    client,
+    pollIntervalMs: 0,
+    sessionTokenReader: async (sessionPath) => ({
+      totalTokens: sessionPath.includes("/a.") ? 10_000 : 20_000,
+      observedAt: Date.now(),
+      dateKey,
+      todayTokens: sessionPath.includes("/a.") ? 1_234 : 5_678,
+      todayAvailable: true,
+    }),
+  });
+  await bridge.start();
+
+  const snapshot = store.snapshot();
+  assert.equal(snapshot.accountTokens.today, 6_912);
+  assert.equal(snapshot.accountTokens.todayAvailable, true);
+  assert.deepEqual(
+    snapshot.tasks.map((task) => task.tokens).sort((a, b) => a - b),
+    [10_000, 20_000],
+  );
+  await bridge.stop();
+});
+
 test("bridge maps current command approval fields and returns the exact wire decision", async () => {
   const store = new DeskStore();
   const client = new FakeAppServerClient();

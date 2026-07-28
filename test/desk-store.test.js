@@ -123,6 +123,11 @@ test("desk store selects the seven-day Codex rate-limit window and today's usage
       { startDate: "2026-07-26", tokens: 99_999 },
     ],
   });
+  store.setLocalTodayTokens({
+    dateKey: "2026-07-27",
+    tokens: 777,
+    available: true,
+  });
   const snapshot = store.snapshot(now);
   assert.deepEqual(snapshot.quota, {
     available: true,
@@ -133,6 +138,31 @@ test("desk store selects the seven-day Codex rate-limit window and today's usage
   });
   assert.equal(snapshot.accountTokens.lifetime, 8_765_432);
   assert.equal(snapshot.accountTokens.today, 12_345);
+  assert.equal(snapshot.accountTokens.todayAvailable, true);
+});
+
+test("desk store uses live local token usage while the official day bucket is pending", () => {
+  const store = new DeskStore();
+  const now = new Date(2026, 6, 27, 12).getTime();
+  store.setAccountUsage({
+    summary: { lifetimeTokens: 100 },
+    dailyUsageBuckets: [{ startDate: "2026-07-26", tokens: 50 }],
+  });
+  store.setLocalTodayTokens({
+    dateKey: "2026-07-27",
+    tokens: 4_321,
+    available: true,
+  });
+  const revision = store.revision;
+  store.setLocalTodayTokens({
+    dateKey: "2026-07-27",
+    tokens: 4_321,
+    available: true,
+  });
+
+  const snapshot = store.snapshot(now);
+  assert.equal(store.revision, revision);
+  assert.equal(snapshot.accountTokens.today, 4_321);
   assert.equal(snapshot.accountTokens.todayAvailable, true);
 });
 

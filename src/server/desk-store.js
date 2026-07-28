@@ -102,6 +102,11 @@ export class DeskStore extends EventEmitter {
     this.previewAnimation = null;
     this.rateLimits = null;
     this.accountUsage = null;
+    this.localTodayTokens = {
+      dateKey: null,
+      tokens: 0,
+      available: false,
+    };
     this.companion = {
       status: "idle",
       mode: null,
@@ -382,6 +387,21 @@ export class DeskStore extends EventEmitter {
     this.#changed("account-usage");
   }
 
+  setLocalTodayTokens(value) {
+    const next = {
+      dateKey: value?.dateKey ?? null,
+      tokens: safeInteger(value?.tokens),
+      available: Boolean(value?.available),
+    };
+    if (
+      next.dateKey === this.localTodayTokens.dateKey &&
+      next.tokens === this.localTodayTokens.tokens &&
+      next.available === this.localTodayTokens.available
+    ) return;
+    this.localTodayTokens = next;
+    this.#changed("local-today-tokens");
+  }
+
   setPreviewAnimation(animation) {
     if (animation !== null) getAnimation(animation);
     this.previewAnimation = animation;
@@ -450,6 +470,10 @@ export class DeskStore extends EventEmitter {
       .filter((bucket) => bucket?.startDate === todayKey);
     const todayTokens = todayBuckets
       .reduce((sum, bucket) => sum + safeInteger(bucket?.tokens), 0);
+    const officialTodayAvailable = todayBuckets.length > 0;
+    const localTodayAvailable =
+      this.localTodayTokens.available &&
+      this.localTodayTokens.dateKey === todayKey;
     const activeStates = new Set(["running", "needs-input", "reviewing"]);
     const activeCount = threads.filter((thread) => (
       activeStates.has(mapThreadToPresentation(thread, { now }).state)
@@ -479,8 +503,10 @@ export class DeskStore extends EventEmitter {
       tokens: { total: totalTokens, level },
       accountTokens: {
         lifetime: safeInteger(this.accountUsage?.summary?.lifetimeTokens),
-        today: todayTokens,
-        todayAvailable: todayBuckets.length > 0,
+        today: officialTodayAvailable
+          ? todayTokens
+          : localTodayAvailable ? this.localTodayTokens.tokens : 0,
+        todayAvailable: officialTodayAvailable || localTodayAvailable,
       },
       quota: weekly ? {
         available: true,

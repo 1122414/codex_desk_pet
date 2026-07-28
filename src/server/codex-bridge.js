@@ -348,31 +348,63 @@ export class CodexBridge extends EventEmitter {
 
   async #refreshSessionTokens(threads) {
     const candidates = (threads ?? [])
-      .filter((thread) => typeof thread?.id === "string" && thread.id && thread.path)
-      .slice(0, 12);
+      .filter((thread) => typeof thread?.id === "string" && thread.id && thread.path);
     const results = await Promise.allSettled(
       candidates.map((thread) => this.sessionTokenReader(thread.path)),
     );
+    let dateKey = null;
+    let todayTokens = 0;
+    let todayAvailable = candidates.length > 0;
     results.forEach((result, index) => {
       if (result.status === "fulfilled") {
         const totalTokens = result.value?.totalTokens;
-        if (!Number.isSafeInteger(totalTokens) || totalTokens <= 0) return;
-        this.store.patchThread(
-          candidates[index].id,
-          {
-            tokenUsage: {
-              total: { totalTokens },
-              observedAt: result.value.observedAt ?? 0,
-            },
-          },
-          { touchActivity: false },
-        );
+        if (Number.isSafeInteger(totalTokens) && totalTokens > 0) {
+          const existing = this.store.getThread(candidates[index].id);
+          const existingTotal =
+            existing?.tokenUsage?.total?.totalTokens ??
+            existing?.tokenUsage?.totalTokens ??
+            0;
+          if (existingTotal !== totalTokens) {
+            this.store.patchThread(
+              candidates[index].id,
+              {
+                tokenUsage: {
+                  total: { totalTokens },
+                  observedAt: result.value.observedAt ?? 0,
+                },
+              },
+              { touchActivity: false },
+            );
+          }
+        }
+        if (result.value === null) return;
+        if (
+          !result.value?.todayAvailable ||
+          typeof result.value.dateKey !== "string" ||
+          !Number.isSafeInteger(result.value.todayTokens) ||
+          result.value.todayTokens < 0
+        ) {
+          todayAvailable = false;
+          return;
+        }
+        if (dateKey !== null && dateKey !== result.value.dateKey) {
+          todayAvailable = false;
+          return;
+        }
+        dateKey ??= result.value.dateKey;
+        todayTokens += result.value.todayTokens;
       } else {
+        todayAvailable = false;
         this.emit(
           "diagnostic",
           `Session token lookup failed for ${candidates[index].id}: ${result.reason.message}`,
         );
       }
+    });
+    this.store.setLocalTodayTokens({
+      dateKey,
+      tokens: todayTokens,
+      available: todayAvailable && dateKey !== null,
     });
   }
 
