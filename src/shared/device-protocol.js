@@ -744,6 +744,11 @@ export class ReliableOutbox {
     return this.#pending.size;
   }
 
+  hasTypePrefix(prefix) {
+    return [...this.#pending.values()]
+      .some(({ envelope }) => envelope.type.startsWith(prefix));
+  }
+
   track(envelope, now = Date.now()) {
     validateEnvelope(envelope);
     if (!RELIABLE_MESSAGE_TYPES.includes(envelope.type)) return false;

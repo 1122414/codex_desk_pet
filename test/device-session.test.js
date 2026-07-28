@@ -252,6 +252,36 @@ test("USB queues a maximum-size v2 pet without overflowing the reliable queue", 
   assert.ok(bridge.queuedMessages > 8_192);
 });
 
+test("a session rejects overlapping Pet transfers and accepts the next after commit ACK", async (t) => {
+  const { bridge, device, transports } = createSessions({
+    transportKind: "usb",
+  });
+  t.after(() => {
+    bridge.close();
+    device.close();
+  });
+  bridge.start({ autoTick: false });
+  device.start({ autoTick: false });
+  await waitFor(() => bridge.ready && device.ready && bridge.pendingAcknowledgements === 0);
+
+  transports.right.holdNext();
+  const pet = { id: "deduplicated-pet", displayName: "Deduplicated Pet", spriteVersionNumber: 2 };
+  const data = Buffer.alloc(64_000, 0x5a);
+  bridge.sendResource(pet, data);
+  const queuedBeforeDuplicate = bridge.queuedMessages;
+  assert.equal(bridge.resourceTransferPending, true);
+  assert.throws(
+    () => bridge.sendResource(pet, data),
+    /resource transfer is already in progress/i,
+  );
+  assert.equal(bridge.queuedMessages, queuedBeforeDuplicate);
+
+  await waitFor(() => device.resourceCache.resumeState(pet.id) !== null);
+  transports.right.flushHeld();
+  await waitFor(() => bridge.resourceTransferPending === false, 1_500);
+  assert.doesNotThrow(() => bridge.sendResource(pet, data));
+});
+
 test("snapshots remain responsive while a large resource waits in the reliable queue", async (t) => {
   const { bridge, device, transports } = createSessions({
     transportKind: "usb",

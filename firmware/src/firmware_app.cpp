@@ -223,12 +223,15 @@ bool FirmwareApp::handleDeviceCommand(
 }
 
 void FirmwareApp::handleSnapshot(const Snapshot& snapshot) {
+  const String previous_pet_id(model_.snapshot().selected_pet_id.c_str());
   auto display_snapshot = snapshot;
   if (have_local_telemetry_) {
     display_snapshot.telemetry = local_telemetry_;
   }
   if (!model_.applySnapshot(display_snapshot)) return;
-  requested_pet_ = "";
+  if (previous_pet_id != snapshot.selected_pet_id.c_str()) {
+    requested_pet_ = "";
+  }
   if (!have_cued_state_ || snapshot.state != last_cued_state_) {
     last_cued_state_ = snapshot.state;
     have_cued_state_ = true;
@@ -241,7 +244,8 @@ void FirmwareApp::handleProtocolEvent(
     const JsonObjectConst payload) {
   if (type.startsWith("resource.")) {
     if (type == "resource.current") {
-      requested_pet_ = "";
+      requested_pet_ = payload["petId"] | "";
+      requested_at_ = static_cast<std::uint64_t>(millis());
       return;
     }
     if (type == "resource.requires-high-bandwidth") {
@@ -254,7 +258,8 @@ void FirmwareApp::handleProtocolEvent(
       return;
     }
     if (type == "resource.commit") {
-      requested_pet_ = "";
+      requested_pet_ = payload["petId"] | "";
+      requested_at_ = static_cast<std::uint64_t>(millis());
       connection_detail_ = "Pet已安装";
       audio_.enqueue(AudioCue::PetInstalled);
     }

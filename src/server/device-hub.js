@@ -14,6 +14,7 @@ const TRANSPORT_PRIORITY = Object.freeze({ usb: 3, wifi: 2, ble: 1, memory: 0 })
 export class DeviceHub extends EventEmitter {
   #sessions = new Set();
   #globalCommands = new CommandDeduplicator(2_048);
+  #preparingResources = new WeakSet();
   #started = false;
 
   constructor({
@@ -154,6 +155,13 @@ export class DeviceHub extends EventEmitter {
       );
     });
     session.on("resourceRequest", (request) => {
+      if (
+        this.#preparingResources.has(session) ||
+        session.resourceTransferPending
+      ) {
+        return;
+      }
+      this.#preparingResources.add(session);
       this.#sendResource(session, request).catch((error) => {
         this.emit(
           "diagnostic",
@@ -167,6 +175,8 @@ export class DeviceHub extends EventEmitter {
             `Device resource error delivery failed (${transport.kind}, ${session.deviceId ?? "unknown"}): ${sendError.message}`,
           );
         }
+      }).finally(() => {
+        this.#preparingResources.delete(session);
       });
     });
     session.on("event", (event) => {

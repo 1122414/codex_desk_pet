@@ -59,6 +59,7 @@ export class DeviceSession extends EventEmitter {
   #reliableQueue = [];
   #initialPeerHandshakeId = null;
   #lastUsbResyncWakeAt = Number.NEGATIVE_INFINITY;
+  #resourceTransferActive = false;
 
   constructor({
     role,
@@ -156,6 +157,10 @@ export class DeviceSession extends EventEmitter {
 
   get queuedMessages() {
     return this.#reliableQueue.length;
+  }
+
+  get resourceTransferPending() {
+    return this.#resourceTransferActive;
   }
 
   start({ autoTick = true } = {}) {
@@ -258,18 +263,33 @@ export class DeviceSession extends EventEmitter {
 
   sendResource(pet, data, { missingRanges = null } = {}) {
     if (this.role !== "bridge" || !this.ready) throw new Error("Only an authenticated bridge can send resources");
+    if (this.#resourceTransferActive) throw new Error("A resource transfer is already in progress");
     const manifest = createPetResourceManifest(pet, data);
-    this.#send("resource.manifest", manifest);
     const profile = TRANSPORT_PROFILES[this.transport.kind] ?? TRANSPORT_PROFILES.memory;
-    for (const chunk of createResourceChunks(
+    const chunks = createResourceChunks(
       manifest,
       data,
       profile.resourceChunkBytes,
       missingRanges ?? [{ offset: 0, length: data.length }],
-    )) {
-      this.#send("resource.chunk", chunk);
+    );
+    const requiredMessages = chunks.length + 2;
+    const immediateCapacity = Math.max(0, this.maxReliableInFlight - this.#outbox.size);
+    const queuedCapacity = this.maxQueuedReliable - this.#reliableQueue.length;
+    if (requiredMessages > immediateCapacity + queuedCapacity) {
+      throw new Error("Resource transfer exceeds the reliable queue capacity");
     }
-    this.#send("resource.commit", { petId: manifest.petId, sha256: manifest.sha256 });
+    this.#resourceTransferActive = true;
+    try {
+      this.#send("resource.manifest", manifest);
+      for (const chunk of chunks) {
+        this.#send("resource.chunk", chunk);
+      }
+      this.#send("resource.commit", { petId: manifest.petId, sha256: manifest.sha256 });
+    } catch (error) {
+      this.#resourceTransferActive = false;
+      this.close();
+      throw error;
+    }
     return manifest;
   }
 
@@ -280,6 +300,7 @@ export class DeviceSession extends EventEmitter {
     this.#timer = null;
     this.#outbox.clear();
     this.#reliableQueue = [];
+    this.#resourceTransferActive = false;
     this.transport.off("message", this.onTransportMessage);
     this.transport.off("close", this.onTransportClose);
     this.transport.off("error", this.onTransportError);
@@ -378,7 +399,10 @@ export class DeviceSession extends EventEmitter {
     }
 
     if (envelope.type === "ack") {
-      if (this.#outbox.acknowledge(envelope)) this.#flushReliableQueue();
+      if (this.#outbox.acknowledge(envelope)) {
+        this.#flushReliableQueue();
+        this.#refreshResourceTransferState();
+      }
       return;
     }
     const reliable = RELIABLE_MESSAGE_TYPES.includes(envelope.type);
@@ -514,6 +538,7 @@ export class DeviceSession extends EventEmitter {
       this.#handshakeStartedAt = this.now();
       this.#outbox.clear();
       this.#reliableQueue = [];
+      this.#resourceTransferActive = false;
       this.deviceId = payload.deviceId;
       this.secret = secret;
       this.deviceInfo = normalizeDeviceInfo(payload.deviceInfo);
@@ -604,6 +629,17 @@ export class DeviceSession extends EventEmitter {
     }
   }
 
+  #refreshResourceTransferState() {
+    if (
+      this.#resourceTransferActive &&
+      !this.#reliableQueue.some(({ type }) => type.startsWith("resource.")) &&
+      !this.#outbox.hasTypePrefix("resource.")
+    ) {
+      this.#resourceTransferActive = false;
+      this.emit("resourceSent");
+    }
+  }
+
   async #handleCommand(payload) {
     if (!this.#commandDeduplicator.accept(payload.commandId)) {
       this.emit("duplicateCommand", payload);
@@ -634,6 +670,7 @@ export class DeviceSession extends EventEmitter {
     this.#timer = null;
     this.#outbox.clear();
     this.#reliableQueue = [];
+    this.#resourceTransferActive = false;
     this.transport.off("message", this.onTransportMessage);
     this.transport.off("close", this.onTransportClose);
     this.transport.off("error", this.onTransportError);
@@ -660,6 +697,7 @@ export class DeviceSession extends EventEmitter {
     this.#receiveWindow.reset();
     this.#outbox.clear();
     this.#reliableQueue = [];
+    this.#resourceTransferActive = false;
     this.#initialPeerHandshakeId = null;
     this.#lastUsbResyncWakeAt = Number.NEGATIVE_INFINITY;
     this.#handshake = null;
