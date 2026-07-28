@@ -127,6 +127,7 @@ std::uint64_t renderFingerprint(
     const String& connection_detail,
     const std::uint8_t transfer_progress,
     const bool voice_recording,
+    const String& voice_mode,
     const bool camera_busy,
     const std::uint64_t minute_bucket) {
   std::uint64_t hash = 1469598103934665603ULL;
@@ -186,6 +187,7 @@ std::uint64_t renderFingerprint(
   hashString(hash, connection_detail);
   hashValue(hash, transfer_progress);
   hashValue(hash, voice_recording);
+  hashString(hash, voice_mode);
   hashValue(hash, camera_busy);
   hashValue(hash, minute_bucket);
   return hash;
@@ -252,6 +254,7 @@ void Tab5Ui::render(
         connection_detail,
         transfer_progress,
         voice_recording_,
+        voice_mode_,
         camera_busy_,
         minute_bucket);
     if (normal_screen_rendered_ && fingerprint == rendered_fingerprint_) {
@@ -311,9 +314,13 @@ bool Tab5Ui::approvalCanAccept(const Approval& approval) const {
   return std::count(approval.detail.begin(), approval.detail.end(), '\n') <= 2;
 }
 
-void Tab5Ui::setVoiceRecording(const bool recording) {
-  if (voice_recording_ == recording) return;
+void Tab5Ui::setVoiceRecording(
+    const bool recording,
+    const String& mode) {
+  const auto next_mode = recording ? mode : String();
+  if (voice_recording_ == recording && voice_mode_ == next_mode) return;
   voice_recording_ = recording;
+  voice_mode_ = next_mode;
   normal_screen_rendered_ = false;
 }
 
@@ -379,12 +386,14 @@ UiAction Tab5Ui::pollTouch(
            kVoiceCommandButton.contains(point))) {
         input_.cancel();
         voice_touch_active_ = true;
+        const String pressed_mode =
+            kVoiceCommandButton.contains(point) ? "command" : "chat";
         if (voice_recording_) {
-          return {UiActionType::VoiceStop, {}};
+          return pressed_mode == voice_mode_
+              ? UiAction{UiActionType::VoiceStop, {}}
+              : UiAction{};
         }
-        return {
-            UiActionType::VoiceStart,
-            kVoiceCommandButton.contains(point) ? "command" : "chat"};
+        return {UiActionType::VoiceStart, pressed_mode};
       }
       if (voice_touch_active_) {
         if (released) {
@@ -547,6 +556,10 @@ void Tab5Ui::drawNormal(
   drawQuota(snapshot);
   drawTokenSummary(snapshot);
   drawTaskList(snapshot, now_ms);
+  const auto voice_chat_recording =
+      voice_recording_ && voice_mode_ == "chat";
+  const auto voice_command_recording =
+      voice_recording_ && voice_mode_ == "command";
 
   canvas_.fillRoundRect(
       kPreviousPetButton.x, kPreviousPetButton.y,
@@ -561,23 +574,24 @@ void Tab5Ui::drawNormal(
   canvas_.fillRoundRect(
       kVoiceChatButton.x, kVoiceChatButton.y,
       kVoiceChatButton.width, kVoiceChatButton.height, 14,
-      voice_recording_ ? kRed : kPanelLight);
+      voice_chat_recording ? kRed : kPanelLight);
   canvas_.fillRoundRect(
       kVoiceCommandButton.x, kVoiceCommandButton.y,
       kVoiceCommandButton.width, kVoiceCommandButton.height, 14,
-      voice_recording_ ? kRed : kPanelLight);
+      voice_command_recording ? kRed : kPanelLight);
   canvas_.fillRoundRect(
       kCameraButton.x, kCameraButton.y,
       kCameraButton.width, kCameraButton.height, 14,
       camera_busy_ ? kOrange : kPanelLight);
   canvas_.setTextSize(1);
-  canvas_.setTextColor(kText, voice_recording_ ? kRed : kPanelLight);
+  canvas_.setTextColor(kText, voice_chat_recording ? kRed : kPanelLight);
   canvas_.drawString(
-      voice_recording_ ? "结束" : "对话",
+      voice_chat_recording ? "结束" : "对话",
       kVoiceChatButton.x + kVoiceChatButton.width / 2,
       kVoiceChatButton.y + kVoiceChatButton.height / 2);
+  canvas_.setTextColor(kText, voice_command_recording ? kRed : kPanelLight);
   canvas_.drawString(
-      voice_recording_ ? "结束" : "命令",
+      voice_command_recording ? "结束" : "命令",
       kVoiceCommandButton.x + kVoiceCommandButton.width / 2,
       kVoiceCommandButton.y + kVoiceCommandButton.height / 2);
   canvas_.setTextColor(kText, camera_busy_ ? kOrange : kPanelLight);

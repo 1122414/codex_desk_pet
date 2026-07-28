@@ -40,7 +40,7 @@ class Tab5Ui {
       const String& connection_detail,
       std::uint8_t transfer_progress);
   bool approvalCanAccept(const Approval& approval) const;
-  void setVoiceRecording(bool recording);
+  void setVoiceRecording(bool recording, const String& mode = "");
   void setCameraBusy(bool busy);
 
  private:
@@ -118,6 +118,7 @@ class Tab5Ui {
   bool voice_touch_active_ = false;
   bool camera_touch_active_ = false;
   bool voice_recording_ = false;
+  String voice_mode_;
   bool camera_busy_ = false;
   std::int16_t task_touch_start_y_ = 0;
   std::int16_t task_scroll_start_pixels_ = 0;

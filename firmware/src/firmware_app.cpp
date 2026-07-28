@@ -318,7 +318,7 @@ void FirmwareApp::handleUiAction(const UiAction& action) {
       } else {
         audio_.setPaused(true);
         if (voice_.start(*client, action.value)) {
-          ui_.setVoiceRecording(true);
+          ui_.setVoiceRecording(true, action.value);
           connection_detail_ =
               action.value == "command"
                   ? "正在听取命令，再点一次结束"
