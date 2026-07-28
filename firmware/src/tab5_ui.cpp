@@ -343,7 +343,8 @@ UiAction Tab5Ui::pollTouch(
     };
     last_touch_ = point;
     const auto released = detail.wasReleased();
-    const auto pressed = detail.wasPressed();
+    const auto pressed =
+        !released && (detail.wasPressed() || !touch_active_);
     const auto phase = released ? TouchPhase::Released
                                 : (pressed ? TouchPhase::Pressed
                                            : TouchPhase::Moved);

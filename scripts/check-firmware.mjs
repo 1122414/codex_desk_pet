@@ -72,6 +72,13 @@ try {
   }
   if (
     !tab5Ui.includes(
+      "!released && (detail.wasPressed() || !touch_active_)",
+    )
+  ) {
+    throw new Error("Tab5 必须在慢帧错过 wasPressed 时恢复首次触摸");
+  }
+  if (
+    !tab5Ui.includes(
       "normal_screen_rendered_ && fingerprint == rendered_fingerprint_",
     )
   ) {
