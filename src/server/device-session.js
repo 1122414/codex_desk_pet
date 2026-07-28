@@ -46,6 +46,7 @@ export class DeviceSession extends EventEmitter {
   #started = false;
   #handshakeStartedAt = 0;
   #reliableQueue = [];
+  #initialPeerHandshakeId = null;
 
   constructor({
     role,
@@ -337,6 +338,9 @@ export class DeviceSession extends EventEmitter {
     let envelope = validateEnvelope(message);
     this.lastReceivedAt = this.now();
     const handshake = HANDSHAKE_TYPES.has(envelope.type);
+    if (this.#isUsbPeerRestart(envelope)) {
+      this.#resetForPeerRestart();
+    }
     if (this.ready && !handshake && envelope.sessionId !== this.sessionId) {
       this.#send("error", { code: "INVALID_SESSION", message: "Message session does not match" }, false);
       return;
@@ -376,6 +380,12 @@ export class DeviceSession extends EventEmitter {
           receivedSequence: envelope.sequence,
         }, false);
         return;
+      }
+      if (
+        envelope.sequence === 1 &&
+        ["hello", "pair.request"].includes(envelope.type)
+      ) {
+        this.#initialPeerHandshakeId = envelope.id;
       }
     }
 
@@ -606,6 +616,36 @@ export class DeviceSession extends EventEmitter {
     this.transport.off("error", this.onTransportError);
     this.state = "closed";
     this.emit("closed");
+  }
+
+  #isUsbPeerRestart(envelope) {
+    if (
+      this.role !== "bridge" ||
+      this.transport.kind !== "usb" ||
+      envelope.sequence !== 1 ||
+      !["hello", "pair.request"].includes(envelope.type) ||
+      this.#receiveWindow.lastAccepted === 0 ||
+      envelope.id === this.#initialPeerHandshakeId
+    ) {
+      return false;
+    }
+    return !this.deviceId || envelope.payload.deviceId === this.deviceId;
+  }
+
+  #resetForPeerRestart() {
+    this.#nextSequence = 1;
+    this.#receiveWindow.reset();
+    this.#outbox.clear();
+    this.#reliableQueue = [];
+    this.#initialPeerHandshakeId = null;
+    this.#handshake = null;
+    this.#handshakeStartedAt = this.now();
+    this.sessionId = null;
+    this.state = "handshaking";
+    this.emit("peerRestart", {
+      deviceId: this.deviceId,
+      transport: this.transport.kind,
+    });
   }
 
   #sendHello() {

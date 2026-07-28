@@ -4,6 +4,8 @@ import { randomUUID } from "node:crypto";
 import { DeviceSession } from "../src/server/device-session.js";
 import { createMemoryTransportPair } from "../src/server/transports/memory-transport.js";
 import {
+  createDeviceInfo,
+  createDeviceInfoHash,
   createEnvelope,
   isEncryptedEnvelope,
 } from "../src/shared/device-protocol.js";
@@ -331,4 +333,55 @@ test("an idle USB bridge keeps one transport open and periodically wakes the dev
   assert.equal(wakeCount, 1);
 
   bridge.close();
+});
+
+test("a USB bridge accepts a restarted peer without mistaking a retry for a reboot", async (t) => {
+  const transports = createMemoryTransportPair({ kind: "usb" });
+  const bridge = new DeviceSession({
+    role: "bridge",
+    transport: transports.left,
+    secretResolver: async (deviceId) => deviceId === "core-s3-1" ? SECRET : null,
+    nonceFactory: () => "bridge_nonce_1234567890",
+  });
+  t.after(() => bridge.close());
+  const replies = [];
+  const restarts = [];
+  transports.right.on("message", (message) => replies.push(message));
+  bridge.on("peerRestart", (event) => restarts.push(event));
+  bridge.start({ autoTick: false });
+
+  const deviceInfo = createDeviceInfo();
+  const createHello = ({ id, nonce }) => createEnvelope({
+    id,
+    sequence: 1,
+    type: "hello",
+    payload: {
+      deviceId: "core-s3-1",
+      deviceNonce: nonce,
+      transport: "usb",
+      deviceInfo,
+      deviceInfoHash: createDeviceInfoHash(deviceInfo),
+    },
+  });
+  const firstHello = createHello({
+    id: "initial-usb-hello-0001",
+    nonce: "device_nonce_initial_1234",
+  });
+  transports.right.send(firstHello);
+  await waitFor(() => replies.filter((message) => message.type === "challenge").length === 1);
+
+  transports.right.send(firstHello);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(replies.filter((message) => message.type === "challenge").length, 1);
+  assert.equal(restarts.length, 0);
+
+  transports.right.send(createHello({
+    id: "restarted-usb-hello-01",
+    nonce: "device_nonce_restarted_12",
+  }));
+  await waitFor(() => replies.filter((message) => message.type === "challenge").length === 2);
+  const restartedChallenge = replies.filter((message) => message.type === "challenge").at(-1);
+  assert.equal(restartedChallenge.sequence, 1);
+  assert.equal(restartedChallenge.payload.deviceNonce, "device_nonce_restarted_12");
+  assert.deepEqual(restarts, [{ deviceId: "core-s3-1", transport: "usb" }]);
 });

@@ -318,7 +318,7 @@ void DeviceProtocolClient::setPairingCode(const String& pairing_code) {
 }
 
 void DeviceProtocolClient::setPairingSecret(const String& pairing_secret) {
-  if (pairing_secret.length() != 64) return;
+  if (pairing_secret.length() != 64 || secret_ == pairing_secret) return;
   secret_ = pairing_secret;
   pairing_code_ = "";
   if (transport_ != nullptr && transport_->connected()) {
