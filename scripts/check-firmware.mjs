@@ -138,6 +138,16 @@ try {
     throw new Error("Tab5 拍照必须先刷新触摸反馈，再执行同步采集");
   }
   if (
+    !firmwareApp.includes(
+      '} else if (event == "voice.reply") {\n' +
+      "    voice_.stop();\n" +
+      "    audio_.setPaused(false);\n" +
+      "    ui_.setVoiceRecording(false);",
+    )
+  ) {
+    throw new Error("Tab5 收到语音结果后必须结束录音并恢复按钮");
+  }
+  if (
     tab5Ui.includes('voice_recording_ ? "松开"') ||
     !tab5Ui.includes('voice_chat_recording ? "结束" : "对话"') ||
     !tab5Ui.includes('voice_command_recording ? "结束" : "命令"')

@@ -3,6 +3,7 @@ const MAX_AUDIO_CHUNK_BYTES = 2_048;
 const MAX_PENDING_CHUNKS = 64;
 const TRANSCRIPT_SETTLE_MS = 2_500;
 const CLOSED_SETTLE_MS = 120;
+const REALTIME_START_TIMEOUT_MS = 10_000;
 const VOICE_INSTRUCTIONS = [
   "你是 Codex Desk Buddy 的语音转写会话。",
   "准确识别用户的普通话语音，不执行命令，不调用工具，不修改文件。",
@@ -16,6 +17,14 @@ function validBase64(value) {
     /^[A-Za-z0-9+/]+={0,2}$/.test(value);
 }
 
+function realtimeErrorMessage(value) {
+  const message = String(value || "Codex 实时语音失败");
+  if (message.includes("requires API key auth")) {
+    return "实时语音需要 OpenAI API Key 登录，当前 ChatGPT 登录暂不支持";
+  }
+  return message;
+}
+
 export class VoiceAgent {
   #sessions = new Map();
 
@@ -26,6 +35,7 @@ export class VoiceAgent {
     cwd = process.cwd(),
     transcriptSettleMs = TRANSCRIPT_SETTLE_MS,
     closedSettleMs = CLOSED_SETTLE_MS,
+    realtimeStartTimeoutMs = REALTIME_START_TIMEOUT_MS,
   } = {}) {
     if (!bridge || !store || !petAgent) {
       throw new TypeError("VoiceAgent requires bridge, store, and petAgent");
@@ -36,6 +46,7 @@ export class VoiceAgent {
     this.cwd = cwd;
     this.transcriptSettleMs = transcriptSettleMs;
     this.closedSettleMs = closedSettleMs;
+    this.realtimeStartTimeoutMs = realtimeStartTimeoutMs;
     this.onNotification = (method, params) => this.#handleNotification(method, params);
     this.bridge.on("notification", this.onNotification);
   }
@@ -60,6 +71,9 @@ export class VoiceAgent {
       audioChain: Promise.resolve(),
       pendingChunks: 0,
       stopping: false,
+      started: false,
+      failed: false,
+      startupError: null,
       finalizeTimer: null,
       ready: null,
       resolveReady: null,
@@ -76,6 +90,12 @@ export class VoiceAgent {
       deviceId: session.deviceId,
     });
     try {
+      const account = await this.bridge.client.request("account/read", {});
+      if (account?.account?.type !== "apiKey") {
+        throw new Error(
+          "实时语音需要 OpenAI API Key 登录，当前 ChatGPT 登录暂不支持",
+        );
+      }
       const response = await this.bridge.client.request("thread/start", {
         cwd: this.cwd,
         approvalPolicy: "never",
@@ -97,15 +117,28 @@ export class VoiceAgent {
         includeStartupContext: false,
         prompt: "只做中文语音转写，不执行任何操作。",
         transport: { type: "websocket" },
-        version: "v3",
+        version: "v2",
       });
-      entry.resolveReady(true);
+      const started = await new Promise((resolve) => {
+        const timer = setTimeout(
+          () => resolve(false),
+          this.realtimeStartTimeoutMs,
+        );
+        entry.ready.then((ready) => {
+          clearTimeout(timer);
+          resolve(ready);
+        });
+      });
+      if (!started) {
+        throw entry.startupError ?? new Error("Codex 实时语音启动超时");
+      }
+      if (this.#sessions.get(entry.deviceId) !== entry) {
+        throw entry.startupError ?? new Error("Codex 实时语音启动失败");
+      }
       this.store.setVoice({ status: "listening" });
       return { accepted: true, mode };
     } catch (error) {
-      entry.resolveReady(false);
-      this.#sessions.delete(session.deviceId);
-      this.store.setVoice({ status: "failed", error: error.message });
+      this.#fail(entry, error);
       throw error;
     }
   }
@@ -183,6 +216,7 @@ export class VoiceAgent {
     const entries = [...this.#sessions.values()];
     this.#sessions.clear();
     for (const entry of entries) {
+      entry.resolveReady(false);
       clearTimeout(entry.finalizeTimer);
       if (entry.threadId && this.bridge.client?.running) {
         await this.bridge.client.request("thread/realtime/stop", {
@@ -196,6 +230,8 @@ export class VoiceAgent {
     const entry = this.#sessions.get(session?.deviceId);
     if (!entry || entry.session !== session) return;
     this.#sessions.delete(entry.deviceId);
+    entry.startupError = new Error("设备语音连接已断开");
+    entry.resolveReady(false);
     clearTimeout(entry.finalizeTimer);
     await entry.audioChain.catch(() => {});
     if (entry.threadId && this.bridge.client?.running) {
@@ -216,16 +252,27 @@ export class VoiceAgent {
     const entry = [...this.#sessions.values()]
       .find((candidate) => candidate.threadId === params?.threadId);
     if (!entry) return;
+    if (method === "thread/realtime/started") {
+      entry.started = true;
+      entry.resolveReady(true);
+      return;
+    }
     if (method === "thread/realtime/transcript/done" && params.role === "user") {
       const text = String(params.text ?? "").trim();
       if (text) entry.transcriptParts.push(text);
       return;
     }
     if (method === "thread/realtime/error") {
-      this.#fail(entry, new Error(params.message || "Codex 实时语音失败"));
+      entry.startupError = new Error(realtimeErrorMessage(params.message));
+      this.#fail(entry, entry.startupError);
       return;
     }
     if (method === "thread/realtime/closed") {
+      if (!entry.started) {
+        entry.startupError = new Error("Codex 实时语音启动前已关闭");
+        this.#fail(entry, entry.startupError);
+        return;
+      }
       clearTimeout(entry.finalizeTimer);
       entry.finalizeTimer = setTimeout(
         () => this.#finalize(entry),
@@ -278,6 +325,9 @@ export class VoiceAgent {
   }
 
   #fail(entry, error) {
+    if (entry.failed) return;
+    entry.failed = true;
+    entry.resolveReady(false);
     if (this.#sessions.get(entry.deviceId) === entry) {
       this.#sessions.delete(entry.deviceId);
     }

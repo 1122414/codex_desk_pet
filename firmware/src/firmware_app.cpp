@@ -264,6 +264,9 @@ void FirmwareApp::handleProtocolEvent(
   if (event == "resource.error") {
     connection_detail_ = String("Pet同步失败: ") + (payload["error"] | "unknown");
   } else if (event == "voice.reply") {
+    voice_.stop();
+    audio_.setPaused(false);
+    ui_.setVoiceRecording(false);
     const String reply = payload["text"] | "没有听清，请再说一次";
     connection_detail_ = reply;
     if (payload["ok"] | false) audio_.enqueuePhrase(reply);
