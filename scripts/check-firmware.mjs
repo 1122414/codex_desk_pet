@@ -21,6 +21,15 @@ try {
       "USB CDC 同时承载设备协议，固件必须使用 CORE_DEBUG_LEVEL=0，避免日志破坏 JSON 报文",
     );
   }
+  const firmwareMain = await readFile(
+    path.join(root, "firmware", "src", "main.cpp"),
+    "utf8",
+  );
+  if (!firmwareMain.includes("SET_LOOP_TASK_STACK_SIZE(32 * 1024)")) {
+    throw new Error(
+      "Tab5 主循环任务必须预留 32KB 栈，避免语音与媒体模块初始化触发栈保护故障",
+    );
+  }
   const usbTransport = await readFile(
     path.join(root, "firmware", "src", "transports", "usb_transport.cpp"),
     "utf8",
