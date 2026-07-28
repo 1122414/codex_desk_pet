@@ -109,6 +109,16 @@ try {
   if (!tab5Ui.includes("drawTruncated(detail, detail_x, 28, 872 - detail_x)")) {
     throw new Error("Tab5 顶部任务详情必须按剩余宽度截断，不能覆盖时钟");
   }
+  if (
+    !tab5Ui.includes('snapshot.selected_pet_id == "chibi-skadi"') ||
+    !tab5Ui.includes('project ? "项目" : "对话"') ||
+    !tab5Ui.includes('"SKADI // CODEX"') ||
+    !tab5Ui.includes("drawThreadDetail(snapshot)")
+  ) {
+    throw new Error(
+      "Tab5 必须为 Chibi Skadi 提供专属主题，并区分项目、纯对话与会话详情",
+    );
+  }
   const bundledPetDirectory = path.join(
     root,
     "firmware",
@@ -224,6 +234,13 @@ try {
     !usbTransport.includes("Serial.flush()")
   ) {
     throw new Error("Tab5 USB 长报文必须分块并完整刷新到主机");
+  }
+  if (
+    !deviceProtocol.includes('sendCommand(\n      "thread.open"') ||
+    !firmwareApp.includes('event == "thread.detail"') ||
+    !firmwareApp.includes("case UiActionType::OpenThread")
+  ) {
+    throw new Error("Tab5 必须支持打开任务并显示只读会话详情");
   }
   const sources = (await readdir(coreDirectory))
     .filter((file) => file.endsWith(".cpp"))

@@ -67,6 +67,7 @@ class DeviceProtocolClient {
       std::size_t byte_count,
       std::uint16_t samples_per_channel);
   bool sendVoiceStop();
+  bool sendThreadOpen(const String& thread_id);
   bool sendVisionBegin(
       const String& capture_id,
       std::size_t total_bytes,

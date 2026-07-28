@@ -21,6 +21,8 @@ enum class UiActionType : std::uint8_t {
   VoiceStart,
   VoiceStop,
   CameraCapture,
+  OpenThread,
+  CloseThread,
   SubmitPairingCode,
 };
 
@@ -42,6 +44,10 @@ class Tab5Ui {
   bool approvalCanAccept(const Approval& approval) const;
   void setVoiceRecording(bool recording, const String& mode = "");
   void setCameraBusy(bool busy);
+  void setThreadLoading(const TaskSummary& task);
+  void setThreadDetail(const ThreadDetail& detail);
+  void setThreadError(const String& thread_id, const String& error);
+  void closeThread();
 
  private:
   UiAction pollTouch(const Snapshot& snapshot, std::uint64_t now_ms, bool paired);
@@ -67,6 +73,8 @@ class Tab5Ui {
   void drawQuota(const Snapshot& snapshot);
   void drawTokenSummary(const Snapshot& snapshot);
   void drawTaskList(const Snapshot& snapshot, std::uint64_t now_ms);
+  void drawThreadDetail(const Snapshot& snapshot);
+  void drawSkadiBackdrop();
   void pushCanvasRegion(const Rect& bounds);
   void drawChevron(const Rect& bounds, bool points_right);
   void drawTruncated(const String& text, std::int16_t x, std::int16_t y, std::int16_t width);
@@ -92,6 +100,8 @@ class Tab5Ui {
   static constexpr Rect kVoiceCommandButton{194, 626, 72, 56};
   static constexpr Rect kCameraButton{272, 626, 72, 56};
   static constexpr Rect kTaskListArea{464, 288, 758, 390};
+  static constexpr Rect kThreadBackButton{468, 104, 92, 46};
+  static constexpr Rect kThreadDetailArea{464, 170, 758, 500};
   static constexpr Rect kDeclineButton{540, 554, 292, 104};
   static constexpr Rect kAcceptButton{864, 554, 356, 104};
   static constexpr InputLayout kInputLayout{
@@ -115,6 +125,8 @@ class Tab5Ui {
   Point last_touch_{};
   bool touch_active_ = false;
   bool task_touch_active_ = false;
+  bool task_touch_moved_ = false;
+  bool thread_back_touch_active_ = false;
   bool pet_button_touch_active_ = false;
   bool pet_button_release_blocked_ = false;
   UiActionType pet_button_touch_action_ = UiActionType::None;
@@ -128,6 +140,8 @@ class Tab5Ui {
   std::int16_t task_scroll_start_pixels_ = 0;
   std::int16_t task_scroll_pixels_ = 0;
   std::int16_t rendered_task_scroll_pixels_ = -1;
+  std::int16_t detail_scroll_pixels_ = 0;
+  std::int16_t rendered_detail_scroll_pixels_ = -1;
   std::uint64_t last_task_scroll_render_at_ms_ = 0;
   bool pairing_touch_latched_ = false;
   std::uint64_t pairing_released_at_ = 0;
@@ -144,6 +158,7 @@ class Tab5Ui {
   bool normal_screen_rendered_ = false;
   String rendered_pairing_code_;
   String rendered_connection_detail_;
+  ThreadDetail thread_detail_;
 };
 
 }  // namespace codex::firmware

@@ -456,6 +456,19 @@ bool DeviceProtocolClient::sendVoiceStop() {
   return sendCommand("voice.stop", [](JsonObject) {});
 }
 
+bool DeviceProtocolClient::sendThreadOpen(const String& thread_id) {
+  if (thread_id.isEmpty() || thread_id.length() > 128) {
+    return false;
+  }
+  for (std::size_t index = 0; index < thread_id.length(); ++index) {
+    const auto value = thread_id[index];
+    if (!(isAlphaNumeric(value) || value == '-' || value == '_')) return false;
+  }
+  return sendCommand(
+      "thread.open",
+      [&thread_id](JsonObject payload) { payload["threadId"] = thread_id; });
+}
+
 bool DeviceProtocolClient::sendVisionBegin(
     const String& capture_id,
     const std::size_t total_bytes,
@@ -865,6 +878,10 @@ void DeviceProtocolClient::handleSnapshot(const JsonObjectConst payload) {
       TaskSummary task;
       task.id = boundedString(value["id"] | "", 128);
       task.title = boundedString(value["title"] | "", 72);
+      task.kind = strcmp(value["kind"] | "", "project") == 0
+          ? ThreadKind::Project
+          : ThreadKind::Conversation;
+      task.workspace = boundedString(value["workspace"] | "", 40);
       parsePresentationState(
           boundedString(value["state"] | "ready", 32),
           task.state);

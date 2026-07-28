@@ -15,6 +15,13 @@ constexpr std::uint64_t kWifiProvisioningRestartDelayMs = 750;
 constexpr DeviceCapabilities kTab5Capabilities{
     true, true, true, true, true, false, true, true, true};
 
+std::string boundedEventString(const char* value, const std::size_t maximum) {
+  if (value == nullptr) return {};
+  std::string result(value);
+  if (result.size() > maximum) result.resize(maximum);
+  return result;
+}
+
 void restartWirelessCoprocessor() {
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
   if (M5.getBoard() != m5::board_t::board_M5Tab5) return;
@@ -281,6 +288,44 @@ void FirmwareApp::handleProtocolEvent(
     const String reply = payload["text"] | "照片分析失败";
     connection_detail_ = reply;
     if (payload["ok"] | false) audio_.enqueuePhrase(reply);
+  } else if (event == "thread.detail") {
+    ThreadDetail detail;
+    detail.visible = true;
+    detail.thread_id = boundedEventString(payload["threadId"] | "", 128);
+    detail.title = boundedEventString(payload["title"] | "未命名会话", 160);
+    detail.kind = strcmp(payload["kind"] | "", "project") == 0
+        ? ThreadKind::Project
+        : ThreadKind::Conversation;
+    detail.workspace = boundedEventString(payload["workspace"] | "", 80);
+    detail.total_messages = static_cast<std::uint16_t>(
+        std::clamp<int>(payload["totalMessages"] | 0, 0, 65'535));
+    detail.truncated = payload["truncated"] | false;
+    if (payload["messages"].is<JsonArrayConst>()) {
+      const auto messages = payload["messages"].as<JsonArrayConst>();
+      const auto count = std::min<std::size_t>(messages.size(), 12);
+      detail.messages.reserve(count);
+      for (std::size_t index = 0; index < count; ++index) {
+        const auto value = messages[index].as<JsonObjectConst>();
+        const char* role = value["role"] | "";
+        if (strcmp(role, "user") != 0 && strcmp(role, "assistant") != 0) {
+          continue;
+        }
+        ConversationMessage message;
+        message.id = boundedEventString(value["id"] | "", 96);
+        message.role = strcmp(role, "user") == 0
+            ? ConversationRole::User
+            : ConversationRole::Assistant;
+        message.text = boundedEventString(value["text"] | "", 420);
+        if (!message.text.empty()) detail.messages.push_back(std::move(message));
+      }
+    }
+    if (detail.thread_id.empty()) {
+      ui_.setThreadError("", "会话详情格式无效");
+      connection_detail_ = "会话详情格式无效";
+    } else {
+      ui_.setThreadDetail(detail);
+      connection_detail_ = "已打开 " + String(detail.title.c_str());
+    }
   }
 }
 
@@ -358,6 +403,32 @@ void FirmwareApp::handleUiAction(const UiAction& action) {
         ui_.setCameraBusy(true);
         connection_detail_ = "正在拍照，请稍候";
       }
+      break;
+    case UiActionType::OpenThread: {
+      const auto task = std::find_if(
+          model_.snapshot().tasks.begin(),
+          model_.snapshot().tasks.end(),
+          [&action](const TaskSummary& value) {
+            return value.id == action.value.c_str();
+          });
+      if (task == model_.snapshot().tasks.end()) {
+        connection_detail_ = "会话已经不在最近列表";
+        break;
+      }
+      ui_.setThreadLoading(*task);
+      if (client == nullptr) {
+        ui_.setThreadError(action.value, "需要连接电脑才能读取对话");
+        connection_detail_ = "会话详情需要连接电脑";
+      } else if (!client->sendThreadOpen(action.value)) {
+        ui_.setThreadError(action.value, "发送详情请求失败");
+        connection_detail_ = "会话详情请求失败";
+      } else {
+        connection_detail_ = "正在读取会话";
+      }
+      break;
+    }
+    case UiActionType::CloseThread:
+      ui_.closeThread();
       break;
     case UiActionType::SubmitPairingCode:
       usb_client_.setPairingCode(action.value);
