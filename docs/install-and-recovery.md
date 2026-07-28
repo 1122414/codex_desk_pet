@@ -106,6 +106,13 @@ Tab5 已完成整机烧录、USB 枚举、应用升级、屏幕显示、全屏�
 - 单击“对话”和“命令”开始/结束录音，验证本地转写、LLM 回复、命令二次确认、扬声器音量和中断恢复。
 - 点击“拍照”，验证摄像头方向、色彩、JPEG 发送、Codex 观察回复和临时图片删除。
 - USB 加密配网、2.4 GHz Wi‑Fi、电脑睡眠与路由器重启后的恢复。
-- 不同 microSD 的兼容性、真实断电恢复和连续 72 小时运行。
+- 传输一个非固件内置 ID 的自定义 Pet，再验证不同 microSD 的兼容性、真实断电恢复和连续 72 小时运行。
+
+保持 Bridge 和 USB 连接时，可先运行以下只读验收。命令不会改设备、Wi‑Fi、Pet 或凭据；等待模式只记录语音文本长度和照片尺寸，不输出实际内容：
+
+```bash
+npm run test:live-tab5
+npm run test:live-tab5 -- --wait-for voice,vision
+```
 
 Secure Boot、Flash Encryption 和签名升级需要正式生产密钥与真机 eFuse 流程；eFuse 操作不可逆，因此不在无硬件、无量产密钥阶段假装完成。
