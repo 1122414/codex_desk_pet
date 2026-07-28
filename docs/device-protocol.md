@@ -57,8 +57,11 @@
 - `telemetry.update`
 - `voice.start`
 - `voice.stop`
+- `thread.open`：携带当前快照中已有的 `threadId`，请求一份只读、限长的最近对话。
 - `state.preview`
 - `wifi.provision`：只允许 Bridge 经已认证的 USB 会话发送，保存网络和 Bridge 地址后设备重启。
+
+`snapshot.tasks[]` 的 `kind` 固定为 `project` 或 `conversation`。存在 Git 工作区信息时为项目，并附带只显示末级目录名的 `workspace`；否则为纯对话。设备发送 `thread.open` 后，Bridge 返回 `thread.detail` 事件，最多包含最近 12 条 `user`/`assistant` 消息，单条文本最多 420 UTF-8 Bytes，总详情最多 4,200 Bytes。推理项、工具调用、图片和其他内部内容不会进入该事件；详情页面只读，不能从设备修改历史消息。
 
 ## 配对和双向认证
 
