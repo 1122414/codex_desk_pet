@@ -101,11 +101,14 @@ test("HTTP API requires a same-origin session for state changes", async (t) => {
   const browserAppSource = await browserApp.text();
   assert.match(browserAppSource, /renderThreadConversation/);
   assert.match(browserAppSource, /detail\.kind === "project"/);
+  assert.match(browserAppSource, /function themeForPetId\(petId\)/);
+  assert.match(browserAppSource, /return "feibi"/);
 
   const browserStyles = await fetch(`${base}/app.css`);
   assert.equal(browserStyles.status, 200);
   const browserCss = await browserStyles.text();
   assert.match(browserCss, /data-theme="chibi-skadi"/);
+  assert.match(browserCss, /data-theme="feibi"/);
   assert.match(browserCss, /\.thread-project/);
   assert.match(browserCss, /\.thread-conversation/);
 

@@ -118,12 +118,16 @@ try {
   }
   if (
     !tab5Ui.includes('snapshot.selected_pet_id == "chibi-skadi"') ||
+    !tab5Ui.includes('snapshot.selected_pet_id == "feibi"') ||
     !tab5Ui.includes('project ? "项目" : "对话"') ||
     !tab5Ui.includes('"SKADI // CODEX"') ||
+    !tab5Ui.includes('"FEIBI // CODEX"') ||
+    !tab5Ui.includes("drawFeibiBackdrop()") ||
+    !tab5Ui.includes('"星愿额度 · WEEK"') ||
     !tab5Ui.includes("drawThreadDetail(snapshot)")
   ) {
     throw new Error(
-      "Tab5 必须为 Chibi Skadi 提供专属主题，并区分项目、纯对话与会话详情",
+      "Tab5 必须为 Chibi Skadi 与菲比提供专属主题，并区分项目、纯对话与会话详情",
     );
   }
   const bundledPetDirectory = path.join(

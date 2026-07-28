@@ -266,6 +266,16 @@ function isSkadiPetId(petId) {
   return petId === "chibi-skadi" || petId?.startsWith("chibi-skadi-");
 }
 
+function isFeibiPetId(petId) {
+  return petId === "feibi" || petId?.startsWith("feibi-");
+}
+
+function themeForPetId(petId) {
+  if (isSkadiPetId(petId)) return "chibi-skadi";
+  if (isFeibiPetId(petId)) return "feibi";
+  return "default";
+}
+
 function formatTokens(value) {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}m tk`;
   if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 10_000 ? 0 : 1)}k tk`;
@@ -289,9 +299,7 @@ async function render(nextSnapshot) {
   const oldState = snapshot?.presentation.state;
   const oldPetId = snapshot?.pet.selectedId;
   snapshot = nextSnapshot;
-  document.body.dataset.theme = isSkadiPetId(snapshot.pet.selectedId)
-    ? "chibi-skadi"
-    : "default";
+  document.body.dataset.theme = themeForPetId(snapshot.pet.selectedId);
   if (oldPetId && oldPetId !== snapshot.pet.selectedId) resetLocalLookState();
   const connected = snapshot.connection.status === "connected";
   const connectionLabels = {
@@ -458,7 +466,13 @@ function renderThreadConversation(detail) {
     const bubble = document.createElement("article");
     bubble.className = `thread-message ${user ? "thread-message-user" : "thread-message-assistant"}`;
     const role = document.createElement("strong");
-    role.textContent = user ? "YOU // 指挥官" : "SKADI // CODEX";
+    role.textContent = user
+      ? "YOU // 指挥官"
+      : document.body.dataset.theme === "feibi"
+        ? "FEIBI // CODEX"
+        : document.body.dataset.theme === "chibi-skadi"
+          ? "SKADI // CODEX"
+          : "CODEX // 助手";
     const text = document.createElement("p");
     text.textContent = message.text;
     bubble.append(role, text);

@@ -68,8 +68,8 @@ class Tab5Ui {
       std::uint8_t frame_index);
   bool drawBundledPet(std::uint8_t frame_index);
   void drawFallbackPet(Animation animation, std::uint8_t frame);
-  void drawApproval(const Approval& approval);
-  void drawCompanionCommand(const Companion& companion);
+  void drawApproval(const Snapshot& snapshot);
+  void drawCompanionCommand(const Snapshot& snapshot);
   void drawStatus(
       const Snapshot& snapshot,
       std::uint64_t now_ms,
@@ -80,8 +80,12 @@ class Tab5Ui {
   void drawThreadDetail(const Snapshot& snapshot);
   void drawThreadMessages(const Snapshot& snapshot);
   void drawSkadiBackdrop();
+  void drawFeibiBackdrop();
   void pushCanvasRegion(const Rect& bounds);
-  void drawChevron(const Rect& bounds, bool points_right);
+  void drawChevron(
+      const Rect& bounds,
+      bool points_right,
+      std::uint16_t color);
   void drawTruncated(const String& text, std::int16_t x, std::int16_t y, std::int16_t width);
   void drawWrapped(
       const String& text,

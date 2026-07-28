@@ -33,6 +33,17 @@ constexpr std::uint16_t kSkadiCoral = 0xf475;
 constexpr std::uint16_t kSkadiLavender = 0xac9d;
 constexpr std::uint16_t kSkadiBlue = 0x4bf5;
 constexpr std::uint16_t kSkadiPearl = 0xfe7b;
+constexpr std::uint16_t kFeibiBackground = 0x1843;
+constexpr std::uint16_t kFeibiPanel = 0x2886;
+constexpr std::uint16_t kFeibiPanelLight = 0x4109;
+constexpr std::uint16_t kFeibiCard = 0x596a;
+constexpr std::uint16_t kFeibiText = 0xffbb;
+constexpr std::uint16_t kFeibiMuted = 0xc517;
+constexpr std::uint16_t kFeibiGold = 0xf60d;
+constexpr std::uint16_t kFeibiRose = 0xec75;
+constexpr std::uint16_t kFeibiViolet = 0xab79;
+constexpr std::uint16_t kFeibiCream = 0xff35;
+constexpr std::uint16_t kFeibiBorder = 0x722c;
 constexpr std::int16_t kKeyX = 330;
 constexpr std::int16_t kKeyY = 204;
 constexpr std::int16_t kKeyWidth = 208;
@@ -68,9 +79,25 @@ bool isSkadiTheme(const Snapshot& snapshot) {
       snapshot.selected_pet_id.rfind("chibi-skadi-", 0) == 0;
 }
 
+bool isFeibiTheme(const Snapshot& snapshot) {
+  return snapshot.selected_pet_id == "feibi" ||
+      snapshot.selected_pet_id.rfind("feibi-", 0) == 0;
+}
+
 std::uint16_t stateColor(
     const PresentationState state,
-    const bool skadi = false) {
+    const bool skadi = false,
+    const bool feibi = false) {
+  if (feibi) {
+    switch (state) {
+      case PresentationState::Completed: return kFeibiGold;
+      case PresentationState::NeedsInput:
+      case PresentationState::Reviewing: return kFeibiViolet;
+      case PresentationState::Blocked: return kFeibiRose;
+      case PresentationState::Running: return kFeibiGold;
+      case PresentationState::Ready: return kFeibiMuted;
+    }
+  }
   if (skadi) {
     switch (state) {
       case PresentationState::Completed: return kSkadiIce;
@@ -303,8 +330,9 @@ void Tab5Ui::render(
           !touch_active_) {
         const auto frame_index = frameIndex(snapshot, now_ms);
         if (frame_index != rendered_pet_frame_index_) {
-          const auto pet_background =
-              isSkadiTheme(snapshot) ? kSkadiPanel : kPanel;
+          const auto pet_background = isFeibiTheme(snapshot)
+              ? kFeibiPanel
+              : isSkadiTheme(snapshot) ? kSkadiPanel : kPanel;
           canvas_.fillRect(
               kPetSpriteArea.x,
               kPetSpriteArea.y,
@@ -349,7 +377,11 @@ void Tab5Ui::render(
     rendered_fingerprint_ = fingerprint;
   }
   canvas_.fillScreen(
-      paired && isSkadiTheme(snapshot) ? kSkadiBackground : kBackground);
+      paired && isFeibiTheme(snapshot)
+          ? kFeibiBackground
+          : paired && isSkadiTheme(snapshot)
+              ? kSkadiBackground
+              : kBackground);
   if (paired) {
     pairing_screen_rendered_ = false;
     drawNormal(snapshot, now_ms, connection_detail, transfer_progress);
@@ -780,23 +812,26 @@ void Tab5Ui::drawPairingCode() {
 void Tab5Ui::drawNormal(
     const Snapshot& snapshot,
     const std::uint64_t now_ms,
-    const String& connection_detail,
-    const std::uint8_t transfer_progress) {
+      const String& connection_detail,
+      const std::uint8_t transfer_progress) {
   const auto skadi = isSkadiTheme(snapshot);
+  const auto feibi = isFeibiTheme(snapshot);
   if (skadi) drawSkadiBackdrop();
+  if (feibi) drawFeibiBackdrop();
   drawStatus(snapshot, now_ms, connection_detail);
   if (snapshot.approval.present) {
-    drawApproval(snapshot.approval);
+    drawApproval(snapshot);
     return;
   }
   if (snapshot.companion.awaitingConfirmation()) {
-    drawCompanionCommand(snapshot.companion);
+    drawCompanionCommand(snapshot);
     return;
   }
 
-  const auto panel = skadi ? kSkadiPanel : kPanel;
-  const auto panel_light = skadi ? kSkadiPanelLight : kPanelLight;
-  const auto text = skadi ? kSkadiText : kText;
+  const auto panel = feibi ? kFeibiPanel : skadi ? kSkadiPanel : kPanel;
+  const auto panel_light =
+      feibi ? kFeibiPanelLight : skadi ? kSkadiPanelLight : kPanelLight;
+  const auto text = feibi ? kFeibiText : skadi ? kSkadiText : kText;
   canvas_.fillRoundRect(
       kPetArea.x,
       kPetArea.y,
@@ -816,6 +851,20 @@ void Tab5Ui::drawNormal(
     canvas_.setTextDatum(top_right);
     canvas_.setTextColor(kSkadiMuted, panel);
     canvas_.drawString("CHIBI SKADI // TIDAL LINK", 404, 98);
+    canvas_.setTextDatum(top_left);
+  } else if (feibi) {
+    canvas_.drawRoundRect(
+        kPetArea.x,
+        kPetArea.y,
+        kPetArea.width,
+        kPetArea.height,
+        24,
+        kFeibiGold);
+    canvas_.fillCircle(42, 106, 10, kFeibiRose);
+    canvas_.fillTriangle(32, 88, 52, 88, 42, 102, kFeibiGold);
+    canvas_.setTextDatum(top_right);
+    canvas_.setTextColor(kFeibiMuted, panel);
+    canvas_.drawString("FEIBI // STARLIGHT DESK", 404, 98);
     canvas_.setTextDatum(top_left);
   }
   drawPet(snapshot, now_ms);
@@ -839,44 +888,58 @@ void Tab5Ui::drawNormal(
       kNextPetButton.width, kNextPetButton.height, 14, panel_light);
   canvas_.setTextDatum(middle_center);
   canvas_.setTextColor(text, panel_light);
-  drawChevron(kPreviousPetButton, false);
-  drawChevron(kNextPetButton, true);
+  drawChevron(kPreviousPetButton, false, text);
+  drawChevron(kNextPetButton, true, text);
   canvas_.fillRoundRect(
       kVoiceChatButton.x, kVoiceChatButton.y,
       kVoiceChatButton.width, kVoiceChatButton.height, 14,
-      voice_chat_recording ? (skadi ? kSkadiCoral : kRed) : panel_light);
+      voice_chat_recording
+          ? (feibi ? kFeibiRose : skadi ? kSkadiCoral : kRed)
+          : panel_light);
   canvas_.fillRoundRect(
       kVoiceCommandButton.x, kVoiceCommandButton.y,
       kVoiceCommandButton.width, kVoiceCommandButton.height, 14,
-      voice_command_recording ? (skadi ? kSkadiCoral : kRed) : panel_light);
+      voice_command_recording
+          ? (feibi ? kFeibiRose : skadi ? kSkadiCoral : kRed)
+          : panel_light);
   canvas_.fillRoundRect(
       kCameraButton.x, kCameraButton.y,
       kCameraButton.width, kCameraButton.height, 14,
-      camera_busy_ ? (skadi ? kSkadiLavender : kOrange) : panel_light);
+      camera_busy_
+          ? (feibi ? kFeibiViolet : skadi ? kSkadiLavender : kOrange)
+          : panel_light);
   canvas_.setTextSize(1);
   canvas_.setTextColor(
       text,
-      voice_chat_recording ? (skadi ? kSkadiCoral : kRed) : panel_light);
+      voice_chat_recording
+          ? (feibi ? kFeibiRose : skadi ? kSkadiCoral : kRed)
+          : panel_light);
   canvas_.drawString(
       voice_chat_recording ? "结束" : "对话",
       kVoiceChatButton.x + kVoiceChatButton.width / 2,
       kVoiceChatButton.y + kVoiceChatButton.height / 2);
   canvas_.setTextColor(
       text,
-      voice_command_recording ? (skadi ? kSkadiCoral : kRed) : panel_light);
+      voice_command_recording
+          ? (feibi ? kFeibiRose : skadi ? kSkadiCoral : kRed)
+          : panel_light);
   canvas_.drawString(
       voice_command_recording ? "结束" : "命令",
       kVoiceCommandButton.x + kVoiceCommandButton.width / 2,
       kVoiceCommandButton.y + kVoiceCommandButton.height / 2);
   canvas_.setTextColor(
       text,
-      camera_busy_ ? (skadi ? kSkadiLavender : kOrange) : panel_light);
+      camera_busy_
+          ? (feibi ? kFeibiViolet : skadi ? kSkadiLavender : kOrange)
+          : panel_light);
   canvas_.drawString(
       camera_busy_ ? "发送中" : "拍照",
       kCameraButton.x + kCameraButton.width / 2,
       kCameraButton.y + kCameraButton.height / 2);
   if (transfer_progress > 0 && transfer_progress < 100) {
-    canvas_.setTextColor(skadi ? kSkadiLavender : kOrange, panel);
+    canvas_.setTextColor(
+        feibi ? kFeibiGold : skadi ? kSkadiLavender : kOrange,
+        panel);
     canvas_.drawString(
         "同步 " + String(transfer_progress) + "%",
         228,
@@ -902,6 +965,36 @@ void Tab5Ui::drawSkadiBackdrop() {
   canvas_.drawArc(890, 710, 380, 348, 205, 335, kSkadiBlue);
   canvas_.drawArc(890, 710, 330, 305, 205, 335, kSkadiPanelLight);
   canvas_.drawLine(438, 82, 1260, 82, kSkadiPanelLight);
+}
+
+void Tab5Ui::drawFeibiBackdrop() {
+  static constexpr Point stars[] = {
+      {18, 132}, {438, 84}, {688, 74}, {982, 78}, {1258, 150},
+      {32, 702}, {452, 692}, {832, 704}, {1114, 690}, {1250, 520},
+  };
+  for (std::size_t index = 0; index < std::size(stars); ++index) {
+    const auto radius = static_cast<std::int16_t>(index % 3 + 2);
+    const auto color = index % 3 == 0
+        ? kFeibiRose
+        : index % 3 == 1 ? kFeibiGold : kFeibiCream;
+    canvas_.drawLine(
+        stars[index].x - radius,
+        stars[index].y,
+        stars[index].x + radius,
+        stars[index].y,
+        color);
+    canvas_.drawLine(
+        stars[index].x,
+        stars[index].y - radius,
+        stars[index].x,
+        stars[index].y + radius,
+        color);
+  }
+  canvas_.drawArc(1010, 712, 340, 315, 198, 332, kFeibiViolet);
+  canvas_.drawArc(1010, 712, 294, 274, 198, 332, kFeibiBorder);
+  canvas_.drawLine(438, 82, 1260, 82, kFeibiBorder);
+  canvas_.fillTriangle(1138, 82, 1174, 82, 1156, 100, kFeibiGold);
+  canvas_.fillTriangle(1174, 82, 1210, 82, 1192, 100, kFeibiRose);
 }
 
 void Tab5Ui::drawPairing(const String& connection_detail) {
@@ -938,8 +1031,9 @@ void Tab5Ui::drawPairing(const String& connection_detail) {
 
 void Tab5Ui::drawPet(const Snapshot& snapshot, const std::uint64_t now_ms) {
   const auto skadi = isSkadiTheme(snapshot);
-  const auto panel = skadi ? kSkadiPanel : kPanel;
-  const auto text = skadi ? kSkadiText : kText;
+  const auto feibi = isFeibiTheme(snapshot);
+  const auto panel = feibi ? kFeibiPanel : skadi ? kSkadiPanel : kPanel;
+  const auto text = feibi ? kFeibiText : skadi ? kSkadiText : kText;
   const auto index = frameIndex(snapshot, now_ms);
   drawPetFrame(snapshot, index);
   rendered_pet_frame_index_ = index;
@@ -954,7 +1048,7 @@ void Tab5Ui::drawPet(const Snapshot& snapshot, const std::uint64_t now_ms) {
   canvas_.setTextSize(1);
   canvas_.setTextDatum(top_left);
   drawTruncated(pet_name, 62, 546, 332);
-  canvas_.setTextColor(stateColor(snapshot.state, skadi), panel);
+  canvas_.setTextColor(stateColor(snapshot.state, skadi, feibi), panel);
   canvas_.setTextDatum(middle_center);
   canvas_.drawString(stateLabel(snapshot.state), 228, 590);
   canvas_.setTextDatum(top_left);
@@ -1150,29 +1244,43 @@ void Tab5Ui::drawFallbackPet(const Animation animation, const std::uint8_t frame
   canvas_.setTextDatum(top_left);
 }
 
-void Tab5Ui::drawApproval(const Approval& approval) {
-  canvas_.fillRoundRect(48, 100, 1184, 584, 22, kPanel);
-  canvas_.setTextColor(kOrange, kPanel);
+void Tab5Ui::drawApproval(const Snapshot& snapshot) {
+  const auto& approval = snapshot.approval;
+  const auto skadi = isSkadiTheme(snapshot);
+  const auto feibi = isFeibiTheme(snapshot);
+  const auto panel = feibi ? kFeibiPanel : skadi ? kSkadiPanel : kPanel;
+  const auto raised =
+      feibi ? kFeibiPanelLight : skadi ? kSkadiPanelLight : kPanelLight;
+  const auto text = feibi ? kFeibiText : skadi ? kSkadiText : kText;
+  const auto muted = feibi ? kFeibiMuted : skadi ? kSkadiMuted : kMuted;
+  const auto accent = feibi ? kFeibiRose : skadi ? kSkadiCoral : kOrange;
+  const auto accept = feibi ? kFeibiGold : skadi ? kSkadiIce : kGreen;
+  canvas_.fillRoundRect(48, 100, 1184, 584, feibi ? 28 : 22, panel);
+  canvas_.drawRoundRect(48, 100, 1184, 584, feibi ? 28 : 22, accent);
+  canvas_.setTextColor(accent, panel);
   canvas_.setTextSize(2);
   canvas_.drawString(String(approval.title.c_str()), 88, 140);
   canvas_.setTextSize(1);
-  canvas_.setTextColor(kText, kPanel);
+  canvas_.setTextColor(text, panel);
   drawWrapped(String(approval.detail.c_str()), 88, 210, 1080, 2, 38);
-  canvas_.setTextColor(kMuted, kPanel);
+  canvas_.setTextColor(muted, panel);
   drawWrapped(String(approval.reason.c_str()), 88, 304, 1080, 2, 34);
   canvas_.fillRoundRect(
       kDeclineButton.x, kDeclineButton.y,
-      kDeclineButton.width, kDeclineButton.height, 14, kPanelLight);
+      kDeclineButton.width, kDeclineButton.height, 14, raised);
   const auto safe = approvalCanAccept(approval);
   canvas_.fillRoundRect(
       kAcceptButton.x, kAcceptButton.y,
-      kAcceptButton.width, kAcceptButton.height, 14, safe ? kGreen : kPanelLight);
+      kAcceptButton.width, kAcceptButton.height, 14, safe ? accept : raised);
   canvas_.setTextDatum(middle_center);
   canvas_.setTextSize(2);
-  canvas_.setTextColor(kText, kPanelLight);
+  canvas_.setTextColor(text, raised);
   canvas_.drawString("拒绝", kDeclineButton.x + kDeclineButton.width / 2,
                      kDeclineButton.y + kDeclineButton.height / 2);
-  canvas_.setTextColor(safe ? kBackground : kMuted, safe ? kGreen : kPanelLight);
+  canvas_.setTextColor(
+      safe ? (feibi ? kFeibiBackground : skadi ? kSkadiBackground : kBackground)
+           : muted,
+      safe ? accept : raised);
   canvas_.drawString(safe ? "仅允许本次" : "请在电脑确认",
                      kAcceptButton.x + kAcceptButton.width / 2,
                      kAcceptButton.y + kAcceptButton.height / 2);
@@ -1180,13 +1288,24 @@ void Tab5Ui::drawApproval(const Approval& approval) {
   canvas_.setTextDatum(top_left);
 }
 
-void Tab5Ui::drawCompanionCommand(const Companion& companion) {
-  canvas_.fillRoundRect(48, 100, 1184, 584, 22, kPanel);
-  canvas_.setTextColor(kOrange, kPanel);
+void Tab5Ui::drawCompanionCommand(const Snapshot& snapshot) {
+  const auto& companion = snapshot.companion;
+  const auto skadi = isSkadiTheme(snapshot);
+  const auto feibi = isFeibiTheme(snapshot);
+  const auto panel = feibi ? kFeibiPanel : skadi ? kSkadiPanel : kPanel;
+  const auto raised =
+      feibi ? kFeibiPanelLight : skadi ? kSkadiPanelLight : kPanelLight;
+  const auto text = feibi ? kFeibiText : skadi ? kSkadiText : kText;
+  const auto muted = feibi ? kFeibiMuted : skadi ? kSkadiMuted : kMuted;
+  const auto accent = feibi ? kFeibiRose : skadi ? kSkadiCoral : kOrange;
+  const auto accept = feibi ? kFeibiGold : skadi ? kSkadiIce : kGreen;
+  canvas_.fillRoundRect(48, 100, 1184, 584, feibi ? 28 : 22, panel);
+  canvas_.drawRoundRect(48, 100, 1184, 584, feibi ? 28 : 22, accent);
+  canvas_.setTextColor(accent, panel);
   canvas_.setTextSize(2);
   canvas_.drawString("执行这条语音命令？", 88, 140);
   canvas_.setTextSize(1);
-  canvas_.setTextColor(kText, kPanel);
+  canvas_.setTextColor(text, panel);
   drawWrapped(
       String(companion.prompt.c_str()),
       88,
@@ -1194,22 +1313,24 @@ void Tab5Ui::drawCompanionCommand(const Companion& companion) {
       1080,
       4,
       42);
-  canvas_.setTextColor(kMuted, kPanel);
+  canvas_.setTextColor(muted, panel);
   canvas_.drawString("确认后才会创建 Codex 任务；敏感操作仍需再次审批", 88, 410);
   canvas_.fillRoundRect(
       kDeclineButton.x, kDeclineButton.y,
-      kDeclineButton.width, kDeclineButton.height, 14, kPanelLight);
+      kDeclineButton.width, kDeclineButton.height, 14, raised);
   canvas_.fillRoundRect(
       kAcceptButton.x, kAcceptButton.y,
-      kAcceptButton.width, kAcceptButton.height, 14, kGreen);
+      kAcceptButton.width, kAcceptButton.height, 14, accept);
   canvas_.setTextDatum(middle_center);
   canvas_.setTextSize(2);
-  canvas_.setTextColor(kText, kPanelLight);
+  canvas_.setTextColor(text, raised);
   canvas_.drawString(
       "取消",
       kDeclineButton.x + kDeclineButton.width / 2,
       kDeclineButton.y + kDeclineButton.height / 2);
-  canvas_.setTextColor(kBackground, kGreen);
+  canvas_.setTextColor(
+      feibi ? kFeibiBackground : skadi ? kSkadiBackground : kBackground,
+      accept);
   canvas_.drawString(
       "确认执行",
       kAcceptButton.x + kAcceptButton.width / 2,
@@ -1223,12 +1344,15 @@ void Tab5Ui::drawStatus(
     const std::uint64_t now_ms,
     const String& connection_detail) {
   const auto skadi = isSkadiTheme(snapshot);
-  const auto panel = skadi ? kSkadiPanel : kPanel;
-  const auto text = skadi ? kSkadiText : kText;
-  const auto muted = skadi ? kSkadiMuted : kMuted;
-  const auto accent = skadi ? kSkadiIce : kBlue;
-  const auto connected_color = skadi ? kSkadiIce : kGreen;
-  const auto error_color = skadi ? kSkadiCoral : kRed;
+  const auto feibi = isFeibiTheme(snapshot);
+  const auto panel = feibi ? kFeibiPanel : skadi ? kSkadiPanel : kPanel;
+  const auto text = feibi ? kFeibiText : skadi ? kSkadiText : kText;
+  const auto muted = feibi ? kFeibiMuted : skadi ? kSkadiMuted : kMuted;
+  const auto accent = feibi ? kFeibiGold : skadi ? kSkadiIce : kBlue;
+  const auto connected_color =
+      feibi ? kFeibiGold : skadi ? kSkadiIce : kGreen;
+  const auto error_color =
+      feibi ? kFeibiRose : skadi ? kSkadiCoral : kRed;
   canvas_.fillRect(0, 0, kScreenWidth, 72, panel);
   if (skadi) {
     canvas_.fillTriangle(
@@ -1241,6 +1365,17 @@ void Tab5Ui::drawStatus(
     canvas_.setTextColor(kSkadiCoral, panel);
     canvas_.setTextSize(1);
     canvas_.drawString("SKADI // LINK", 62, 8);
+  } else if (feibi) {
+    const auto mark = snapshot.bridge_connected
+        ? connected_color
+        : error_color;
+    canvas_.drawLine(20, 36, 44, 36, mark);
+    canvas_.drawLine(32, 24, 32, 48, mark);
+    canvas_.fillCircle(32, 36, 5, mark);
+    canvas_.drawLine(52, 14, 52, 58, kFeibiBorder);
+    canvas_.setTextColor(kFeibiRose, panel);
+    canvas_.setTextSize(1);
+    canvas_.drawString("FEIBI // LINK", 62, 8);
   } else {
     canvas_.fillCircle(
         32,
@@ -1248,11 +1383,11 @@ void Tab5Ui::drawStatus(
         12,
         snapshot.bridge_connected ? connected_color : error_color);
   }
-  canvas_.setTextColor(stateColor(snapshot.state, skadi), panel);
+  canvas_.setTextColor(stateColor(snapshot.state, skadi, feibi), panel);
   canvas_.setTextSize(2);
   canvas_.setTextDatum(middle_left);
   const String status_text = stateLabel(snapshot.state);
-  canvas_.drawString(status_text, 62, skadi ? 42 : 36);
+  canvas_.drawString(status_text, 62, skadi || feibi ? 42 : 36);
   const auto status_width = canvas_.textWidth(status_text);
   canvas_.setTextColor(muted, panel);
   canvas_.setTextSize(1);
@@ -1327,6 +1462,25 @@ void Tab5Ui::drawStatus(
       canvas_.fillTriangle(1140, 25, 1131, 38, 1140, 38, kSkadiPearl);
       canvas_.fillTriangle(1131, 38, 1141, 38, 1132, 51, kSkadiPearl);
     }
+  } else if (feibi) {
+    canvas_.drawRoundRect(1148, 22, 76, 28, 10, kFeibiCream);
+    canvas_.fillCircle(1226, 36, 5, kFeibiCream);
+    const auto lit = static_cast<std::uint8_t>((battery + 19) / 20);
+    for (std::uint8_t index = 0; index < 5; ++index) {
+      canvas_.fillRoundRect(
+          1154 + index * 13,
+          28,
+          9,
+          16,
+          index % 2 == 0 ? 5 : 2,
+          index < lit
+              ? (snapshot.telemetry.charging ? kFeibiRose : kFeibiGold)
+              : kFeibiPanelLight);
+    }
+    if (snapshot.telemetry.charging) {
+      canvas_.fillTriangle(1138, 24, 1129, 38, 1139, 38, kFeibiCream);
+      canvas_.fillTriangle(1129, 38, 1139, 38, 1131, 52, kFeibiCream);
+    }
   } else {
     canvas_.drawRoundRect(1178, 25, 42, 22, 4, muted);
     canvas_.fillRect(1220, 31, 4, 10, muted);
@@ -1347,22 +1501,34 @@ void Tab5Ui::drawStatus(
 void Tab5Ui::drawQuota(const Snapshot& snapshot) {
   constexpr Rect panel{448, 88, 390, 130};
   const auto skadi = isSkadiTheme(snapshot);
-  const auto background = skadi ? kSkadiPanel : kPanel;
-  const auto raised = skadi ? kSkadiPanelLight : kPanelLight;
-  const auto text = skadi ? kSkadiText : kText;
-  const auto muted = skadi ? kSkadiMuted : kMuted;
-  const auto accent = skadi ? kSkadiIce : kBlue;
+  const auto feibi = isFeibiTheme(snapshot);
+  const auto background =
+      feibi ? kFeibiPanel : skadi ? kSkadiPanel : kPanel;
+  const auto raised =
+      feibi ? kFeibiPanelLight : skadi ? kSkadiPanelLight : kPanelLight;
+  const auto text = feibi ? kFeibiText : skadi ? kSkadiText : kText;
+  const auto muted = feibi ? kFeibiMuted : skadi ? kSkadiMuted : kMuted;
+  const auto accent = feibi ? kFeibiGold : skadi ? kSkadiIce : kBlue;
   canvas_.fillRoundRect(
       panel.x, panel.y, panel.width, panel.height, 16, background);
   if (skadi) {
     canvas_.drawRoundRect(
         panel.x, panel.y, panel.width, panel.height, 16, kSkadiBlue);
     canvas_.fillTriangle(448, 88, 482, 88, 448, 122, kSkadiCoral);
+  } else if (feibi) {
+    canvas_.drawRoundRect(
+        panel.x, panel.y, panel.width, panel.height, 20, kFeibiBorder);
+    canvas_.fillCircle(470, 108, 8, kFeibiRose);
+    canvas_.drawLine(458, 108, 482, 108, kFeibiGold);
+    canvas_.drawLine(470, 96, 470, 120, kFeibiGold);
   }
   canvas_.setTextDatum(top_left);
   canvas_.setTextColor(muted, background);
   canvas_.setTextSize(1);
-  canvas_.drawString(skadi ? "潮汐额度 · WEEK" : "本周额度", 470, 106);
+  canvas_.drawString(
+      feibi ? "星愿额度 · WEEK" : skadi ? "潮汐额度 · WEEK" : "本周额度",
+      feibi ? 490 : 470,
+      106);
   const auto used = snapshot.quota.available ? snapshot.quota.used_percent : 0;
   const auto remaining = snapshot.quota.available ? 100 - used : 0;
   canvas_.setTextColor(
@@ -1408,10 +1574,16 @@ void Tab5Ui::drawQuota(const Snapshot& snapshot) {
       340 * used / 100,
       6,
       3,
-      used >= 90 ? (skadi ? kSkadiCoral : kRed) : accent);
+      used >= 90
+          ? (feibi ? kFeibiRose : skadi ? kSkadiCoral : kRed)
+          : accent);
   if (skadi) {
     for (std::int16_t x = 482; x < 808; x += 42) {
       canvas_.fillCircle(x, 203, 2, kSkadiPearl);
+    }
+  } else if (feibi) {
+    for (std::int16_t x = 482; x < 808; x += 42) {
+      canvas_.fillCircle(x, 203, 2, kFeibiCream);
     }
   }
 }
@@ -1419,9 +1591,11 @@ void Tab5Ui::drawQuota(const Snapshot& snapshot) {
 void Tab5Ui::drawTokenSummary(const Snapshot& snapshot) {
   constexpr Rect panel{854, 88, 402, 130};
   const auto skadi = isSkadiTheme(snapshot);
-  const auto background = skadi ? kSkadiPanel : kPanel;
-  const auto text = skadi ? kSkadiText : kText;
-  const auto muted = skadi ? kSkadiMuted : kMuted;
+  const auto feibi = isFeibiTheme(snapshot);
+  const auto background =
+      feibi ? kFeibiPanel : skadi ? kSkadiPanel : kPanel;
+  const auto text = feibi ? kFeibiText : skadi ? kSkadiText : kText;
+  const auto muted = feibi ? kFeibiMuted : skadi ? kSkadiMuted : kMuted;
   canvas_.fillRoundRect(
       panel.x, panel.y, panel.width, panel.height, 16, background);
   if (skadi) {
@@ -1431,11 +1605,22 @@ void Tab5Ui::drawTokenSummary(const Snapshot& snapshot) {
     canvas_.drawCircle(1222, 182, 14, kSkadiIce);
     canvas_.drawLine(1213, 182, 1231, 182, kSkadiIce);
     canvas_.drawLine(1222, 173, 1222, 191, kSkadiIce);
+  } else if (feibi) {
+    canvas_.drawRoundRect(
+        panel.x, panel.y, panel.width, panel.height, 20, kFeibiBorder);
+    canvas_.fillTriangle(1256, 88, 1222, 88, 1256, 122, kFeibiRose);
+    canvas_.drawLine(1208, 182, 1236, 182, kFeibiGold);
+    canvas_.drawLine(1222, 168, 1222, 196, kFeibiGold);
+    canvas_.fillCircle(1222, 182, 5, kFeibiCream);
   }
   canvas_.setTextDatum(top_left);
   canvas_.setTextColor(muted, background);
   canvas_.setTextSize(1);
-  canvas_.drawString(skadi ? "PRT TOKEN · MEMORY" : "TOKEN", 876, 106);
+  canvas_.drawString(
+      feibi ? "RIBBON TOKEN · MEMORY"
+            : skadi ? "PRT TOKEN · MEMORY" : "TOKEN",
+      876,
+      106);
   const auto task_tokens = snapshot.tokens.total;
   canvas_.setTextColor(text, background);
   canvas_.setTextSize(2);
@@ -1460,32 +1645,45 @@ void Tab5Ui::drawTaskList(
     const std::uint64_t now_ms) {
   constexpr Rect panel{448, 234, 808, 462};
   const auto skadi = isSkadiTheme(snapshot);
-  const auto background = skadi ? kSkadiPanel : kPanel;
-  const auto raised = skadi ? kSkadiPanelLight : kPanelLight;
-  const auto text = skadi ? kSkadiText : kText;
-  const auto muted = skadi ? kSkadiMuted : kMuted;
-  const auto project_accent = skadi ? kSkadiIce : kBlue;
-  const auto conversation_accent = skadi ? kSkadiCoral : kGreen;
+  const auto feibi = isFeibiTheme(snapshot);
+  const auto background =
+      feibi ? kFeibiPanel : skadi ? kSkadiPanel : kPanel;
+  const auto raised =
+      feibi ? kFeibiPanelLight : skadi ? kSkadiPanelLight : kPanelLight;
+  const auto text = feibi ? kFeibiText : skadi ? kSkadiText : kText;
+  const auto muted = feibi ? kFeibiMuted : skadi ? kSkadiMuted : kMuted;
+  const auto project_accent =
+      feibi ? kFeibiGold : skadi ? kSkadiIce : kBlue;
+  const auto conversation_accent =
+      feibi ? kFeibiRose : skadi ? kSkadiCoral : kGreen;
   canvas_.fillRoundRect(
       panel.x, panel.y, panel.width, panel.height, 16, background);
   if (skadi) {
     canvas_.drawRoundRect(
         panel.x, panel.y, panel.width, panel.height, 16, kSkadiBlue);
     canvas_.drawLine(468, 276, 1228, 276, kSkadiPanelLight);
+  } else if (feibi) {
+    canvas_.drawRoundRect(
+        panel.x, panel.y, panel.width, panel.height, 20, kFeibiBorder);
+    canvas_.drawLine(468, 276, 1228, 276, kFeibiPanelLight);
+    canvas_.fillTriangle(448, 234, 486, 234, 448, 272, kFeibiRose);
   }
   canvas_.setTextDatum(top_left);
   canvas_.setTextColor(text, background);
   canvas_.setTextSize(1);
-  canvas_.drawString(skadi ? "任务海域" : "任务", 470, 252);
+  canvas_.drawString(
+      feibi ? "菲比手账" : skadi ? "任务海域" : "任务",
+      470,
+      252);
   canvas_.setTextColor(project_accent, background);
   canvas_.drawString(
       String(snapshot.task_counts.active) + " 个进行中",
-      skadi ? 560 : 536,
+      skadi || feibi ? 560 : 536,
       252);
   canvas_.setTextDatum(top_right);
   canvas_.setTextColor(muted, background);
   canvas_.drawString(
-      (skadi ? "潮汐记录 " : "显示 ") +
+      (feibi ? "星光记录 " : skadi ? "潮汐记录 " : "显示 ") +
           String(snapshot.task_counts.visible) + "/" +
           String(snapshot.task_counts.total),
       1218,
@@ -1502,7 +1700,11 @@ void Tab5Ui::drawTaskList(
     canvas_.setTextColor(muted, background);
     canvas_.setTextDatum(middle_center);
     canvas_.drawString(
-        skadi ? "海面安静 · 暂无任务与对话" : "暂无任务 · Bridge 已连接",
+        feibi
+            ? "手账空白 · 暂无项目与对话"
+            : skadi
+                ? "海面安静 · 暂无任务与对话"
+                : "暂无任务 · Bridge 已连接",
         840,
         476);
     canvas_.setTextDatum(top_left);
@@ -1526,16 +1728,18 @@ void Tab5Ui::drawTaskList(
     const auto row = static_cast<std::int16_t>(index - first_index);
     const auto y = kTaskListArea.y + row * kTaskRowHeight - pixel_offset;
     const auto project = task.kind == ThreadKind::Project;
-    const auto card = skadi
-        ? (project ? kSkadiCard : kSkadiPanelLight)
-        : (index % 2 == 0 ? kPanelLight : kPanel);
+    const auto card = feibi
+        ? (project ? kFeibiCard : kFeibiPanelLight)
+        : skadi
+            ? (project ? kSkadiCard : kSkadiPanelLight)
+            : (index % 2 == 0 ? kPanelLight : kPanel);
     const auto card_accent = project ? project_accent : conversation_accent;
     canvas_.fillRoundRect(
         464,
         y,
         758,
         64,
-        project ? 8 : 18,
+        project ? (feibi ? 10 : 8) : (feibi ? 24 : 18),
         card);
     if (project) {
       canvas_.fillRect(464, y + 8, 7, 48, card_accent);
@@ -1543,6 +1747,10 @@ void Tab5Ui::drawTaskList(
       canvas_.drawLine(481, y + 13, 486, y + 8, card_accent);
       canvas_.drawLine(486, y + 8, 494, y + 8, card_accent);
       canvas_.drawLine(494, y + 8, 498, y + 13, card_accent);
+      if (feibi) {
+        canvas_.fillTriangle(
+            1176, y, 1222, y, 1222, y + 28, kFeibiGold);
+      }
     } else {
       canvas_.fillRoundRect(476, y + 9, 24, 18, 7, card_accent);
       canvas_.fillTriangle(
@@ -1550,18 +1758,18 @@ void Tab5Ui::drawTaskList(
     }
     canvas_.fillRoundRect(
         508, y + 8, project ? 48 : 56, 20, 7,
-        skadi ? kSkadiPanel : card);
+        feibi ? kFeibiPanel : skadi ? kSkadiPanel : card);
     canvas_.setTextDatum(middle_center);
     canvas_.setTextColor(
         card_accent,
-        skadi ? kSkadiPanel : card);
+        feibi ? kFeibiPanel : skadi ? kSkadiPanel : card);
     canvas_.drawString(project ? "项目" : "对话", project ? 532 : 536, y + 18);
     canvas_.setTextDatum(top_left);
     canvas_.setTextColor(text, card);
     canvas_.setTextSize(1);
     drawTruncated(String(task.title.c_str()), 574, y + 8, 410);
     canvas_.setTextDatum(top_right);
-    canvas_.setTextColor(stateColor(task.state, skadi), card);
+    canvas_.setTextColor(stateColor(task.state, skadi, feibi), card);
     canvas_.drawString(shortStateLabel(task.state), 1202, y + 10);
     canvas_.setTextColor(muted, card);
     String recency = "--";
@@ -1616,21 +1824,26 @@ void Tab5Ui::drawTaskList(
         6,
         thumb_height,
         3,
-        skadi ? kSkadiIce : kBlue);
+        feibi ? kFeibiGold : skadi ? kSkadiIce : kBlue);
   }
 }
 
 void Tab5Ui::drawThreadDetail(const Snapshot& snapshot) {
   constexpr Rect panel{448, 88, 808, 608};
   const auto skadi = isSkadiTheme(snapshot);
-  const auto background = skadi ? kSkadiPanel : kPanel;
-  const auto raised = skadi ? kSkadiPanelLight : kPanelLight;
-  const auto text = skadi ? kSkadiText : kText;
-  const auto muted = skadi ? kSkadiMuted : kMuted;
+  const auto feibi = isFeibiTheme(snapshot);
+  const auto background =
+      feibi ? kFeibiPanel : skadi ? kSkadiPanel : kPanel;
+  const auto raised =
+      feibi ? kFeibiPanelLight : skadi ? kSkadiPanelLight : kPanelLight;
+  const auto text = feibi ? kFeibiText : skadi ? kSkadiText : kText;
+  const auto muted = feibi ? kFeibiMuted : skadi ? kSkadiMuted : kMuted;
   const auto project = thread_detail_.kind == ThreadKind::Project;
-  const auto accent = skadi
-      ? (project ? kSkadiIce : kSkadiCoral)
-      : (project ? kBlue : kGreen);
+  const auto accent = feibi
+      ? (project ? kFeibiGold : kFeibiRose)
+      : skadi
+          ? (project ? kSkadiIce : kSkadiCoral)
+          : (project ? kBlue : kGreen);
   canvas_.fillRoundRect(
       panel.x, panel.y, panel.width, panel.height, 16, background);
   canvas_.drawRoundRect(
@@ -1638,8 +1851,8 @@ void Tab5Ui::drawThreadDetail(const Snapshot& snapshot) {
       panel.y,
       panel.width,
       panel.height,
-      16,
-      skadi ? kSkadiBlue : raised);
+      feibi ? 20 : 16,
+      feibi ? kFeibiBorder : skadi ? kSkadiBlue : raised);
 
   canvas_.fillRoundRect(
       kThreadBackButton.x,
@@ -1657,7 +1870,9 @@ void Tab5Ui::drawThreadDetail(const Snapshot& snapshot) {
 
   canvas_.fillRoundRect(578, 106, project ? 58 : 66, 22, 8, accent);
   canvas_.setTextDatum(middle_center);
-  canvas_.setTextColor(skadi ? kSkadiBackground : kBackground, accent);
+  canvas_.setTextColor(
+      feibi ? kFeibiBackground : skadi ? kSkadiBackground : kBackground,
+      accent);
   canvas_.drawString(project ? "项目" : "对话", project ? 607 : 611, 117);
   canvas_.setTextDatum(top_left);
   canvas_.setTextColor(text, background);
@@ -1678,19 +1893,30 @@ void Tab5Ui::drawThreadDetail(const Snapshot& snapshot) {
       132,
       550);
   canvas_.drawLine(468, 158, 1234, 158, raised);
+  if (feibi && project) {
+    canvas_.fillTriangle(1192, 88, 1256, 88, 1256, 122, kFeibiGold);
+  } else if (feibi) {
+    canvas_.fillCircle(1222, 106, 12, kFeibiRose);
+    canvas_.fillTriangle(1213, 114, 1222, 114, 1213, 124, kFeibiRose);
+  }
   drawThreadMessages(snapshot);
 }
 
 void Tab5Ui::drawThreadMessages(const Snapshot& snapshot) {
   const auto skadi = isSkadiTheme(snapshot);
-  const auto background = skadi ? kSkadiPanel : kPanel;
-  const auto raised = skadi ? kSkadiPanelLight : kPanelLight;
-  const auto text = skadi ? kSkadiText : kText;
-  const auto muted = skadi ? kSkadiMuted : kMuted;
+  const auto feibi = isFeibiTheme(snapshot);
+  const auto background =
+      feibi ? kFeibiPanel : skadi ? kSkadiPanel : kPanel;
+  const auto raised =
+      feibi ? kFeibiPanelLight : skadi ? kSkadiPanelLight : kPanelLight;
+  const auto text = feibi ? kFeibiText : skadi ? kSkadiText : kText;
+  const auto muted = feibi ? kFeibiMuted : skadi ? kSkadiMuted : kMuted;
   const auto project = thread_detail_.kind == ThreadKind::Project;
-  const auto accent = skadi
-      ? (project ? kSkadiIce : kSkadiCoral)
-      : (project ? kBlue : kGreen);
+  const auto accent = feibi
+      ? (project ? kFeibiGold : kFeibiRose)
+      : skadi
+          ? (project ? kSkadiIce : kSkadiCoral)
+          : (project ? kBlue : kGreen);
   canvas_.fillRect(464, 170, 780, 500, background);
   if (thread_detail_.loading) {
     canvas_.setTextDatum(middle_center);
@@ -1698,7 +1924,9 @@ void Tab5Ui::drawThreadMessages(const Snapshot& snapshot) {
     canvas_.drawCircle(840, 370, 28, accent);
     canvas_.drawArc(840, 370, 28, 24, 310, 80, text);
     canvas_.drawString(
-        skadi ? "正在潜入会话海域…" : "正在读取会话…",
+        feibi
+            ? "正在翻开菲比手账…"
+            : skadi ? "正在潜入会话海域…" : "正在读取会话…",
         840,
         426);
     canvas_.setTextDatum(top_left);
@@ -1706,7 +1934,9 @@ void Tab5Ui::drawThreadMessages(const Snapshot& snapshot) {
   }
   if (!thread_detail_.error.empty()) {
     canvas_.setTextDatum(middle_center);
-    canvas_.setTextColor(skadi ? kSkadiCoral : kRed, background);
+    canvas_.setTextColor(
+        feibi ? kFeibiRose : skadi ? kSkadiCoral : kRed,
+        background);
     canvas_.drawString("会话读取失败", 840, 344);
     canvas_.setTextColor(muted, background);
     drawWrapped(
@@ -1755,25 +1985,29 @@ void Tab5Ui::drawThreadMessages(const Snapshot& snapshot) {
     const auto user = message.role == ConversationRole::User;
     const auto bubble_x = static_cast<std::int16_t>(user ? 626 : 476);
     const auto bubble_width = static_cast<std::int16_t>(user ? 590 : 650);
-    const auto bubble = skadi
-        ? (user ? kSkadiCard : kSkadiPanelLight)
-        : (user ? kPanelLight : kPanel);
-    const auto bubble_accent = skadi
-        ? (user ? kSkadiIce : kSkadiLavender)
-        : (user ? kBlue : kGreen);
+    const auto bubble = feibi
+        ? (user ? kFeibiCard : kFeibiPanelLight)
+        : skadi
+            ? (user ? kSkadiCard : kSkadiPanelLight)
+            : (user ? kPanelLight : kPanel);
+    const auto bubble_accent = feibi
+        ? (user ? kFeibiGold : kFeibiRose)
+        : skadi
+            ? (user ? kSkadiIce : kSkadiLavender)
+            : (user ? kBlue : kGreen);
     canvas_.fillRoundRect(
         bubble_x,
         y + 5,
         bubble_width,
         112,
-        user ? 18 : 10,
+        feibi ? (user ? 22 : 14) : user ? 18 : 10,
         bubble);
     canvas_.drawRoundRect(
         bubble_x,
         y + 5,
         bubble_width,
         112,
-        user ? 18 : 10,
+        feibi ? (user ? 22 : 14) : user ? 18 : 10,
         bubble_accent);
     if (user) {
       canvas_.fillTriangle(
@@ -1795,7 +2029,14 @@ void Tab5Ui::drawThreadMessages(const Snapshot& snapshot) {
           bubble_accent);
     }
     canvas_.setTextColor(bubble_accent, bubble);
-    canvas_.drawString(user ? "YOU // 指挥官" : "SKADI // CODEX", bubble_x + 16, y + 14);
+    canvas_.drawString(
+        user
+            ? "YOU // 指挥官"
+            : feibi
+                ? "FEIBI // CODEX"
+                : skadi ? "SKADI // CODEX" : "CODEX // 助手",
+        bubble_x + 16,
+        y + 14);
     canvas_.setTextColor(text, bubble);
     drawWrapped(
         String(message.text.c_str()),
@@ -1846,12 +2087,25 @@ void Tab5Ui::pushCanvasRegion(const Rect& bounds) {
   M5.Display.endWrite();
 }
 
-void Tab5Ui::drawChevron(const Rect& bounds, const bool points_right) {
+void Tab5Ui::drawChevron(
+    const Rect& bounds,
+    const bool points_right,
+    const std::uint16_t color) {
   const auto cx = bounds.x + bounds.width / 2;
   const auto cy = bounds.y + bounds.height / 2;
   const auto direction = points_right ? 1 : -1;
-  canvas_.drawLine(cx - 8 * direction, cy - 11, cx + 6 * direction, cy, kText);
-  canvas_.drawLine(cx + 6 * direction, cy, cx - 8 * direction, cy + 11, kText);
+  canvas_.drawLine(
+      cx - 8 * direction,
+      cy - 11,
+      cx + 6 * direction,
+      cy,
+      color);
+  canvas_.drawLine(
+      cx + 6 * direction,
+      cy,
+      cx - 8 * direction,
+      cy + 11,
+      color);
 }
 
 std::uint64_t Tab5Ui::currentUnixSeconds(
