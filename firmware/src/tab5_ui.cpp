@@ -44,6 +44,8 @@ constexpr std::int16_t kTouchMoveThreshold = 14;
 constexpr std::int16_t kRegionChunkRows = 64;
 constexpr std::int16_t kRegionBufferWidth = 808;
 constexpr std::uint64_t kTaskScrollFrameIntervalMs = 33;
+constexpr std::uint64_t kPetButtonReleaseGuardMs = 120;
+constexpr std::uint8_t kPetAnimationRowFrames = 8;
 constexpr std::uint16_t kBundledPetWidth = 192;
 constexpr std::uint16_t kBundledPetHeight = 208;
 constexpr std::size_t kBundledPetPixels =
@@ -243,6 +245,9 @@ bool Tab5Ui::begin(
   if (frame_pixels_ == nullptr) {
     frame_pixels_ = static_cast<std::uint16_t*>(malloc(kPetFrameBytes));
   }
+  animation_row_pixels_ = static_cast<std::uint16_t*>(heap_caps_malloc(
+      static_cast<std::size_t>(kPetFrameBytes) * kPetAnimationRowFrames,
+      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   const auto region_bytes =
       static_cast<std::size_t>(kRegionBufferWidth) *
       kRegionChunkRows *
@@ -255,7 +260,9 @@ bool Tab5Ui::begin(
   M5.Display.setBrightness(128);
   M5.Speaker.setVolume(48);
   bundled_pet_ready_ = SPIFFS.begin(false);
-  return frame_pixels_ != nullptr && region_pixels_ != nullptr;
+  return frame_pixels_ != nullptr &&
+      animation_row_pixels_ != nullptr &&
+      region_pixels_ != nullptr;
 }
 
 UiAction Tab5Ui::poll(
@@ -293,7 +300,7 @@ void Tab5Ui::render(
     if (normal_screen_rendered_ && fingerprint == rendered_fingerprint_) {
       if (!snapshot.approval.present &&
           !snapshot.companion.awaitingConfirmation() &&
-          !task_touch_active_) {
+          !touch_active_) {
         const auto frame_index = frameIndex(snapshot, now_ms);
         if (frame_index != rendered_pet_frame_index_) {
           const auto pet_background =
@@ -332,8 +339,8 @@ void Tab5Ui::render(
               !task_touch_active_ ||
               now_ms - last_task_scroll_render_at_ms_ >=
                   kTaskScrollFrameIntervalMs)) {
-        drawThreadDetail(snapshot);
-        pushCanvasRegion({448, 88, 808, 608});
+        drawThreadMessages(snapshot);
+        pushCanvasRegion({464, 170, 780, 500});
         rendered_detail_scroll_pixels_ = detail_scroll_pixels_;
         last_task_scroll_render_at_ms_ = now_ms;
       }
@@ -435,8 +442,13 @@ void Tab5Ui::closeThread() {
   rendered_detail_scroll_pixels_ = -1;
   task_touch_active_ = false;
   task_touch_moved_ = false;
-  thread_back_touch_active_ = false;
   normal_screen_rendered_ = false;
+}
+
+void Tab5Ui::invalidatePetCache() {
+  cached_pet_id_ = "";
+  cached_animation_row_ = UINT8_MAX;
+  animation_row_ready_ = false;
 }
 
 UiAction Tab5Ui::pollTouch(
@@ -479,9 +491,18 @@ UiAction Tab5Ui::pollTouch(
         snapshot.approval.present ||
         snapshot.companion.awaitingConfirmation();
     if (pet_button_release_blocked_) {
+      const auto blocked_button =
+          pet_button_blocked_action_ == UiActionType::PreviousPet
+              ? kPreviousPetButton.contains(point)
+              : kNextPetButton.contains(point);
+      if (blocked_button) {
+        pet_button_quiet_since_ms_ = 0;
+        input_.cancel();
+        return {};
+      }
+      pet_button_release_blocked_ = false;
+      pet_button_blocked_action_ = UiActionType::None;
       pet_button_quiet_since_ms_ = 0;
-      input_.cancel();
-      return {};
     }
     if (!confirmation_visible) {
       if (
@@ -494,31 +515,27 @@ UiAction Tab5Ui::pollTouch(
             kPreviousPetButton.contains(point)
                 ? UiActionType::PreviousPet
                 : UiActionType::NextPet;
-        return {};
+        return {pet_button_touch_action_, {}};
       }
       if (pet_button_touch_active_) {
         if (!released) return {};
         const auto action = pet_button_touch_action_;
-        const auto same_button =
-            action == UiActionType::PreviousPet
-                ? kPreviousPetButton.contains(point)
-                : kNextPetButton.contains(point);
         pet_button_touch_active_ = false;
         pet_button_touch_action_ = UiActionType::None;
         pet_button_release_blocked_ = true;
+        pet_button_blocked_action_ = action;
         pet_button_quiet_since_ms_ = 0;
         input_.cancel();
-        return same_button ? UiAction{action, {}} : UiAction{};
+        return {};
       }
       if (pressed && kCameraButton.contains(point)) {
         input_.cancel();
         camera_touch_active_ = true;
-        return {};
+        return {UiActionType::CameraCapture, {}};
       }
       if (camera_touch_active_) {
         if (released) {
           camera_touch_active_ = false;
-          return {UiActionType::CameraCapture, {}};
         }
         return {};
       }
@@ -543,16 +560,11 @@ UiAction Tab5Ui::pollTouch(
         return {};
       }
       if (thread_detail_.visible) {
-        if (pressed && kThreadBackButton.contains(point)) {
+        if (pressed && kThreadBackTouchArea.contains(point)) {
           input_.cancel();
-          thread_back_touch_active_ = true;
-          return {};
-        }
-        if (thread_back_touch_active_) {
-          if (!released) return {};
-          const auto close = kThreadBackButton.contains(point);
-          thread_back_touch_active_ = false;
-          return close ? UiAction{UiActionType::CloseThread, {}} : UiAction{};
+          task_touch_active_ = false;
+          task_touch_moved_ = false;
+          return {UiActionType::CloseThread, {}};
         }
         const auto maximum_scroll = std::max<std::int32_t>(
             0,
@@ -632,44 +644,29 @@ UiAction Tab5Ui::pollTouch(
     }
     const auto safe = snapshot.companion.awaitingConfirmation() ||
         approvalCanAccept(snapshot.approval);
-    if (released && !confirmation_visible) {
-      if (kPreviousPetButton.contains(point)) {
-        input_.cancel();
-        pet_button_release_blocked_ = true;
-        pet_button_quiet_since_ms_ = 0;
-        return {UiActionType::PreviousPet, {}};
-      }
-      if (kNextPetButton.contains(point)) {
-        input_.cancel();
-        pet_button_release_blocked_ = true;
-        pet_button_quiet_since_ms_ = 0;
-        return {UiActionType::NextPet, {}};
-      }
-    }
     return mapInputAction(input_.onTouch(
         phase, point, now_ms, confirmation_visible, safe));
   }
   if (pet_button_touch_active_) {
     const auto action = pet_button_touch_action_;
-    const auto same_button =
-        action == UiActionType::PreviousPet
-            ? kPreviousPetButton.contains(last_touch_)
-            : kNextPetButton.contains(last_touch_);
     pet_button_touch_active_ = false;
     pet_button_touch_action_ = UiActionType::None;
     pet_button_release_blocked_ = true;
+    pet_button_blocked_action_ = action;
     pet_button_quiet_since_ms_ = 0;
     touch_active_ = false;
     input_.cancel();
-    return paired && same_button ? UiAction{action, {}} : UiAction{};
+    return {};
   }
   if (pet_button_release_blocked_) {
     if (pet_button_quiet_since_ms_ == 0) {
       pet_button_quiet_since_ms_ = now_ms;
     } else if (
         now_ms >= pet_button_quiet_since_ms_ &&
-        now_ms - pet_button_quiet_since_ms_ >= 300) {
+        now_ms - pet_button_quiet_since_ms_ >=
+            kPetButtonReleaseGuardMs) {
       pet_button_release_blocked_ = false;
+      pet_button_blocked_action_ = UiActionType::None;
       pet_button_quiet_since_ms_ = 0;
     }
     return {};
@@ -679,11 +676,6 @@ UiAction Tab5Ui::pollTouch(
   if (!paired) {
     pairing_released_at_ = now_ms;
     return {};
-  }
-  if (thread_back_touch_active_) {
-    const auto close = paired && kThreadBackButton.contains(last_touch_);
-    thread_back_touch_active_ = false;
-    return close ? UiAction{UiActionType::CloseThread, {}} : UiAction{};
   }
   if (task_touch_active_) {
     const auto was_moved = task_touch_moved_;
@@ -713,27 +705,13 @@ UiAction Tab5Ui::pollTouch(
   }
   if (camera_touch_active_) {
     camera_touch_active_ = false;
-    return {UiActionType::CameraCapture, {}};
+    return {};
   }
   const auto confirmation_visible =
       snapshot.approval.present ||
       snapshot.companion.awaitingConfirmation();
   const auto safe = snapshot.companion.awaitingConfirmation() ||
       approvalCanAccept(snapshot.approval);
-  if (!confirmation_visible) {
-    if (kPreviousPetButton.contains(last_touch_)) {
-      input_.cancel();
-      pet_button_release_blocked_ = true;
-      pet_button_quiet_since_ms_ = 0;
-      return {UiActionType::PreviousPet, {}};
-    }
-    if (kNextPetButton.contains(last_touch_)) {
-      input_.cancel();
-      pet_button_release_blocked_ = true;
-      pet_button_quiet_since_ms_ = 0;
-      return {UiActionType::NextPet, {}};
-    }
-  }
   return mapInputAction(input_.onTouch(
       TouchPhase::Released,
       last_touch_,
@@ -985,17 +963,8 @@ void Tab5Ui::drawPet(const Snapshot& snapshot, const std::uint64_t now_ms) {
 void Tab5Ui::drawPetFrame(
     const Snapshot& snapshot,
     const std::uint8_t index) {
-  String error;
-  const auto custom = snapshot.selected_pet_id != "codex-core" && pet_store_ != nullptr &&
-      pet_store_->loadFrame(
-          snapshot.selected_pet_id.c_str(), index, frame_pixels_,
-          static_cast<std::size_t>(kPetFrameWidth) * kPetFrameHeight, error);
-  auto drawn = custom;
-  if (drawn) {
-    canvas_.setSwapBytes(true);
-    canvas_.pushImage(36, 108, kPetFrameWidth, kPetFrameHeight, frame_pixels_, kPetTransparentColor);
-    canvas_.setSwapBytes(false);
-  } else if (
+  auto drawn = drawCachedPetFrame(snapshot, index);
+  if (!drawn &&
       snapshot.selected_pet_id == "chibi-skadi" &&
       drawBundledPet(index)) {
     drawn = true;
@@ -1003,6 +972,48 @@ void Tab5Ui::drawPetFrame(
   if (!drawn) {
     drawFallbackPet(snapshot.animation, index % 8);
   }
+}
+
+bool Tab5Ui::drawCachedPetFrame(
+    const Snapshot& snapshot,
+    const std::uint8_t frame_index) {
+  if (snapshot.selected_pet_id == "codex-core" || pet_store_ == nullptr) {
+    return false;
+  }
+  const auto row = static_cast<std::uint8_t>(
+      frame_index / kPetAnimationRowFrames);
+  if (cached_pet_id_ != snapshot.selected_pet_id.c_str() ||
+      cached_animation_row_ != row) {
+    String error;
+    cached_pet_id_ = snapshot.selected_pet_id.c_str();
+    cached_animation_row_ = row;
+    animation_row_ready_ = pet_store_->loadFrames(
+        snapshot.selected_pet_id.c_str(),
+        static_cast<std::uint8_t>(row * kPetAnimationRowFrames),
+        kPetAnimationRowFrames,
+        animation_row_pixels_,
+        static_cast<std::size_t>(kPetFrameWidth) *
+            kPetFrameHeight *
+            kPetAnimationRowFrames,
+        error);
+  }
+  if (!animation_row_ready_) return false;
+  const auto frame_pixels =
+      static_cast<std::size_t>(kPetFrameWidth) * kPetFrameHeight;
+  const auto* pixels =
+      animation_row_pixels_ +
+      static_cast<std::size_t>(frame_index % kPetAnimationRowFrames) *
+          frame_pixels;
+  canvas_.setSwapBytes(true);
+  canvas_.pushImage(
+      kPetSpriteArea.x,
+      kPetSpriteArea.y,
+      kPetFrameWidth,
+      kPetFrameHeight,
+      pixels,
+      kPetTransparentColor);
+  canvas_.setSwapBytes(false);
+  return true;
 }
 
 bool Tab5Ui::drawBundledPet(const std::uint8_t frame_index) {
@@ -1667,7 +1678,20 @@ void Tab5Ui::drawThreadDetail(const Snapshot& snapshot) {
       132,
       550);
   canvas_.drawLine(468, 158, 1234, 158, raised);
+  drawThreadMessages(snapshot);
+}
 
+void Tab5Ui::drawThreadMessages(const Snapshot& snapshot) {
+  const auto skadi = isSkadiTheme(snapshot);
+  const auto background = skadi ? kSkadiPanel : kPanel;
+  const auto raised = skadi ? kSkadiPanelLight : kPanelLight;
+  const auto text = skadi ? kSkadiText : kText;
+  const auto muted = skadi ? kSkadiMuted : kMuted;
+  const auto project = thread_detail_.kind == ThreadKind::Project;
+  const auto accent = skadi
+      ? (project ? kSkadiIce : kSkadiCoral)
+      : (project ? kBlue : kGreen);
+  canvas_.fillRect(464, 170, 780, 500, background);
   if (thread_detail_.loading) {
     canvas_.setTextDatum(middle_center);
     canvas_.setTextColor(accent, background);

@@ -48,6 +48,7 @@ class Tab5Ui {
   void setThreadDetail(const ThreadDetail& detail);
   void setThreadError(const String& thread_id, const String& error);
   void closeThread();
+  void invalidatePetCache();
 
  private:
   UiAction pollTouch(const Snapshot& snapshot, std::uint64_t now_ms, bool paired);
@@ -62,6 +63,9 @@ class Tab5Ui {
   void drawPairing(const String& connection_detail);
   void drawPet(const Snapshot& snapshot, std::uint64_t now_ms);
   void drawPetFrame(const Snapshot& snapshot, std::uint8_t frame_index);
+  bool drawCachedPetFrame(
+      const Snapshot& snapshot,
+      std::uint8_t frame_index);
   bool drawBundledPet(std::uint8_t frame_index);
   void drawFallbackPet(Animation animation, std::uint8_t frame);
   void drawApproval(const Approval& approval);
@@ -74,6 +78,7 @@ class Tab5Ui {
   void drawTokenSummary(const Snapshot& snapshot);
   void drawTaskList(const Snapshot& snapshot, std::uint64_t now_ms);
   void drawThreadDetail(const Snapshot& snapshot);
+  void drawThreadMessages(const Snapshot& snapshot);
   void drawSkadiBackdrop();
   void pushCanvasRegion(const Rect& bounds);
   void drawChevron(const Rect& bounds, bool points_right);
@@ -101,6 +106,7 @@ class Tab5Ui {
   static constexpr Rect kCameraButton{272, 626, 72, 56};
   static constexpr Rect kTaskListArea{464, 288, 758, 390};
   static constexpr Rect kThreadBackButton{468, 104, 92, 46};
+  static constexpr Rect kThreadBackTouchArea{448, 88, 136, 82};
   static constexpr Rect kThreadDetailArea{464, 170, 758, 500};
   static constexpr Rect kDeclineButton{540, 554, 292, 104};
   static constexpr Rect kAcceptButton{864, 554, 356, 104};
@@ -115,6 +121,7 @@ class Tab5Ui {
   PetStore* pet_store_ = nullptr;
   M5Canvas canvas_{&M5.Display};
   std::uint16_t* frame_pixels_ = nullptr;
+  std::uint16_t* animation_row_pixels_ = nullptr;
   std::uint16_t* region_pixels_ = nullptr;
   std::vector<std::uint8_t> bundled_pet_buffer_;
   std::vector<std::uint8_t> bundled_pet_compressed_buffer_;
@@ -126,10 +133,10 @@ class Tab5Ui {
   bool touch_active_ = false;
   bool task_touch_active_ = false;
   bool task_touch_moved_ = false;
-  bool thread_back_touch_active_ = false;
   bool pet_button_touch_active_ = false;
   bool pet_button_release_blocked_ = false;
   UiActionType pet_button_touch_action_ = UiActionType::None;
+  UiActionType pet_button_blocked_action_ = UiActionType::None;
   std::uint64_t pet_button_quiet_since_ms_ = 0;
   bool voice_touch_active_ = false;
   bool camera_touch_active_ = false;
@@ -150,6 +157,9 @@ class Tab5Ui {
   String pairing_code_;
   String device_id_;
   String setup_code_;
+  String cached_pet_id_;
+  std::uint8_t cached_animation_row_ = UINT8_MAX;
+  bool animation_row_ready_ = false;
   float look_degrees_ = 0.0F;
   std::uint64_t look_until_ = 0;
   std::uint64_t rendered_fingerprint_ = 0;

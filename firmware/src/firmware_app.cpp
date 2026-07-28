@@ -106,7 +106,9 @@ void FirmwareApp::setup() {
   configureProtocol(usb_client_);
   configureProtocol(wifi_client_);
   configureProtocol(ble_client_);
-  connection_detail_ = paired() ? "等待电脑 Bridge" : "请通过USB连接电脑并输入配对码";
+  connection_detail_ = paired()
+      ? "等待电脑 Bridge（USB、Wi-Fi 或蓝牙）"
+      : "请通过USB连接电脑并输入配对码";
 }
 
 void FirmwareApp::loop() {
@@ -265,6 +267,7 @@ void FirmwareApp::handleProtocolEvent(
       return;
     }
     if (type == "resource.commit") {
+      ui_.invalidatePetCache();
       requested_pet_ = payload["petId"] | "";
       requested_at_ = static_cast<std::uint64_t>(millis());
       connection_detail_ = "Pet已安装";
@@ -417,8 +420,10 @@ void FirmwareApp::handleUiAction(const UiAction& action) {
       }
       ui_.setThreadLoading(*task);
       if (client == nullptr) {
-        ui_.setThreadError(action.value, "需要连接电脑才能读取对话");
-        connection_detail_ = "会话详情需要连接电脑";
+        ui_.setThreadError(
+            action.value,
+            "需要电脑 Bridge 在线；USB、Wi-Fi 或蓝牙均可");
+        connection_detail_ = "等待电脑 Bridge；无需 USB 线";
       } else if (!client->sendThreadOpen(action.value)) {
         ui_.setThreadError(action.value, "发送详情请求失败");
         connection_detail_ = "会话详情请求失败";

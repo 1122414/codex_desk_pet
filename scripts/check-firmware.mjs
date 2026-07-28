@@ -80,12 +80,17 @@ try {
   if (
     !tab5Ui.includes("pet_button_touch_active_") ||
     !tab5Ui.includes("pet_button_release_blocked_") ||
+    !tab5Ui.includes("pet_button_blocked_action_") ||
     !tab5Ui.includes("pet_button_quiet_since_ms_") ||
-    !tab5Ui.includes(
-      "now_ms - pet_button_quiet_since_ms_ >= 300",
-    )
+    !tab5Ui.includes("kPetButtonReleaseGuardMs = 120")
   ) {
-    throw new Error("Tab5 宠物切换键必须锁定一次触摸，避免释放事件重复切换");
+    throw new Error("Tab5 宠物切换键必须只隔离同一按键的释放，不能全局吞触摸");
+  }
+  if (
+    !tab5Ui.includes("kThreadBackTouchArea.contains(point)") ||
+    !tab5Ui.includes("return {UiActionType::CloseThread, {}};")
+  ) {
+    throw new Error("Tab5 会话返回必须使用扩大命中区并在按下时立即执行");
   }
   if (
     !tab5Ui.includes(
@@ -96,15 +101,17 @@ try {
   }
   if (
     !tab5Ui.includes("frame_index != rendered_pet_frame_index_") ||
-    !tab5Ui.includes("pushCanvasRegion(kPetSpriteArea)")
+    !tab5Ui.includes("pushCanvasRegion(kPetSpriteArea)") ||
+    !tab5Ui.includes("pet_store_->loadFrames(")
   ) {
-    throw new Error("Tab5 动画帧必须局部提交，不能被静态界面缓存跳过");
+    throw new Error("Tab5 动画必须缓存整行动画帧并局部提交，不能逐帧读取 SD");
   }
   if (
     !tab5Ui.includes("kTaskScrollFrameIntervalMs = 33") ||
-    !tab5Ui.includes("pushCanvasRegion({464, 288, 780, 390})")
+    !tab5Ui.includes("pushCanvasRegion({464, 288, 780, 390})") ||
+    !tab5Ui.includes("pushCanvasRegion({464, 170, 780, 500})")
   ) {
-    throw new Error("Tab5 任务滚动必须以约 30 FPS 局部提交，不能重绘整屏");
+    throw new Error("Tab5 任务与会话滚动必须以约 30 FPS 局部提交，不能重绘标题");
   }
   if (!tab5Ui.includes("drawTruncated(detail, detail_x, 28, 872 - detail_x)")) {
     throw new Error("Tab5 顶部任务详情必须按剩余宽度截断，不能覆盖时钟");

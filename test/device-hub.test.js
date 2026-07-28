@@ -172,7 +172,7 @@ test("Wi-Fi provisioning is sent only through an authenticated USB session", asy
   }), /Wi-Fi 配置无效/);
 });
 
-test("an authenticated device can request a bounded thread conversation", async (t) => {
+test("an authenticated BLE device can request a bounded thread conversation without USB", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "codex-desk-hub-thread-"));
   const credentials = new DeviceCredentialRepository(path.join(root, "devices.json"));
   await credentials.pair({ deviceId: "tab5-thread-1", secret: "c".repeat(64) });
@@ -203,6 +203,8 @@ test("an authenticated device can request a bounded thread conversation", async 
   t.after(() => hub.close());
 
   const transports = createMemoryTransportPair({ kind: "ble" });
+  assert.equal(transports.left.kind, "ble");
+  assert.equal(transports.right.kind, "ble");
   const bridgeSession = hub.attachTransport(transports.left);
   const device = new DeviceSession({
     role: "device",
@@ -225,6 +227,10 @@ test("an authenticated device can request a bounded thread conversation", async 
   const detail = events.find(({ event }) => event === "thread.detail");
   assert.equal(detail.kind, "project");
   assert.deepEqual(detail.messages.map(({ role }) => role), ["user", "assistant"]);
+  assert.equal(
+    Buffer.byteLength(JSON.stringify(detail)) <= 8 * 1024,
+    true,
+  );
 });
 
 test("global command deduplication prevents dual-link duplicate approval execution", async (t) => {
