@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   FIRMWARE_FLASH_LAYOUT,
   createFirmwareManifest,
+  createFirmwareWritePlan,
   sha256,
   verifyFirmwareRelease,
 } from "../src/server/firmware-release.js";
@@ -78,5 +79,33 @@ test("Tab5 release places the ESP32-P4 bootloader at its ROM boot offset", () =>
   assert.deepEqual(
     { offset: bundledPet.offset, maximumBytes: bundledPet.maximumBytes },
     { offset: 0xf60000, maximumBytes: 0x090000 },
+  );
+});
+
+test("normal firmware updates preserve NVS while explicit erase uses the factory image", () => {
+  const components = FIRMWARE_FLASH_LAYOUT.map((layout) => ({
+    name: layout.name,
+    file: layout.file,
+    offset: layout.offset,
+    bytes: 1,
+    sha256: "a".repeat(64),
+  }));
+  const manifest = createFirmwareManifest({
+    components,
+    factoryImage: {
+      file: "factory.bin",
+      bytes: 1,
+      sha256: "b".repeat(64),
+    },
+  });
+  const updatePlan = createFirmwareWritePlan(manifest);
+  assert.deepEqual(
+    updatePlan.map(({ name, offset }) => ({ name, offset })),
+    FIRMWARE_FLASH_LAYOUT.map(({ name, offset }) => ({ name, offset })),
+  );
+  assert.ok(updatePlan.every(({ offset }) => offset < 0x9000 || offset >= 0xe000));
+  assert.deepEqual(
+    createFirmwareWritePlan(manifest, { erase: true }),
+    [{ name: "factory", file: "factory.bin", offset: 0 }],
   );
 });

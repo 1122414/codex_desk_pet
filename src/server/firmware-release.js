@@ -96,6 +96,22 @@ export function validateFirmwareManifest(manifest) {
   });
 }
 
+export function createFirmwareWritePlan(manifest, { erase = false } = {}) {
+  const validated = validateFirmwareManifest(manifest);
+  if (erase) {
+    return [{
+      name: "factory",
+      file: validated.factoryImage.file,
+      offset: 0,
+    }];
+  }
+  return validated.components.map(({ name, file, offset }) => ({
+    name,
+    file,
+    offset,
+  }));
+}
+
 async function verifyArtifact(directory, artifact) {
   if (!validArtifact(artifact)) throw new Error("Firmware artifact metadata is invalid");
   const root = path.resolve(directory);

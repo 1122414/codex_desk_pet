@@ -2,7 +2,10 @@ import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { verifyFirmwareRelease } from "../src/server/firmware-release.js";
+import {
+  createFirmwareWritePlan,
+  verifyFirmwareRelease,
+} from "../src/server/firmware-release.js";
 import { DEVICE_FIRMWARE_VERSION } from "../src/shared/device-protocol.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -64,6 +67,7 @@ function runEsptool(args) {
 }
 
 if (erase) runEsptool(["erase-flash"]);
+const writePlan = createFirmwareWritePlan(manifest, { erase });
 runEsptool([
   "--baud",
   "921600",
@@ -74,9 +78,13 @@ runEsptool([
   "80m",
   "--flash-size",
   "16MB",
-  "0x0",
-  path.join(releaseRoot, manifest.factoryImage.file),
+  ...writePlan.flatMap((item) => [
+    `0x${item.offset.toString(16)}`,
+    path.join(releaseRoot, item.file),
+  ]),
 ]);
 process.stdout.write(
-  `Tab5 已写入固件 ${manifest.firmwareVersion}；请等待设备重启并显示配对界面。\n`,
+  `Tab5 已写入固件 ${manifest.firmwareVersion}` +
+  `${erase ? "（已清除设备配置）" : "（已保留配对与网络配置）"}；` +
+  "请等待设备重启。\n",
 );
