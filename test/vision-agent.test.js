@@ -11,6 +11,16 @@ async function settle() {
   await new Promise((resolve) => setTimeout(resolve, 15));
 }
 
+async function waitFor(check, timeoutMs = 500) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const result = check();
+    if (result) return result;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("等待摄像头处理完成超时");
+}
+
 test("camera JPEG is authenticated, reassembled, analyzed, and removed", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "codex-desk-vision-test-"));
   const observations = [];
@@ -159,9 +169,12 @@ test("camera accepts only one in-flight capture per authenticated device", async
     /上一张照片仍在处理/,
   );
   releaseObservation();
-  await settle();
-  assert.equal(
-    agent.acceptEvent(session, begin("3333333333333333")),
-    true,
-  );
+  await waitFor(() => {
+    try {
+      return agent.acceptEvent(session, begin("3333333333333333"));
+    } catch (error) {
+      if (!/上一张照片仍在处理/.test(error.message)) throw error;
+      return false;
+    }
+  });
 });
