@@ -32,8 +32,16 @@ const HANDSHAKE_TYPES = new Set(HANDSHAKE_MESSAGE_TYPES);
 const DEFAULT_RELIABLE_WINDOWS = Object.freeze({
   usb: 1,
   wifi: 24,
-  ble: 4,
+  ble: 1,
   memory: 64,
+});
+
+const DEFAULT_RETRY_OPTIONS = Object.freeze({
+  ble: Object.freeze({
+    baseRetryMs: 2_000,
+    maxRetryMs: 8_000,
+    maxAttempts: 6,
+  }),
 });
 
 export class DeviceSession extends EventEmitter {
@@ -113,7 +121,10 @@ export class DeviceSession extends EventEmitter {
     this.sessionId = null;
     this.lastReceivedAt = 0;
     this.lastSentAt = 0;
-    this.#outbox = new ReliableOutbox(retry);
+    this.#outbox = new ReliableOutbox({
+      ...DEFAULT_RETRY_OPTIONS[transport.kind],
+      ...retry,
+    });
     this.#commandDeduplicator = new CommandDeduplicator(512);
     this.onTransportMessage = (message) => {
       this.#receive(message).catch((error) => {

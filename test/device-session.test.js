@@ -257,6 +257,92 @@ test("snapshots remain responsive while a large resource waits in the reliable q
   assert.deepEqual(order, ["snapshot", "resource"]);
 });
 
+test("BLE serializes and coalesces snapshots behind one reliable message", async (t) => {
+  const { bridge, device, transports } = createSessions({
+    transportKind: "ble",
+  });
+  t.after(() => {
+    bridge.close();
+    device.close();
+  });
+  const revisions = [];
+  device.on("snapshot", (snapshot) => revisions.push(snapshot.revision));
+  bridge.start({ autoTick: false });
+  device.start({ autoTick: false });
+  await waitFor(() =>
+    bridge.ready &&
+    device.ready &&
+    bridge.pendingAcknowledgements === 0,
+  );
+
+  transports.right.holdNext();
+  bridge.sendSnapshot({ revision: 2, presentation: { state: "running" } });
+  bridge.sendSnapshot({ revision: 3, presentation: { state: "running" } });
+  bridge.sendSnapshot({ revision: 4, presentation: { state: "running" } });
+  assert.equal(bridge.pendingAcknowledgements, 1);
+  assert.equal(bridge.queuedMessages, 1);
+
+  await waitFor(() => revisions.includes(2));
+  transports.right.flushHeld();
+  await waitFor(() =>
+    revisions.includes(4) &&
+    bridge.pendingAcknowledgements === 0 &&
+    bridge.queuedMessages === 0,
+  );
+  assert.deepEqual(revisions.slice(-2), [2, 4]);
+});
+
+test("BLE waits for a full GATT transfer window before retrying", async (t) => {
+  const clock = { value: 1_000 };
+  const transports = createMemoryTransportPair({ kind: "ble" });
+  const bridge = new DeviceSession({
+    role: "bridge",
+    transport: transports.left,
+    secretResolver: (deviceId) => deviceId === "core-s3-1" ? SECRET : null,
+    snapshotProvider: () => ({
+      revision: 1,
+      presentation: { state: "ready" },
+    }),
+    now: () => clock.value,
+    nonceFactory: () => "bridge_nonce_1234567890",
+  });
+  const device = new DeviceSession({
+    role: "device",
+    transport: transports.right,
+    deviceId: "core-s3-1",
+    secret: SECRET,
+    now: () => clock.value,
+    nonceFactory: () => "device_nonce_1234567890",
+  });
+  t.after(() => {
+    bridge.close();
+    device.close();
+  });
+  bridge.start({ autoTick: false });
+  device.start({ autoTick: false });
+  await waitFor(() =>
+    bridge.ready &&
+    device.ready &&
+    bridge.pendingAcknowledgements === 0,
+  );
+
+  let retries = 0;
+  bridge.on("retry", () => {
+    retries += 1;
+  });
+  transports.right.holdNext();
+  bridge.sendSnapshot({
+    revision: 2,
+    presentation: { state: "running" },
+  });
+  clock.value += 1_999;
+  bridge.tick(clock.value);
+  assert.equal(retries, 0);
+  clock.value += 1;
+  bridge.tick(clock.value);
+  assert.equal(retries, 1);
+});
+
 test("heartbeat timeout closes an authenticated session so its transport can reconnect", async (t) => {
   const { bridge, device, clock } = createSessions();
   t.after(() => {
