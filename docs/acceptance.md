@@ -17,10 +17,10 @@
 | 内置与自定义 Pet，自由切换；新 Pet 在 PC 制作 | `src/server/pet-catalog.js` 校验 v1/v2；`src/server/device-pet-asset.js` 转换 384×416 设备帧；`firmware/src/pet_store.cpp` 缓存和回退；浏览器、触摸、滑动和屏幕左右按钮都可切换 | 已完成 |
 | 按键切换、电脑切换、Codex 同步 | 触摸和屏幕左右按钮向 Bridge 发 `pet.select`，电脑控制面板写同一 Bridge 选择状态并广播所有设备；Tab5 外接物理按键映射保留给真机验收 | 设备与本项目电脑端同步已完成；Codex 官方客户端没有公开 Pet 选择事件，不能宣称原生双向同步 |
 | 显示最近运行任务 | Bridge 调用 `thread/list`，官方 Hooks 补充其他 Codex 客户端的实时生命周期；状态模型在审批、活动和最近完成任务之间按明确优先级选取显示线程 | 已完成 |
-| 声音、中文语音、时钟、电量、Token、等级 | `firmware/src/device_audio.cpp` 使用独立任务播放 ESP-SR 离线中文 TTS；单击开始/结束对话或命令，ChatGPT 登录使用电脑本地 `whisper.cpp` 转写且不需要 API Key，命令必须二次确认；UI 读取 RTC、电池并显示真实线程 Token/等级；真机上报 `voiceDataReady=true`，只读验收确认当前/今日 Token 均为可靠整数 | 本地转写、模型校验、真机数据源与自动化完成；真机完整对话、扬声器听感、电量曲线和温升待实测 |
+| 声音、中文语音、时钟、电量、Token、等级 | `firmware/src/device_audio.cpp` 使用独立任务播放 ESP-SR 离线中文 TTS；单击开始/结束对话或命令，ChatGPT 登录使用电脑本地 `whisper.cpp` 转写且不需要 API Key，命令必须二次确认；UI 读取 RTC、电池并显示真实线程 Token/等级；真机上报 `voiceDataReady=true`，当前任务累计 Token 来自会话记录，官方当日桶尚未生成时由当天会话增量补齐 | 本地转写、模型校验、真机数据源与自动化完成；真机完整对话、扬声器听感、电量曲线和温升待实测 |
 | USB 常联和稳定无线 | 真机已完成整机烧录、USB 枚举、真实账户配对和加密 USB 状态同步；USB 接收缓存按协议上限配置，并修复同一轮轮询中新消息时间戳导致的误超时。2026-07-27 真机连续 20 秒保持 `ready`，仅一次握手、零重试、零协议错误、零待确认消息；虚拟 Tab5 另完成 500 次 USB/Wi-Fi 主链切换和四类故障注入 | USB 基础链路已完成；真实插拔长稳、Wi‑Fi 天线、路由器和电脑睡眠环境待实测 |
-| 蓝牙或其他无线方式 | ESP32-C6 BLE 已完成配对并在拔线后同步真实任务状态；2.4 GHz Wi‑Fi 使用独立 WebSocket 完成高带宽热备。BLE 仅承载轻量状态/控制，Pet、语音和图片走 USB/Wi‑Fi | BLE 基础真机完成；Wi‑Fi 与弱信号恢复待真机 |
-| Pet 接入 LLM 对话 | 文本和语音对话进入临时、只读、禁止工具的 Codex 会话；ChatGPT 订阅登录可直接使用，无需 API Key；语音命令只排队，设备明确确认后才创建 `workspace-write/on-request` 任务 | 代码与自动化完成；真机无 Key 语音待验收 |
+| 蓝牙或其他无线方式 | ESP32-C6 BLE 已在 2026-07-27 完成配对并在拔线后同步真实任务状态；2.4 GHz Wi‑Fi 使用独立 WebSocket 完成高带宽热备。BLE 仅承载轻量状态/控制，Pet、语音和图片走 USB/Wi‑Fi | BLE 历史真机证据有效；稳定 Bundle 当前等待 macOS 蓝牙隐私开关复验，Wi‑Fi 与弱信号恢复待真机 |
+| Pet 接入 LLM 对话 | 文本和语音对话进入临时、只读、禁止工具的 Codex 会话；ChatGPT 订阅登录可直接使用，无需 API Key；语音命令只排队，设备明确确认后才创建 `workspace-write/on-request` 任务。原生 ChatGPT Voice 可在官方 Codex 界面使用，但当前 App Server Realtime 对 `chatgpt` 登录仍要求 API Key，设备因此使用本地 Whisper，不依赖或伪造该私有界面 | 无 Key 文本真实往返、代码与自动化完成；真机无 Key 语音待验收 |
 | 摄像头与 CV | Tab5 官方 MIPI CSI 驱动采集 2MP RGB565，P4 硬件 JPEG 编码；USB/Wi‑Fi 加密分块、512 KiB 上限、SHA‑256、`0600` 临时文件和用后删除；只描述清楚可见内容 | 代码和真实工具链构建完成；v0.2.0 真机画面、方向和色彩待验收 |
 | 产品化稳定性 | 每设备密钥、会话加密、凭据撤销、CSRF、回环控制面板、资源双槽回退、固定依赖、完整工厂镜像、逐文件 SHA‑256、显式串口恢复和故障压力测试 | 真机前软件基线完成；生产签名、eFuse、72 小时和认证测试待硬件与量产密钥 |
 | 不要求电脑关机后仍获取 Codex 状态 | Bridge 是 Codex 数据源；电脑关闭时设备保留本地 Pet/时钟并显示离线，不伪造实时任务 | 按约定排除 |
@@ -48,14 +48,14 @@ npm run smoke:codex
 
 ## 2026-07-28 复验结果
 
-- `npm run check`：150/150 项 JavaScript 测试和固件核心检查通过。
+- `npm run check`：153/153 项 JavaScript 测试和固件核心检查通过。
 - `npm run test:virtual-tab5`：真实协议的一次性配对、AES 加密、USB/Wi-Fi 双链路、遥测、28,114,944 Bytes V2 Pet 转换/安装、审批和 Wi-Fi 接管通过。
 - `npm run test:stability`：501 个认证会话、500 次链路切换、250 次资源中断恢复和全部故障注入通过。
 - 浏览器 Mock 验收：1280×720 布局、9/9 动画、16/16 V2 看向方向、V1 能力禁用、Pet 切换和审批均通过，浏览器控制台 0 错误。
 - `npm run smoke:codex`：Codex Desktop `0.146.0-alpha.3.1` 的 App Server 初始化和最近线程读取通过。
 - `npm run doctor`：Codex Hooks 已安装并识别 6 类事件；PlatformIO 与完整发布包健康。
-- `npm run test:live-tab5`：真机板型 `m5stack-tab5-k145`、固件 0.2.0、协议 v4、USB+BLE、microSD、中文语音数据、最近任务倒序和今日 Token 全部通过；语音与视觉尚无一次完成记录。
-- v0.2.0 完整工厂镜像已通过真实 ESP32-P4 工具链构建并逐组件复验：16,711,680 Bytes，SHA-256 `d5913ec318052ee61261f92a71dbd6498644cd89c34957563d00c79a294a55f1`。
+- `npm run test:live-tab5` 的历史证据已验证真机板型 `m5stack-tab5-k145`、固件 0.2.0、协议 v4、USB+BLE、microSD、中文语音数据、最近任务倒序和今日 Token；当前部署后 USB 已复验，BLE 权限、语音与视觉仍待本轮完成记录。
+- v0.2.0 完整工厂镜像已通过真实 ESP32-P4 工具链构建并逐组件复验：16,711,680 Bytes，SHA-256 `86df4d8eee613fb5299328d6b7d9e87659c9b986672b17fb65fb210ee64fcc42`。
 
 ## 剩余真机与产品化清单
 
