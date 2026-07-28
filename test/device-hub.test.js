@@ -172,6 +172,61 @@ test("Wi-Fi provisioning is sent only through an authenticated USB session", asy
   }), /Wi-Fi 配置无效/);
 });
 
+test("an authenticated device can request a bounded thread conversation", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codex-desk-hub-thread-"));
+  const credentials = new DeviceCredentialRepository(path.join(root, "devices.json"));
+  await credentials.pair({ deviceId: "tab5-thread-1", secret: "c".repeat(64) });
+  const hub = new DeviceHub({
+    store: new DeskStore(),
+    bridge: {
+      decideApproval: async () => null,
+      readThreadConversation: async (threadId) => ({
+        threadId,
+        title: "斯卡蒂主题",
+        kind: "project",
+        workspace: "codex-desk",
+        messages: [
+          { id: "user-1", role: "user", text: "打开详情", createdAt: null },
+          { id: "agent-1", role: "assistant", text: "详情已打开", createdAt: null },
+        ],
+        totalMessages: 2,
+        truncated: false,
+      }),
+    },
+    catalog: new PetCatalog(path.join(root, "pets"), {
+      deviceAssetConverter: passthroughDeviceConverter,
+    }),
+    settings: new SettingsRepository(path.join(root, "settings.json")),
+    credentials,
+  });
+  await hub.start();
+  t.after(() => hub.close());
+
+  const transports = createMemoryTransportPair({ kind: "ble" });
+  const bridgeSession = hub.attachTransport(transports.left);
+  const device = new DeviceSession({
+    role: "device",
+    transport: transports.right,
+    deviceId: "tab5-thread-1",
+    secret: "c".repeat(64),
+  });
+  t.after(() => device.close());
+  const events = [];
+  device.on("event", (event) => events.push(event));
+  device.start();
+  await waitFor(() => bridgeSession.ready && device.ready);
+
+  device.sendCommand(
+    "thread.open",
+    { threadId: "thread-detail-1" },
+    randomUUID(),
+  );
+  await waitFor(() => events.some(({ event }) => event === "thread.detail"));
+  const detail = events.find(({ event }) => event === "thread.detail");
+  assert.equal(detail.kind, "project");
+  assert.deepEqual(detail.messages.map(({ role }) => role), ["user", "assistant"]);
+});
+
 test("global command deduplication prevents dual-link duplicate approval execution", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "codex-desk-hub-dedupe-"));
   const credentials = new DeviceCredentialRepository(path.join(root, "devices.json"));

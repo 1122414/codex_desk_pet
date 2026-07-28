@@ -98,6 +98,24 @@ test("protocol rejects malformed command payloads before they reach the Bridge",
       mode: "command",
     },
   }));
+  assert.doesNotThrow(() => createEnvelope({
+    sequence: 6,
+    type: "command",
+    payload: {
+      command: "thread.open",
+      commandId: "command-thread-0001",
+      threadId: "019f6f5f-913c-7563-84f6-2c37ad577cea",
+    },
+  }));
+  assert.throws(() => createEnvelope({
+    sequence: 7,
+    type: "command",
+    payload: {
+      command: "thread.open",
+      commandId: "command-thread-0002",
+      threadId: "../private/thread",
+    },
+  }), /threadId/);
 });
 
 test("Wi-Fi provisioning accepts only bounded device-safe network settings", () => {

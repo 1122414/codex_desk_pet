@@ -12,7 +12,7 @@ import { PET_ATLAS, STANDARD_ANIMATIONS } from "./pet-spec.js";
 export const DEVICE_PROTOCOL_VERSION = 4;
 export const DEVICE_INFO_VERSION = 2;
 export const DEVICE_BOARD_ID = "m5stack-tab5-k145";
-export const DEVICE_FIRMWARE_VERSION = "0.2.0";
+export const DEVICE_FIRMWARE_VERSION = "0.3.0";
 export const MINIMUM_DEVICE_FIRMWARE_VERSION = "0.2.0";
 export const HEARTBEAT_INTERVAL_MS = 5_000;
 export const CONNECTION_TIMEOUT_MS = 15_000;
@@ -53,6 +53,7 @@ export const DEVICE_COMMANDS = Object.freeze([
   "telemetry.update",
   "voice.start",
   "voice.stop",
+  "thread.open",
   "state.preview",
   "wifi.provision",
 ]);
@@ -325,6 +326,9 @@ function validatePayload(type, payload) {
     }
     if (payload.command === "voice.start" && !["chat", "command"].includes(payload.mode)) {
       throw new ProtocolError("voice mode is invalid");
+    }
+    if (payload.command === "thread.open") {
+      requireString(payload.threadId, "threadId", /^[A-Za-z0-9_-]{1,128}$/);
     }
     if (payload.command === "state.preview" && (
       payload.animation !== null &&

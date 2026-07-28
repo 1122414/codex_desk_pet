@@ -291,6 +291,14 @@ export class DeviceHub extends EventEmitter {
       case "voice.stop":
         if (!this.voiceAgent) throw new Error("语音服务不可用");
         return this.voiceAgent.stop(session.deviceId);
+      case "thread.open": {
+        const detail = await this.bridge.readThreadConversation(payload.threadId);
+        session.sendEvent({ event: "thread.detail", ...detail });
+        return {
+          threadId: detail.threadId,
+          messages: detail.messages.length,
+        };
+      }
       case "state.preview":
         this.store.setPreviewAnimation(payload.animation ?? null);
         return { animation: payload.animation ?? null };

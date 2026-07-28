@@ -216,6 +216,31 @@ test("HTTP API requires a same-origin session for state changes", async (t) => {
   const session = await fetch(`${base}/api/session`);
   const cookie = session.headers.get("set-cookie").split(";")[0];
   const { csrfToken } = await session.json();
+  const deniedConversation = await fetch(
+    `${base}/api/threads/mock-thread/conversation`,
+  );
+  assert.equal(deniedConversation.status, 403);
+  const conversation = await fetch(
+    `${base}/api/threads/mock-thread/conversation`,
+    {
+      headers: { Cookie: cookie, Origin: base },
+    },
+  );
+  assert.equal(conversation.status, 200);
+  const conversationBody = await conversation.json();
+  assert.equal(conversationBody.threadId, "mock-thread");
+  assert.equal(conversationBody.kind, "project");
+  assert.deepEqual(
+    conversationBody.messages.map(({ role }) => role),
+    ["user", "assistant"],
+  );
+  const missingConversation = await fetch(
+    `${base}/api/threads/missing-thread/conversation`,
+    {
+      headers: { Cookie: cookie, Origin: base },
+    },
+  );
+  assert.equal(missingConversation.status, 404);
   const selected = await fetch(`${base}/api/pet/select`, {
     method: "POST",
     headers: {

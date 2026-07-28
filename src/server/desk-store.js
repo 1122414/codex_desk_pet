@@ -75,6 +75,15 @@ function taskProgress(thread) {
   return { known: false, completed: 0, total: 0, percent: 0 };
 }
 
+function threadKind(thread) {
+  return thread?.gitInfo ? "project" : "conversation";
+}
+
+function workspaceLabel(thread) {
+  if (typeof thread?.cwd !== "string" || !thread.cwd) return "";
+  return thread.cwd.split(/[\\/]/).filter(Boolean).at(-1) ?? "";
+}
+
 function serializeApproval(approval) {
   if (!approval) return null;
   const { rpcId: _rpcId, ...publicApproval } = approval;
@@ -454,6 +463,8 @@ export class DeskStore extends EventEmitter {
         return {
           id: thread.id,
           title: summarizeThread(thread).slice(0, 56),
+          kind: threadKind(thread),
+          workspace: workspaceLabel(thread).slice(0, 40),
           state: presentation.state,
           updatedAt: Math.floor(getThreadRecency(thread) / 1_000),
           tokens: extractTotalTokens(thread.tokenUsage) || safeInteger(thread.goal?.tokensUsed),
@@ -491,6 +502,8 @@ export class DeskStore extends EventEmitter {
       task: selected ? {
         id: selected.id,
         title: summarizeThread(selected),
+        kind: threadKind(selected),
+        workspace: workspaceLabel(selected),
         updatedAt: selected.updatedAt ?? selected.recencyAt ?? null,
         threadStatus: selected.status?.type ?? "notLoaded",
       } : null,
@@ -540,6 +553,7 @@ export class DeskStore extends EventEmitter {
         sound: true,
         companionChat: true,
         companionCommands: true,
+        threadConversation: true,
         transports: ["usb", "wifi", "ble"],
       },
     };

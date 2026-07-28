@@ -104,6 +104,36 @@ test("desk store exposes a bounded multi-task snapshot with plan progress and cl
   assert.ok(Number.isInteger(snapshot.clock.utcOffsetMinutes));
 });
 
+test("desk store marks git workspaces as projects and other threads as conversations", () => {
+  const store = new DeskStore();
+  store.replaceThreads([
+    {
+      id: "project",
+      name: "项目任务",
+      cwd: "/workspace/codex-desk",
+      gitInfo: { branch: "main" },
+      updatedAt: 200,
+      status: { type: "idle" },
+    },
+    {
+      id: "conversation",
+      name: "纯对话",
+      updatedAt: 100,
+      status: { type: "idle" },
+    },
+  ]);
+
+  const snapshot = store.snapshot(300_000);
+  assert.deepEqual(
+    snapshot.tasks.map(({ id, kind, workspace }) => ({ id, kind, workspace })),
+    [
+      { id: "project", kind: "project", workspace: "codex-desk" },
+      { id: "conversation", kind: "conversation", workspace: "" },
+    ],
+  );
+  assert.equal(snapshot.capabilities.threadConversation, true);
+});
+
 test("desk store selects the seven-day Codex rate-limit window and today's usage", () => {
   const store = new DeskStore();
   const now = new Date(2026, 6, 27, 12).getTime();

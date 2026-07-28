@@ -16,7 +16,7 @@ import {
 } from "./codex-hook.js";
 
 const MAX_BODY_BYTES = 16 * 1024;
-const BRIDGE_VERSION = "0.2.0";
+const BRIDGE_VERSION = "0.3.0";
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 class HttpError extends Error {
@@ -217,6 +217,28 @@ export class DeskHttpServer {
         },
         devices: this.deviceHub?.listDevices() ?? [],
       });
+      return;
+    }
+    const conversationMatch = route.match(
+      /^\/api\/threads\/([A-Za-z0-9_-]{1,128})\/conversation$/,
+    );
+    if (req.method === "GET" && conversationMatch) {
+      this.#requireSessionAccess(req);
+      try {
+        json(
+          res,
+          200,
+          await this.bridge.readThreadConversation(conversationMatch[1]),
+        );
+      } catch (error) {
+        if (error.code === "THREAD_NOT_FOUND") {
+          throw new HttpError(404, "Thread was not found");
+        }
+        if (error.code === "CODEX_UNAVAILABLE") {
+          throw new HttpError(503, "Codex App Server is unavailable");
+        }
+        throw error;
+      }
       return;
     }
 
@@ -426,8 +448,20 @@ export class DeskHttpServer {
   }
 
   #requireMutationAccess(req) {
+    this.#requireSessionAccess(req, { csrf: true });
+  }
+
+  #requireSessionAccess(req, { csrf = false } = {}) {
     const cookies = parseCookies(req.headers.cookie);
-    if (cookies.codex_desk_session !== this.#sessionId || req.headers["x-codex-desk-csrf"] !== this.#csrfToken) {
+    if (cookies.codex_desk_session !== this.#sessionId) {
+      throw new HttpError(
+        403,
+        csrf
+          ? "Valid local session and CSRF token are required"
+          : "Valid local session is required",
+      );
+    }
+    if (csrf && req.headers["x-codex-desk-csrf"] !== this.#csrfToken) {
       throw new HttpError(403, "Valid local session and CSRF token are required");
     }
     const fetchSite = req.headers["sec-fetch-site"];

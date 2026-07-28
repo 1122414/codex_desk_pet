@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import { JsonRpcClient } from "./json-rpc-client.js";
 import { readLatestSessionTokenUsage } from "./session-token-reader.js";
 
@@ -12,6 +13,94 @@ const APPROVAL_METHODS = new Set([
 ]);
 const MAX_DEVICE_APPROVAL_BYTES = 96;
 const MAX_DEVICE_APPROVAL_LINES = 3;
+const MAX_THREAD_MESSAGES = 12;
+const MAX_THREAD_MESSAGE_BYTES = 420;
+const MAX_THREAD_DETAIL_BYTES = 4_200;
+
+function boundedUtf8(value, maximumBytes) {
+  if (typeof value !== "string" || maximumBytes < 1) return "";
+  const sanitized = value
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
+    .trim();
+  if (Buffer.byteLength(sanitized) <= maximumBytes) return sanitized;
+  let result = "";
+  for (const character of sanitized) {
+    if (Buffer.byteLength(result + character + "…") > maximumBytes) break;
+    result += character;
+  }
+  return `${result.trimEnd()}…`;
+}
+
+function textualContent(value) {
+  if (typeof value === "string") return value;
+  if (!Array.isArray(value)) return "";
+  return value
+    .map((part) => {
+      if (typeof part === "string") return part;
+      if (!isPlainObject(part)) return "";
+      if (!["text", "input_text", "output_text"].includes(part.type)) return "";
+      return typeof part.text === "string" ? part.text : "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function conversationMessage(item, turn, fallbackIndex) {
+  if (!isPlainObject(item)) return null;
+  const role = item.type === "userMessage"
+    ? "user"
+    : ["agentMessage", "assistantMessage"].includes(item.type) ? "assistant" : null;
+  if (!role) return null;
+  const rawText = role === "assistant"
+    ? (typeof item.text === "string" ? item.text : textualContent(item.content))
+    : textualContent(item.content);
+  const text = boundedUtf8(rawText, MAX_THREAD_MESSAGE_BYTES);
+  if (!text) return null;
+  return {
+    id: boundedUtf8(item.id, 96) || `${role}-${fallbackIndex}`,
+    role,
+    text,
+    createdAt: Number.isFinite(item.createdAt)
+      ? Math.floor(item.createdAt)
+      : Number.isFinite(turn?.createdAt) ? Math.floor(turn.createdAt) : null,
+  };
+}
+
+export function normalizeThreadConversation(thread, listedThread = null) {
+  const source = isPlainObject(thread) ? thread : {};
+  const listed = isPlainObject(listedThread) ? listedThread : {};
+  const allMessages = [];
+  for (const turn of Array.isArray(source.turns) ? source.turns : []) {
+    for (const item of Array.isArray(turn?.items) ? turn.items : []) {
+      const message = conversationMessage(item, turn, allMessages.length);
+      if (message) allMessages.push(message);
+    }
+  }
+  const cwd = typeof source.cwd === "string" && source.cwd
+    ? source.cwd
+    : typeof listed.cwd === "string" ? listed.cwd : "";
+  const detail = {
+    threadId: boundedUtf8(source.id ?? listed.id, 128),
+    title: boundedUtf8(
+      source.name ?? listed.name ?? source.preview ?? listed.preview ?? "未命名会话",
+      160,
+    ),
+    kind: source.gitInfo || listed.gitInfo ? "project" : "conversation",
+    workspace: boundedUtf8(cwd ? path.basename(cwd) : "", 80),
+    messages: allMessages.slice(-MAX_THREAD_MESSAGES),
+    totalMessages: allMessages.length,
+    truncated: allMessages.length > MAX_THREAD_MESSAGES,
+  };
+  while (
+    detail.messages.length > 1 &&
+    Buffer.byteLength(JSON.stringify({ event: "thread.detail", ...detail })) >
+      MAX_THREAD_DETAIL_BYTES
+  ) {
+    detail.messages.shift();
+    detail.truncated = true;
+  }
+  return detail;
+}
 
 function filePathsFromItem(item) {
   if (item?.type !== "fileChange" || !Array.isArray(item.changes)) return [];
@@ -269,11 +358,21 @@ export class CodexBridge extends EventEmitter {
         id: "mock-thread",
         name: "制作 Codex Desk Buddy MVP",
         preview: "制作 Codex Desk Buddy MVP",
+        cwd: "/workspace/codex-desk-buddy",
+        gitInfo: { branch: "main" },
         createdAt: Date.now() / 1_000 - 300,
         updatedAt: Date.now() / 1_000,
         status: { type: "active", activeFlags: [] },
         lastTurn: { id: "mock-turn", status: "inProgress" },
         tokenUsage: { total: { totalTokens: 12_840 } },
+      }, {
+        id: "mock-chat",
+        name: "聊聊 Skadi 的新衣服",
+        preview: "聊聊 Skadi 的新衣服",
+        createdAt: Date.now() / 1_000 - 900,
+        updatedAt: Date.now() / 1_000 - 600,
+        status: { type: "notLoaded" },
+        tokenUsage: { total: { totalTokens: 2_160 } },
       }]);
       return;
     }
@@ -344,6 +443,57 @@ export class CodexBridge extends EventEmitter {
       this.#refreshGoals(threads),
       this.#refreshSessionTokens(threads),
     ]);
+  }
+
+  async readThreadConversation(threadId) {
+    if (typeof threadId !== "string" || threadId.length < 1 || threadId.length > 128) {
+      throw new TypeError("Thread id is invalid");
+    }
+    const listedThread = this.store.getThread(threadId);
+    if (!listedThread) {
+      const error = new Error("Thread was not found");
+      error.code = "THREAD_NOT_FOUND";
+      throw error;
+    }
+    if (this.isMock) {
+      const project = Boolean(listedThread.gitInfo);
+      return normalizeThreadConversation({
+        ...listedThread,
+        turns: [{
+          id: `${threadId}-turn`,
+          createdAt: Date.now() / 1_000,
+          items: [
+            {
+              id: `${threadId}-user`,
+              type: "userMessage",
+              content: [{
+                type: "text",
+                text: project
+                  ? "把任务卡做成 Chibi Skadi 的冰海主题。"
+                  : "Skadi 今天心情怎么样？",
+              }],
+            },
+            {
+              id: `${threadId}-assistant`,
+              type: "agentMessage",
+              text: project
+                ? "正在区分项目卡和对话卡，并实现只读会话详情。"
+                : "她正在桌面上安静地看着今天的任务。",
+            },
+          ],
+        }],
+      }, listedThread);
+    }
+    if (!this.client?.running) {
+      const error = new Error("Codex App Server is not running");
+      error.code = "CODEX_UNAVAILABLE";
+      throw error;
+    }
+    const response = await this.client.request("thread/read", {
+      threadId,
+      includeTurns: true,
+    });
+    return normalizeThreadConversation(response?.thread, listedThread);
   }
 
   async #refreshSessionTokens(threads) {

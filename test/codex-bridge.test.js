@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { CodexBridge } from "../src/server/codex-bridge.js";
+import {
+  CodexBridge,
+  normalizeThreadConversation,
+} from "../src/server/codex-bridge.js";
 import { DeskStore } from "../src/server/desk-store.js";
 
 class FakeAppServerClient extends EventEmitter {
@@ -169,6 +172,91 @@ test("bridge aggregates live daily tokens from every readable session", async ()
     [10_000, 20_000],
   );
   await bridge.stop();
+});
+
+test("bridge exposes a bounded read-only conversation without reasoning or tool internals", async () => {
+  const store = new DeskStore();
+  const client = new FakeAppServerClient();
+  client.threadList = [{
+    id: "thread-detail",
+    name: "斯卡蒂主题",
+    cwd: "/workspace/codex-desk",
+    gitInfo: { branch: "main" },
+    updatedAt: Date.now() / 1_000,
+    status: { type: "notLoaded" },
+  }];
+  const originalRequest = client.request.bind(client);
+  client.request = async (method, params) => {
+    if (method === "thread/read") {
+      return {
+        thread: {
+          ...client.threadList[0],
+          turns: Array.from({ length: 8 }, (_, index) => ({
+            id: `turn-${index}`,
+            items: [
+              {
+                id: `user-${index}`,
+                type: "userMessage",
+                content: [
+                  { type: "text", text: `用户消息 ${index} ${"海".repeat(180)}` },
+                  { type: "image", url: "file:///private/photo.jpg" },
+                ],
+              },
+              {
+                id: `reasoning-${index}`,
+                type: "reasoning",
+                summary: ["不应出现在设备上"],
+              },
+              {
+                id: `tool-${index}`,
+                type: "commandExecution",
+                command: "print-secret",
+              },
+              {
+                id: `assistant-${index}`,
+                type: "agentMessage",
+                text: `助手消息 ${index}`,
+              },
+            ],
+          })),
+        },
+      };
+    }
+    return originalRequest(method, params);
+  };
+  const bridge = new CodexBridge({ store, client, pollIntervalMs: 0 });
+  await bridge.start();
+
+  const detail = await bridge.readThreadConversation("thread-detail");
+  assert.equal(detail.kind, "project");
+  assert.equal(detail.workspace, "codex-desk");
+  assert.equal(detail.messages.length, 12);
+  assert.deepEqual(new Set(detail.messages.map(({ role }) => role)), new Set(["user", "assistant"]));
+  assert.equal(JSON.stringify(detail).includes("print-secret"), false);
+  assert.equal(JSON.stringify(detail).includes("不应出现在设备上"), false);
+  assert.equal(JSON.stringify(detail).includes("private/photo.jpg"), false);
+  assert.equal(Buffer.byteLength(JSON.stringify({ event: "thread.detail", ...detail })) <= 4_200, true);
+  assert.equal(detail.truncated, true);
+  await assert.rejects(
+    () => bridge.readThreadConversation("missing-thread"),
+    (error) => error.code === "THREAD_NOT_FOUND",
+  );
+  await bridge.stop();
+});
+
+test("conversation normalizer distinguishes pure chats from projects", () => {
+  const detail = normalizeThreadConversation({
+    id: "chat-only",
+    name: "纯对话",
+    turns: [{
+      items: [
+        { id: "user", type: "userMessage", content: [{ type: "text", text: "你好" }] },
+        { id: "agent", type: "agentMessage", text: "你好，我是 Skadi。" },
+      ],
+    }],
+  });
+  assert.equal(detail.kind, "conversation");
+  assert.deepEqual(detail.messages.map(({ role }) => role), ["user", "assistant"]);
 });
 
 test("bridge maps current command approval fields and returns the exact wire decision", async () => {
