@@ -44,6 +44,7 @@ const DEFAULT_RETRY_OPTIONS = Object.freeze({
   }),
 });
 
+const DEFAULT_MAX_QUEUED_RELIABLE = 16_384;
 const USB_RESYNC_WAKE_INTERVAL_MS = 1_000;
 
 export class DeviceSession extends EventEmitter {
@@ -77,7 +78,7 @@ export class DeviceSession extends EventEmitter {
     connectionTimeoutMs = CONNECTION_TIMEOUT_MS,
     handshakeTimeoutMs = 30_000,
     maxReliableInFlight = DEFAULT_RELIABLE_WINDOWS[transport?.kind] ?? 16,
-    maxQueuedReliable = 8_192,
+    maxQueuedReliable = DEFAULT_MAX_QUEUED_RELIABLE,
     retry = {},
   } = {}) {
     super();

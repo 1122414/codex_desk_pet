@@ -155,7 +155,18 @@ export class DeviceHub extends EventEmitter {
     });
     session.on("resourceRequest", (request) => {
       this.#sendResource(session, request).catch((error) => {
-        session.sendEvent({ event: "resource.error", petId: request.petId, error: error.message });
+        this.emit(
+          "diagnostic",
+          `Device resource transfer failed (${transport.kind}, ${session.deviceId ?? "unknown"}): ${error.message}`,
+        );
+        try {
+          session.sendEvent({ event: "resource.error", petId: request.petId, error: error.message });
+        } catch (sendError) {
+          this.emit(
+            "diagnostic",
+            `Device resource error delivery failed (${transport.kind}, ${session.deviceId ?? "unknown"}): ${sendError.message}`,
+          );
+        }
       });
     });
     session.on("event", (event) => {
@@ -305,7 +316,15 @@ export class DeviceHub extends EventEmitter {
 
   #broadcastSnapshot(snapshot) {
     for (const session of this.#sessions) {
-      if (session.ready) session.sendSnapshot(this.#deviceSnapshot(snapshot));
+      if (!session.ready) continue;
+      try {
+        session.sendSnapshot(this.#deviceSnapshot(snapshot));
+      } catch (error) {
+        this.emit(
+          "diagnostic",
+          `Device snapshot delivery failed (${session.transport.kind}, ${session.deviceId ?? "unknown"}): ${error.message}`,
+        );
+      }
     }
   }
 

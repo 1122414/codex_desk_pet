@@ -228,6 +228,30 @@ test("large pet transfers use a bounded ACK window before installing", async (t)
   assert.equal(bridge.queuedMessages, 0);
 });
 
+test("USB queues a maximum-size v2 pet without overflowing the reliable queue", async (t) => {
+  const { bridge, device, transports } = createSessions({
+    transportKind: "usb",
+  });
+  t.after(() => {
+    bridge.close();
+    device.close();
+  });
+  bridge.start({ autoTick: false });
+  device.start({ autoTick: false });
+  await waitFor(() => bridge.ready && device.ready && bridge.pendingAcknowledgements === 0);
+
+  transports.right.holdNext();
+  const data = Buffer.alloc(32 * 1024 * 1024, 0x4e);
+  assert.doesNotThrow(() => {
+    bridge.sendResource(
+      { id: "maximum-v2-pet", displayName: "Maximum V2 Pet", spriteVersionNumber: 2 },
+      data,
+    );
+  });
+  assert.equal(bridge.pendingAcknowledgements, 1);
+  assert.ok(bridge.queuedMessages > 8_192);
+});
+
 test("snapshots remain responsive while a large resource waits in the reliable queue", async (t) => {
   const { bridge, device, transports } = createSessions({
     transportKind: "usb",
