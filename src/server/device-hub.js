@@ -233,6 +233,10 @@ export class DeviceHub extends EventEmitter {
       case "pet.select":
         await this.catalog.refresh();
         if (typeof payload.petId !== "string" || !this.catalog.has(payload.petId)) throw new Error("Pet was not found");
+        this.emit(
+          "diagnostic",
+          `Pet selection (${new Date().toISOString()}, ${session.transport.kind}, ${session.deviceId}): ${this.store.selectedPetId} -> ${payload.petId} [${payload.commandId}]`,
+        );
         await this.settings.save({ selectedPetId: payload.petId });
         this.store.setSelectedPet(payload.petId);
         return { selectedId: payload.petId };

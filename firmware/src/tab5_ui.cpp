@@ -369,14 +369,12 @@ UiAction Tab5Ui::pollTouch(
     const auto confirmation_visible =
         snapshot.approval.present ||
         snapshot.companion.awaitingConfirmation();
+    if (pet_button_release_blocked_) {
+      pet_button_quiet_since_ms_ = 0;
+      input_.cancel();
+      return {};
+    }
     if (!confirmation_visible) {
-      if (
-          pet_button_release_blocked_ &&
-          (kPreviousPetButton.contains(point) ||
-           kNextPetButton.contains(point))) {
-        input_.cancel();
-        return {};
-      }
       if (
           pressed &&
           (kPreviousPetButton.contains(point) ||
@@ -399,7 +397,7 @@ UiAction Tab5Ui::pollTouch(
         pet_button_touch_active_ = false;
         pet_button_touch_action_ = UiActionType::None;
         pet_button_release_blocked_ = true;
-        pet_button_quiet_polls_ = 0;
+        pet_button_quiet_since_ms_ = 0;
         input_.cancel();
         return same_button ? UiAction{action, {}} : UiAction{};
       }
@@ -463,13 +461,13 @@ UiAction Tab5Ui::pollTouch(
       if (kPreviousPetButton.contains(point)) {
         input_.cancel();
         pet_button_release_blocked_ = true;
-        pet_button_quiet_polls_ = 0;
+        pet_button_quiet_since_ms_ = 0;
         return {UiActionType::PreviousPet, {}};
       }
       if (kNextPetButton.contains(point)) {
         input_.cancel();
         pet_button_release_blocked_ = true;
-        pet_button_quiet_polls_ = 0;
+        pet_button_quiet_since_ms_ = 0;
         return {UiActionType::NextPet, {}};
       }
     }
@@ -485,16 +483,21 @@ UiAction Tab5Ui::pollTouch(
     pet_button_touch_active_ = false;
     pet_button_touch_action_ = UiActionType::None;
     pet_button_release_blocked_ = true;
-    pet_button_quiet_polls_ = 0;
+    pet_button_quiet_since_ms_ = 0;
     touch_active_ = false;
     input_.cancel();
     return paired && same_button ? UiAction{action, {}} : UiAction{};
   }
   if (pet_button_release_blocked_) {
-    if (++pet_button_quiet_polls_ >= 2) {
+    if (pet_button_quiet_since_ms_ == 0) {
+      pet_button_quiet_since_ms_ = now_ms;
+    } else if (
+        now_ms >= pet_button_quiet_since_ms_ &&
+        now_ms - pet_button_quiet_since_ms_ >= 300) {
       pet_button_release_blocked_ = false;
-      pet_button_quiet_polls_ = 0;
+      pet_button_quiet_since_ms_ = 0;
     }
+    return {};
   }
   if (!touch_active_) return {};
   touch_active_ = false;
@@ -523,13 +526,13 @@ UiAction Tab5Ui::pollTouch(
     if (kPreviousPetButton.contains(last_touch_)) {
       input_.cancel();
       pet_button_release_blocked_ = true;
-      pet_button_quiet_polls_ = 0;
+      pet_button_quiet_since_ms_ = 0;
       return {UiActionType::PreviousPet, {}};
     }
     if (kNextPetButton.contains(last_touch_)) {
       input_.cancel();
       pet_button_release_blocked_ = true;
-      pet_button_quiet_polls_ = 0;
+      pet_button_quiet_since_ms_ = 0;
       return {UiActionType::NextPet, {}};
     }
   }

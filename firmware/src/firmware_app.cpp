@@ -450,6 +450,14 @@ void FirmwareApp::selectPetOffset(const int offset) {
   index = (index + offset + static_cast<int>(snapshot.pets.size())) %
       static_cast<int>(snapshot.pets.size());
   const auto& next = snapshot.pets[index];
+  if (!pet_selection_guard_.accept(
+          snapshot.selected_pet_id,
+          next.id,
+          offset,
+          static_cast<std::uint64_t>(millis()))) {
+    connection_detail_ = "已忽略重复触摸";
+    return;
+  }
   model_.selectPetLocally(next.id);
   requested_pet_ = "";
   if (auto* client = primaryClient(); client != nullptr) {

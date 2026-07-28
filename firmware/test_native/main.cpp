@@ -152,6 +152,35 @@ void testInput() {
       "Tab5 pet area preserves the wide swipe interaction");
 }
 
+void testPetSelectionGuard() {
+  codex::PetSelectionGuard guard;
+  expect(
+      guard.accept("pet-a", "pet-b", 1, 1'000),
+      "first Pet selection is accepted");
+  expect(
+      !guard.accept("pet-b", "pet-a", 1, 4'000),
+      "same-direction two-Pet bounce is rejected");
+  expect(
+      guard.accept("pet-b", "pet-a", -1, 4'100),
+      "opposite-direction selection remains immediately available");
+
+  codex::PetSelectionGuard multi_pet_guard;
+  expect(
+      multi_pet_guard.accept("pet-a", "pet-b", 1, 10'000),
+      "multi-Pet traversal accepts its first step");
+  expect(
+      multi_pet_guard.accept("pet-b", "pet-c", 1, 10'100),
+      "multi-Pet traversal accepts a distinct next target");
+
+  codex::PetSelectionGuard timeout_guard;
+  expect(
+      timeout_guard.accept("pet-a", "pet-b", 1, 20'000),
+      "repeat timeout starts from an accepted selection");
+  expect(
+      timeout_guard.accept("pet-b", "pet-a", 1, 26'000),
+      "same-direction return is accepted after the repeat window");
+}
+
 void testReconnectAndSequence() {
   codex::ReconnectSchedule reconnect;
   const std::vector<std::uint32_t> expected{
@@ -320,6 +349,7 @@ int main() {
   testAudioPlans();
   testModel();
   testInput();
+  testPetSelectionGuard();
   testReconnectAndSequence();
   testResources();
   testStressCycles();

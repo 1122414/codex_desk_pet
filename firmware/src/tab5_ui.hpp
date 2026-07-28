@@ -118,7 +118,7 @@ class Tab5Ui {
   bool pet_button_touch_active_ = false;
   bool pet_button_release_blocked_ = false;
   UiActionType pet_button_touch_action_ = UiActionType::None;
-  std::uint8_t pet_button_quiet_polls_ = 0;
+  std::uint64_t pet_button_quiet_since_ms_ = 0;
   bool voice_touch_active_ = false;
   bool camera_touch_active_ = false;
   bool voice_recording_ = false;

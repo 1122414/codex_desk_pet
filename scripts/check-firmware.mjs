@@ -80,7 +80,10 @@ try {
   if (
     !tab5Ui.includes("pet_button_touch_active_") ||
     !tab5Ui.includes("pet_button_release_blocked_") ||
-    !tab5Ui.includes("pet_button_quiet_polls_")
+    !tab5Ui.includes("pet_button_quiet_since_ms_") ||
+    !tab5Ui.includes(
+      "now_ms - pet_button_quiet_since_ms_ >= 300",
+    )
   ) {
     throw new Error("Tab5 宠物切换键必须锁定一次触摸，避免释放事件重复切换");
   }
@@ -144,6 +147,9 @@ try {
   }
   if (!firmwareApp.includes('pet_id == "chibi-skadi"')) {
     throw new Error("Tab5 内置 Pet 不得重复请求外部素材包");
+  }
+  if (!firmwareApp.includes("pet_selection_guard_.accept")) {
+    throw new Error("Tab5 宠物切换必须在业务层拒绝同一触摸造成的快速回弹");
   }
   if (
     !firmwareApp.includes("camera_capture_pending_ = true;") ||

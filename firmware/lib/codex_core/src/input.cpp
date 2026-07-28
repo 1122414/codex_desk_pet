@@ -112,4 +112,26 @@ void InputController::cancel() {
   pressed_at_ = 0;
 }
 
+bool PetSelectionGuard::accept(
+    const std::string& current_id,
+    const std::string& target_id,
+    const int offset,
+    const std::uint64_t now_ms) {
+  if (current_id.empty() || target_id.empty() || offset == 0) return false;
+  const auto within_repeat_window =
+      last_action_at_ != 0 &&
+      now_ms >= last_action_at_ &&
+      now_ms - last_action_at_ < kRepeatWindowMs;
+  if (
+      within_repeat_window &&
+      offset == last_offset_ &&
+      target_id == previous_id_) {
+    return false;
+  }
+  previous_id_ = current_id;
+  last_offset_ = offset;
+  last_action_at_ = now_ms;
+  return true;
+}
+
 }  // namespace codex

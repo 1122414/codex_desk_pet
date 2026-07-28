@@ -55,6 +55,7 @@ class FirmwareApp {
   DeviceProtocolClient wifi_client_;
   DeviceProtocolClient ble_client_;
   DeskModel model_;
+  PetSelectionGuard pet_selection_guard_;
   Telemetry local_telemetry_;
   String pairing_secret_;
   String connection_detail_ = "正在启动";
