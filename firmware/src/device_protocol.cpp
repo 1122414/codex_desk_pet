@@ -659,6 +659,9 @@ void DeviceProtocolClient::onTransportMessage(const String& message) {
     }
     if (observation.status == SequenceStatus::Gap) {
       sendError("RESYNC_REQUIRED");
+      if (strcmp(transport_->kind(), "usb") == 0) {
+        startHandshake(millis(), true);
+      }
       return;
     }
   }
@@ -829,7 +832,9 @@ void DeviceProtocolClient::handleReadyMessage(
   if (type == "error") {
     const String code = payload["code"] | "";
     if (code == "RESYNC_REQUIRED" || code == "INVALID_SESSION") {
-      startHandshake(millis(), false);
+      startHandshake(
+          millis(),
+          strcmp(transport_->kind(), "usb") == 0);
     }
   }
 }

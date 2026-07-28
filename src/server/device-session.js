@@ -44,6 +44,8 @@ const DEFAULT_RETRY_OPTIONS = Object.freeze({
   }),
 });
 
+const USB_RESYNC_WAKE_INTERVAL_MS = 1_000;
+
 export class DeviceSession extends EventEmitter {
   #nextSequence = 1;
   #receiveWindow = new SequenceWindow();
@@ -55,6 +57,7 @@ export class DeviceSession extends EventEmitter {
   #handshakeStartedAt = 0;
   #reliableQueue = [];
   #initialPeerHandshakeId = null;
+  #lastUsbResyncWakeAt = Number.NEGATIVE_INFINITY;
 
   constructor({
     role,
@@ -444,7 +447,15 @@ export class DeviceSession extends EventEmitter {
         return;
       case "error":
         if (envelope.payload.code === "RESYNC_REQUIRED" && this.role === "bridge" && this.ready) {
-          this.sendSnapshot();
+          if (this.transport.kind === "usb" && typeof this.transport.wakeDevice === "function") {
+            const now = this.now();
+            if (now - this.#lastUsbResyncWakeAt >= USB_RESYNC_WAKE_INTERVAL_MS) {
+              this.#lastUsbResyncWakeAt = now;
+              this.transport.wakeDevice();
+            }
+          } else {
+            this.sendSnapshot();
+          }
         }
         this.emit("remoteError", envelope.payload);
         return;
@@ -649,6 +660,7 @@ export class DeviceSession extends EventEmitter {
     this.#outbox.clear();
     this.#reliableQueue = [];
     this.#initialPeerHandshakeId = null;
+    this.#lastUsbResyncWakeAt = Number.NEGATIVE_INFINITY;
     this.#handshake = null;
     this.#handshakeStartedAt = this.now();
     this.sessionId = null;

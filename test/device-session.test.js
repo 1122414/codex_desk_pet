@@ -421,6 +421,40 @@ test("an idle USB bridge keeps one transport open and periodically wakes the dev
   bridge.close();
 });
 
+test("a ready USB bridge wakes the device once when the peer requests resynchronization", async (t) => {
+  const { bridge, device, transports } = createSessions({
+    transportKind: "usb",
+    sessionOptions: { maxReliableInFlight: 2 },
+  });
+  t.after(() => {
+    bridge.close();
+    device.close();
+  });
+  let wakeCount = 0;
+  transports.left.wakeDevice = () => {
+    wakeCount += 1;
+  };
+  bridge.start({ autoTick: false });
+  device.start({ autoTick: false });
+  await waitFor(() =>
+    bridge.ready &&
+    device.ready &&
+    bridge.pendingAcknowledgements === 0,
+  );
+
+  transports.left.dropNext();
+  const telemetry = {
+    batteryPercent: 80,
+    charging: false,
+    wifiRssi: -60,
+  };
+  bridge.sendCommand("telemetry.update", telemetry, randomUUID());
+  bridge.sendCommand("telemetry.update", telemetry, randomUUID());
+  await waitFor(() => wakeCount === 1);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(wakeCount, 1);
+});
+
 test("a USB bridge accepts a restarted peer without mistaking a retry for a reboot", async (t) => {
   const transports = createMemoryTransportPair({ kind: "usb" });
   const bridge = new DeviceSession({

@@ -149,6 +149,13 @@ try {
   ) {
     throw new Error("Tab5 USB 主机唤醒必须重置协议序号后重新握手");
   }
+  if (
+    !deviceProtocol.includes(
+      'sendError("RESYNC_REQUIRED");\n      if (strcmp(transport_->kind(), "usb") == 0) {\n        startHandshake(millis(), true);',
+    )
+  ) {
+    throw new Error("Tab5 USB 序号失步后必须主动重置序号并重新握手");
+  }
   if (!deviceProtocol.includes('type != "ack" &&\n      type != "error"')) {
     throw new Error("Tab5 认证前不得对错误报文再次回复错误");
   }
