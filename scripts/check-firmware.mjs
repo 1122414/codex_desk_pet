@@ -144,6 +144,14 @@ try {
     throw new Error("Tab5 认证前不得对错误报文再次回复错误");
   }
   if (
+    deviceProtocol.includes('codex-desk-aead-v1\\",3') ||
+    deviceProtocol.includes('material = "[3,\\"') ||
+    deviceProtocol.includes('aad = "[3,\\"') ||
+    (deviceProtocol.match(/String\(kProtocolVersion\)/g)?.length ?? 0) < 3
+  ) {
+    throw new Error("Tab5 握手与加密材料必须统一使用当前协议版本");
+  }
+  if (
     !usbTransport.includes("kChunkBytes = 128") ||
     !usbTransport.includes("Serial.flush()")
   ) {

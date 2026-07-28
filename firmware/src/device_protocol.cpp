@@ -1239,7 +1239,9 @@ String DeviceProtocolClient::encryptionMaterial(const bool outgoing) const {
   material.reserve(
       device_id_.length() + device_nonce_.length() +
       bridge_nonce_.length() + strlen(direction) + 48U);
-  material = "[\"codex-desk-aead-v1\",3,\"";
+  material = "[\"codex-desk-aead-v1\",";
+  material += String(kProtocolVersion);
+  material += ",\"";
   material += device_id_;
   material += "\",\"";
   material += device_nonce_;
@@ -1260,7 +1262,9 @@ String DeviceProtocolClient::envelopeAdditionalData(
   String aad;
   aad.reserve(
       id.length() + type.length() + session_id.length() + 64U);
-  aad = "[3,\"";
+  aad = "[";
+  aad += String(kProtocolVersion);
+  aad += ",\"";
   aad += id;
   aad += "\",";
   aad += String(static_cast<unsigned long long>(sequence));
@@ -1423,7 +1427,9 @@ String DeviceProtocolClient::handshakeProof(const String& role) const {
   material.reserve(
       device_id_.length() + device_nonce_.length() +
       bridge_nonce_.length() + device_info_hash_.length() + role.length() + 24);
-  material = "[3,\"";
+  material = "[";
+  material += String(kProtocolVersion);
+  material += ",\"";
   material += device_id_;
   material += "\",\"";
   material += device_nonce_;
