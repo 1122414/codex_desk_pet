@@ -197,12 +197,13 @@ async function readJson(baseUrl, route) {
   return response.json();
 }
 
-async function readState(baseUrl) {
-  const [devices, snapshot, pets] = await Promise.all([
+async function readState(baseUrl, cachedPets = null) {
+  const requests = [
     readJson(baseUrl, "/api/devices"),
     readJson(baseUrl, "/api/snapshot"),
-    readJson(baseUrl, "/api/pets"),
-  ]);
+  ];
+  if (!cachedPets) requests.push(readJson(baseUrl, "/api/pets"));
+  const [devices, snapshot, pets = cachedPets] = await Promise.all(requests);
   return { devices, snapshot, pets };
 }
 
@@ -217,7 +218,9 @@ export async function verifyLiveTab5({
   pollMs = DEFAULT_POLL_MS,
 } = {}) {
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
-  let report = evaluateLiveTab5(await readState(normalizedBaseUrl));
+  const initialState = await readState(normalizedBaseUrl);
+  const cachedPets = initialState.pets;
+  let report = evaluateLiveTab5(initialState);
   let pending = pendingEvidence(report, waitFor);
   const startedAt = Date.now();
   while (pending.length > 0) {
@@ -225,7 +228,7 @@ export async function verifyLiveTab5({
       throw new Error(`等待真机证据超时：${pending.join("、")}`);
     }
     await new Promise((resolve) => setTimeout(resolve, pollMs));
-    report = evaluateLiveTab5(await readState(normalizedBaseUrl));
+    report = evaluateLiveTab5(await readState(normalizedBaseUrl, cachedPets));
     pending = pendingEvidence(report, waitFor);
   }
   return report;

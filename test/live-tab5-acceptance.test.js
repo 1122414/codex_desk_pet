@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   evaluateLiveTab5,
   parseLiveTab5Arguments,
+  verifyLiveTab5,
 } from "../scripts/verify-live-tab5.mjs";
 
 function fixture() {
@@ -126,4 +127,43 @@ test("live Tab5 arguments only permit loopback and known evidence", () => {
     () => parseLiveTab5Arguments(["--timeout-ms"]),
     /缺少参数/,
   );
+});
+
+test("live evidence polling reads the Pet catalog only once", async () => {
+  const originalFetch = globalThis.fetch;
+  const source = fixture();
+  let petReads = 0;
+  let snapshotReads = 0;
+  globalThis.fetch = async (url) => {
+    const route = new URL(url).pathname;
+    if (route === "/api/devices") {
+      return new Response(JSON.stringify(source.devices), { status: 200 });
+    }
+    if (route === "/api/pets") {
+      petReads += 1;
+      return new Response(JSON.stringify(source.pets), { status: 200 });
+    }
+    if (route === "/api/snapshot") {
+      snapshotReads += 1;
+      const snapshot = structuredClone(source.snapshot);
+      if (snapshotReads === 1) {
+        snapshot.voice.status = "idle";
+        snapshot.voice.transcript = null;
+      }
+      return new Response(JSON.stringify(snapshot), { status: 200 });
+    }
+    return new Response("", { status: 404 });
+  };
+  try {
+    const report = await verifyLiveTab5({
+      waitFor: ["voice"],
+      timeoutMs: 1_000,
+      pollMs: 1,
+    });
+    assert.equal(report.evidence.voice.completed, true);
+    assert.equal(snapshotReads, 2);
+    assert.equal(petReads, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
