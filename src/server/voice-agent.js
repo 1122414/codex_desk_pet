@@ -1,6 +1,14 @@
-const SAMPLE_RATE = 16_000;
+import {
+  LOCAL_SPEECH_MAX_SECONDS,
+  LOCAL_SPEECH_SAMPLE_RATE,
+  LocalSpeechRecognizer,
+} from "./local-speech-recognizer.js";
+
+const SAMPLE_RATE = LOCAL_SPEECH_SAMPLE_RATE;
 const MAX_AUDIO_CHUNK_BYTES = 2_048;
 const MAX_PENDING_CHUNKS = 64;
+const MAX_LOCAL_AUDIO_BYTES =
+  SAMPLE_RATE * 2 * LOCAL_SPEECH_MAX_SECONDS;
 const TRANSCRIPT_SETTLE_MS = 2_500;
 const CLOSED_SETTLE_MS = 120;
 const REALTIME_START_TIMEOUT_MS = 10_000;
@@ -36,6 +44,7 @@ export class VoiceAgent {
     transcriptSettleMs = TRANSCRIPT_SETTLE_MS,
     closedSettleMs = CLOSED_SETTLE_MS,
     realtimeStartTimeoutMs = REALTIME_START_TIMEOUT_MS,
+    localSpeech = new LocalSpeechRecognizer(),
   } = {}) {
     if (!bridge || !store || !petAgent) {
       throw new TypeError("VoiceAgent requires bridge, store, and petAgent");
@@ -47,6 +56,7 @@ export class VoiceAgent {
     this.transcriptSettleMs = transcriptSettleMs;
     this.closedSettleMs = closedSettleMs;
     this.realtimeStartTimeoutMs = realtimeStartTimeoutMs;
+    this.localSpeech = localSpeech;
     this.onNotification = (method, params) => this.#handleNotification(method, params);
     this.bridge.on("notification", this.onNotification);
   }
@@ -66,8 +76,11 @@ export class VoiceAgent {
       deviceId: session.deviceId,
       session,
       mode,
+      backend: null,
       threadId: null,
       transcriptParts: [],
+      audioChunks: [],
+      audioBytes: 0,
       audioChain: Promise.resolve(),
       pendingChunks: 0,
       stopping: false,
@@ -77,6 +90,7 @@ export class VoiceAgent {
       finalizeTimer: null,
       ready: null,
       resolveReady: null,
+      abortController: new AbortController(),
     };
     entry.ready = new Promise((resolve) => {
       entry.resolveReady = resolve;
@@ -91,11 +105,18 @@ export class VoiceAgent {
     });
     try {
       const account = await this.bridge.client.request("account/read", {});
-      if (account?.account?.type !== "apiKey") {
-        throw new Error(
-          "实时语音需要 OpenAI API Key 登录，当前 ChatGPT 登录暂不支持",
-        );
+      if (!account?.account?.type) {
+        throw new Error("Codex 当前未登录");
       }
+      if (account.account.type !== "apiKey") {
+        await this.localSpeech.assertReady();
+        entry.backend = "local";
+        entry.started = true;
+        entry.resolveReady(true);
+        this.store.setVoice({ status: "listening" });
+        return { accepted: true, mode, recognition: "local" };
+      }
+      entry.backend = "realtime";
       const response = await this.bridge.client.request("thread/start", {
         cwd: this.cwd,
         approvalPolicy: "never",
@@ -136,7 +157,7 @@ export class VoiceAgent {
         throw entry.startupError ?? new Error("Codex 实时语音启动失败");
       }
       this.store.setVoice({ status: "listening" });
-      return { accepted: true, mode };
+      return { accepted: true, mode, recognition: "realtime" };
     } catch (error) {
       this.#fail(entry, error);
       throw error;
@@ -156,6 +177,18 @@ export class VoiceAgent {
       !validBase64(payload.data)
     ) {
       throw new Error("语音音频块无效");
+    }
+    const decoded = Buffer.from(payload.data, "base64");
+    if (decoded.length !== payload.samplesPerChannel * 2) {
+      throw new Error("语音音频块长度无效");
+    }
+    if (entry.backend === "local") {
+      if (entry.audioBytes + decoded.length > MAX_LOCAL_AUDIO_BYTES) {
+        throw new Error(`单次语音不能超过 ${LOCAL_SPEECH_MAX_SECONDS} 秒`);
+      }
+      entry.audioChunks.push(decoded);
+      entry.audioBytes += decoded.length;
+      return true;
     }
     if (entry.pendingChunks >= MAX_PENDING_CHUNKS) {
       throw new Error("语音上传速度超过处理能力");
@@ -188,8 +221,19 @@ export class VoiceAgent {
     const entry = this.#sessions.get(deviceId);
     if (!entry) return { accepted: false };
     if (entry.stopping) return { accepted: true };
+    if (silent) {
+      await this.#cancel(entry);
+      return { accepted: true };
+    }
     entry.stopping = true;
-    if (!silent) this.store.setVoice({ status: "transcribing" });
+    this.store.setVoice({ status: "transcribing" });
+    if (entry.backend === "local") {
+      const audio = Buffer.concat(entry.audioChunks, entry.audioBytes);
+      entry.audioChunks = [];
+      entry.audioBytes = 0;
+      this.#transcribeLocal(entry, audio);
+      return { accepted: true };
+    }
     await entry.audioChain;
     if (!entry.threadId) {
       this.#sessions.delete(deviceId);
@@ -216,6 +260,7 @@ export class VoiceAgent {
     const entries = [...this.#sessions.values()];
     this.#sessions.clear();
     for (const entry of entries) {
+      entry.abortController.abort();
       entry.resolveReady(false);
       clearTimeout(entry.finalizeTimer);
       if (entry.threadId && this.bridge.client?.running) {
@@ -229,16 +274,8 @@ export class VoiceAgent {
   async disconnect(session) {
     const entry = this.#sessions.get(session?.deviceId);
     if (!entry || entry.session !== session) return;
-    this.#sessions.delete(entry.deviceId);
     entry.startupError = new Error("设备语音连接已断开");
-    entry.resolveReady(false);
-    clearTimeout(entry.finalizeTimer);
-    await entry.audioChain.catch(() => {});
-    if (entry.threadId && this.bridge.client?.running) {
-      await this.bridge.client.request("thread/realtime/stop", {
-        threadId: entry.threadId,
-      }).catch(() => {});
-    }
+    await this.#cancel(entry);
     this.store.setVoice({
       status: "idle",
       mode: null,
@@ -324,9 +361,40 @@ export class VoiceAgent {
     }
   }
 
+  async #transcribeLocal(entry, audio) {
+    try {
+      const transcript = await this.localSpeech.transcribe(audio, {
+        signal: entry.abortController.signal,
+      });
+      if (this.#sessions.get(entry.deviceId) !== entry) return;
+      entry.transcriptParts.push(transcript);
+      await this.#finalize(entry);
+    } catch (error) {
+      if (this.#sessions.get(entry.deviceId) === entry) {
+        this.#fail(entry, error);
+      }
+    }
+  }
+
+  async #cancel(entry) {
+    if (this.#sessions.get(entry.deviceId) === entry) {
+      this.#sessions.delete(entry.deviceId);
+    }
+    entry.abortController.abort();
+    entry.resolveReady(false);
+    clearTimeout(entry.finalizeTimer);
+    await entry.audioChain.catch(() => {});
+    if (entry.threadId && this.bridge.client?.running) {
+      await this.bridge.client.request("thread/realtime/stop", {
+        threadId: entry.threadId,
+      }).catch(() => {});
+    }
+  }
+
   #fail(entry, error) {
     if (entry.failed) return;
     entry.failed = true;
+    entry.abortController.abort();
     entry.resolveReady(false);
     if (this.#sessions.get(entry.deviceId) === entry) {
       this.#sessions.delete(entry.deviceId);

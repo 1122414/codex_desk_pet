@@ -7,6 +7,8 @@ import { VoiceAgent } from "../src/server/voice-agent.js";
 function createFixture({
   accountType = "apiKey",
   realtimeStartNotification = "started",
+  localTranscript = "本地语音识别成功",
+  localReadyError = null,
 } = {}) {
   const bridge = new EventEmitter();
   const requests = [];
@@ -45,6 +47,18 @@ function createFixture({
     },
   };
   const events = [];
+  const localAudio = [];
+  const localSpeech = {
+    assertReady: async () => {
+      if (localReadyError) throw new Error(localReadyError);
+      return { ready: true };
+    },
+    transcribe: async (audio, { signal }) => {
+      assert.equal(signal.aborted, false);
+      localAudio.push(Buffer.from(audio));
+      return localTranscript;
+    },
+  };
   const session = {
     ready: true,
     deviceId: "tab5-voice-1",
@@ -59,6 +73,7 @@ function createFixture({
     transcriptSettleMs: 1,
     closedSettleMs: 1,
     realtimeStartTimeoutMs: 50,
+    localSpeech,
   });
   return {
     agent,
@@ -67,6 +82,7 @@ function createFixture({
     chatCalls,
     commandCalls,
     events,
+    localAudio,
     session,
     store,
   };
@@ -82,7 +98,7 @@ test("voice chat streams PCM into Codex Realtime and returns a bounded reply", a
 
   assert.deepEqual(
     await fixture.agent.start(fixture.session, { mode: "chat" }),
-    { accepted: true, mode: "chat" },
+    { accepted: true, mode: "chat", recognition: "realtime" },
   );
   assert.equal(fixture.store.snapshot().voice.status, "listening");
   assert.equal(
@@ -143,24 +159,56 @@ test("voice start waits for the realtime started notification and surfaces async
   }]);
 });
 
-test("voice start fails clearly before opening realtime for a ChatGPT login", async (t) => {
-  const fixture = createFixture({ accountType: "chatgpt" });
+test("ChatGPT login uses local speech recognition without an API key", async (t) => {
+  const fixture = createFixture({
+    accountType: "chatgpt",
+    localTranscript: "今天进展怎么样",
+  });
   t.after(() => fixture.agent.close());
 
-  await assert.rejects(
-    fixture.agent.start(fixture.session, { mode: "chat" }),
-    /API Key 登录/,
+  assert.deepEqual(
+    await fixture.agent.start(fixture.session, { mode: "chat" }),
+    { accepted: true, mode: "chat", recognition: "local" },
   );
   assert.equal(
     fixture.requests.some(({ method }) => method === "thread/start"),
     false,
   );
-  assert.equal(fixture.store.snapshot().voice.status, "failed");
+  const samples = Buffer.alloc(640 * 2, 7);
+  assert.equal(fixture.agent.acceptAudio(fixture.session, {
+    event: "voice.audio",
+    data: samples.toString("base64"),
+    sampleRate: 16_000,
+    numChannels: 1,
+    samplesPerChannel: 640,
+  }), true);
+  await fixture.agent.stop(fixture.session.deviceId);
+  await settle();
+
+  assert.equal(fixture.localAudio.length, 1);
+  assert.deepEqual(fixture.localAudio[0], samples);
+  assert.deepEqual(fixture.chatCalls, ["今天进展怎么样"]);
   assert.deepEqual(fixture.events, [{
     event: "voice.reply",
-    ok: false,
-    text: "实时语音需要 OpenAI API Key 登录，当前 ChatGPT 登录暂不支持",
+    ok: true,
+    text: "收到：今天进展怎么样",
   }]);
+  assert.equal(fixture.store.snapshot().voice.status, "completed");
+});
+
+test("ChatGPT voice reports a clear local setup error", async (t) => {
+  const fixture = createFixture({
+    accountType: "chatgpt",
+    localReadyError: "未找到本地语音模型；请先运行 npm run setup:local-voice",
+  });
+  t.after(() => fixture.agent.close());
+
+  await assert.rejects(
+    fixture.agent.start(fixture.session, { mode: "chat" }),
+    /setup:local-voice/,
+  );
+  assert.equal(fixture.store.snapshot().voice.status, "failed");
+  assert.match(fixture.events[0].text, /setup:local-voice/);
 });
 
 test("voice command is queued for explicit confirmation instead of executing", async (t) => {
@@ -176,6 +224,33 @@ test("voice command is queued for explicit confirmation instead of executing", a
   fixture.bridge.emit("notification", "thread/realtime/closed", {
     threadId: "voice-thread-1",
   });
+  await settle();
+
+  assert.deepEqual(fixture.commandCalls, ["让 Codex 运行测试"]);
+  assert.deepEqual(fixture.events, [{
+    event: "voice.command.queued",
+    requestId: "voice-command-1",
+    text: "让 Codex 运行测试",
+  }]);
+  assert.equal(fixture.store.snapshot().voice.status, "awaiting-confirmation");
+});
+
+test("local voice command is queued for explicit confirmation", async (t) => {
+  const fixture = createFixture({
+    accountType: "chatgpt",
+    localTranscript: "让 Codex 运行测试",
+  });
+  t.after(() => fixture.agent.close());
+  await fixture.agent.start(fixture.session, { mode: "command" });
+  const samples = Buffer.alloc(320 * 2);
+  fixture.agent.acceptAudio(fixture.session, {
+    event: "voice.audio",
+    data: samples.toString("base64"),
+    sampleRate: 16_000,
+    numChannels: 1,
+    samplesPerChannel: 320,
+  });
+  await fixture.agent.stop(fixture.session.deviceId);
   await settle();
 
   assert.deepEqual(fixture.commandCalls, ["让 Codex 运行测试"]);

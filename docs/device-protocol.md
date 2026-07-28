@@ -140,7 +140,7 @@
 ## 语音与视觉事件
 
 - 设备按住“对话”或“命令”后发送 `voice.start`，随后通过加密 `event` 发送 16 kHz、单声道 PCM 分块，松开时发送 `voice.stop`。
-- Bridge 使用 Codex App Server Realtime 得到文字；对话交给临时只读 Pet 会话，命令只进入设备确认队列，未确认时绝不创建可执行任务。
+- ChatGPT 登录时 Bridge 使用电脑本地 `whisper.cpp` 得到文字，不需要 API Key；API Key 登录可继续使用 Codex App Server Realtime。两条路径都会把对话交给临时只读 Pet 会话，命令只进入设备确认队列，未确认时绝不创建可执行任务。
 - 拍照由设备手动触发。P4 把相机 RGB565 帧硬件编码为不超过 512 KiB 的 JPEG，依次发送 `vision.capture.begin/chunk/end`。
 - Bridge 强制校验设备身份、USB/Wi‑Fi 链路、分块顺序、总大小与 SHA‑256；临时文件权限为 `0600`，多模态回合结束后立即删除。
 - 摄像头 MVP 不连续录像、不后台抓拍，也不做人脸身份、健康、情绪或其他敏感属性推断。

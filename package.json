@@ -20,6 +20,7 @@
     "test:virtual-tab5": "node scripts/verify-virtual-tab5.mjs",
     "test:stability": "node scripts/run-stability.mjs && node scripts/check-firmware.mjs",
     "test:firmware": "node scripts/check-firmware.mjs",
+    "setup:local-voice": "node scripts/setup-local-voice.mjs",
     "setup:firmware-tts": "node scripts/setup-esp-tts.mjs",
     "build:bundled-pet": "node scripts/build-bundled-pet.mjs",
     "build:firmware": "pio run -d firmware",
