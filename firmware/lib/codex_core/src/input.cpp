@@ -1,5 +1,6 @@
 #include "codex_core/input.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 #include "codex_core/animation.hpp"
@@ -9,6 +10,18 @@ namespace codex {
 bool Rect::contains(const Point point) const {
   return point.x >= x && point.y >= y && point.x < x + width &&
          point.y < y + height;
+}
+
+bool touchMovedBeyondSlop(
+    const Point start,
+    const Point current,
+    const std::int16_t slop) {
+  const auto dx = static_cast<std::int32_t>(current.x) - start.x;
+  const auto dy = static_cast<std::int32_t>(current.y) - start.y;
+  const auto safe_slop = std::max<std::int32_t>(slop, 0);
+  return static_cast<std::int64_t>(dx) * dx +
+          static_cast<std::int64_t>(dy) * dy >=
+      static_cast<std::int64_t>(safe_slop) * safe_slop;
 }
 
 InputController::InputController(const InputLayout layout) : layout_(layout) {}

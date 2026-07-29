@@ -105,6 +105,19 @@ void testModel() {
 }
 
 void testInput() {
+  expect(
+      !codex::touchMovedBeyondSlop({100, 100}, {104, 104}, 8),
+      "small diagonal touch jitter remains a tap");
+  expect(
+      codex::touchMovedBeyondSlop({100, 100}, {106, 106}, 8),
+      "diagonal drag exceeds the circular tap slop");
+  expect(
+      codex::touchMovedBeyondSlop({100, 100}, {109, 100}, 8),
+      "horizontal drag is never treated as a task tap");
+  expect(
+      codex::touchMovedBeyondSlop({100, 100}, {100, 109}, 8),
+      "vertical drag is never treated as a task tap");
+
   codex::InputController input;
   auto action = input.onTouch(
       codex::TouchPhase::Pressed, {240, 180}, 100, true, true);

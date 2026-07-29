@@ -93,6 +93,15 @@ try {
     throw new Error("Tab5 会话返回必须使用扩大命中区并在按下时立即执行");
   }
   if (
+    !tab5Ui.includes("kTouchMoveThreshold = 8") ||
+    !tab5Ui.includes(
+      "touchMovedBeyondSlop(\n                  task_touch_start_, point, kTouchMoveThreshold)",
+    ) ||
+    !tab5Ui.includes("if (task_touch_moved_)")
+  ) {
+    throw new Error("Tab5 任务列表必须区分点击与任意方向滑动，滑动松手不能打开会话");
+  }
+  if (
     !tab5Ui.includes(
       "normal_screen_rendered_ && fingerprint == rendered_fingerprint_",
     )

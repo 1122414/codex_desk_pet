@@ -19,6 +19,8 @@ struct Rect {
   bool contains(Point point) const;
 };
 
+bool touchMovedBeyondSlop(Point start, Point current, std::int16_t slop);
+
 enum class TouchPhase : std::uint8_t {
   Pressed,
   Moved,

@@ -51,7 +51,7 @@ constexpr std::int16_t kKeyHeight = 88;
 constexpr std::int16_t kTaskRowHeight = 72;
 constexpr std::uint8_t kVisibleTaskRows = 5;
 constexpr std::int16_t kDetailMessageRowHeight = 124;
-constexpr std::int16_t kTouchMoveThreshold = 14;
+constexpr std::int16_t kTouchMoveThreshold = 8;
 constexpr std::int16_t kRegionChunkRows = 64;
 constexpr std::int16_t kRegionBufferWidth = 808;
 constexpr std::uint64_t kTaskScrollFrameIntervalMs = 33;
@@ -607,22 +607,25 @@ UiAction Tab5Ui::pollTouch(
           input_.cancel();
           task_touch_active_ = true;
           task_touch_moved_ = false;
-          task_touch_start_y_ = point.y;
+          task_touch_start_ = point;
           task_scroll_start_pixels_ = static_cast<std::int16_t>(
               std::min<std::int32_t>(
                   detail_scroll_pixels_, maximum_scroll));
           return {};
         }
         if (task_touch_active_) {
-          const auto delta = task_touch_start_y_ - point.y;
-          if (std::abs(delta) > kTouchMoveThreshold) {
+          const auto delta = task_touch_start_.y - point.y;
+          if (touchMovedBeyondSlop(
+                  task_touch_start_, point, kTouchMoveThreshold)) {
             task_touch_moved_ = true;
           }
-          detail_scroll_pixels_ = static_cast<std::int16_t>(
-              std::clamp<int>(
-                  static_cast<int>(task_scroll_start_pixels_) + delta,
-                  0,
-                  static_cast<int>(maximum_scroll)));
+          if (task_touch_moved_) {
+            detail_scroll_pixels_ = static_cast<std::int16_t>(
+                std::clamp<int>(
+                    static_cast<int>(task_scroll_start_pixels_) + delta,
+                    0,
+                    static_cast<int>(maximum_scroll)));
+          }
           if (released) {
             task_touch_active_ = false;
             task_touch_moved_ = false;
@@ -639,20 +642,23 @@ UiAction Tab5Ui::pollTouch(
         input_.cancel();
         task_touch_active_ = true;
         task_touch_moved_ = false;
-        task_touch_start_y_ = point.y;
+        task_touch_start_ = point;
         task_scroll_start_pixels_ = static_cast<std::int16_t>(
             std::min<std::int32_t>(task_scroll_pixels_, maximum_scroll));
         return {};
       }
       if (task_touch_active_) {
-        const auto delta = task_touch_start_y_ - point.y;
-        if (std::abs(delta) > kTouchMoveThreshold) {
+        const auto delta = task_touch_start_.y - point.y;
+        if (touchMovedBeyondSlop(
+                task_touch_start_, point, kTouchMoveThreshold)) {
           task_touch_moved_ = true;
         }
-        task_scroll_pixels_ = static_cast<std::int16_t>(std::clamp<int>(
-            static_cast<int>(task_scroll_start_pixels_) + delta,
-            0,
-            static_cast<int>(maximum_scroll)));
+        if (task_touch_moved_) {
+          task_scroll_pixels_ = static_cast<std::int16_t>(std::clamp<int>(
+              static_cast<int>(task_scroll_start_pixels_) + delta,
+              0,
+              static_cast<int>(maximum_scroll)));
+        }
         if (released) {
           const auto was_moved = task_touch_moved_;
           task_touch_active_ = false;
@@ -660,7 +666,7 @@ UiAction Tab5Ui::pollTouch(
           if (!was_moved && kTaskListArea.contains(point)) {
             const auto content_y =
                 task_scroll_start_pixels_ +
-                task_touch_start_y_ -
+                task_touch_start_.y -
                 kTaskListArea.y;
             const auto index = static_cast<std::size_t>(
                 std::max<std::int32_t>(content_y, 0) / kTaskRowHeight);
@@ -719,7 +725,7 @@ UiAction Tab5Ui::pollTouch(
         kTaskListArea.contains(last_touch_)) {
       const auto content_y =
           task_scroll_start_pixels_ +
-          task_touch_start_y_ -
+          task_touch_start_.y -
           kTaskListArea.y;
       const auto index = static_cast<std::size_t>(
           std::max<std::int32_t>(content_y, 0) / kTaskRowHeight);

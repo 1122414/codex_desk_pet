@@ -147,7 +147,7 @@ class Tab5Ui {
   bool voice_recording_ = false;
   String voice_mode_;
   bool camera_busy_ = false;
-  std::int16_t task_touch_start_y_ = 0;
+  Point task_touch_start_{};
   std::int16_t task_scroll_start_pixels_ = 0;
   std::int16_t task_scroll_pixels_ = 0;
   std::int16_t rendered_task_scroll_pixels_ = -1;
