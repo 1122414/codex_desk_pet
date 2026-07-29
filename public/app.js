@@ -467,7 +467,9 @@ function renderThreadConversation(detail) {
     bubble.className = `thread-message ${user ? "thread-message-user" : "thread-message-assistant"}`;
     const role = document.createElement("strong");
     role.textContent = user
-      ? "YOU // 指挥官"
+      ? document.body.dataset.theme === "chibi-skadi"
+        ? "YOU // 博士"
+        : "YOU // 指挥官"
       : document.body.dataset.theme === "feibi"
         ? "FEIBI // CODEX"
         : document.body.dataset.theme === "chibi-skadi"

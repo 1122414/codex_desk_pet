@@ -91,7 +91,7 @@ export class JsonRpcClient extends EventEmitter {
     });
 
     const initialized = await this.request("initialize", {
-      clientInfo: { name: "codex-desk-buddy", title: "Codex Desk Buddy", version: "0.4.1" },
+      clientInfo: { name: "codex-desk-buddy", title: "Codex Desk Buddy", version: "0.4.2" },
       capabilities: {
         experimentalApi: true,
         requestAttestation: false,

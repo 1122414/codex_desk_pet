@@ -47,19 +47,19 @@ void testAnimations() {
     for (std::size_t frame = 0; frame < spec.frame_count; ++frame) {
       loop_duration += spec.durations_ms[frame];
     }
-    expect(loop_duration >= 1'500, "animation loops do not blink rapidly");
+    expect(loop_duration >= 2'200, "animation loops keep a relaxed cadence");
   }
   expect(
-      codex::animationSpec(codex::Animation::Idle).durations_ms[0] >= 1'500 &&
-          codex::animationSpec(codex::Animation::Idle).durations_ms[5] >= 1'500,
+      codex::animationSpec(codex::Animation::Idle).durations_ms[0] >= 2'500 &&
+          codex::animationSpec(codex::Animation::Idle).durations_ms[5] >= 2'500,
       "idle animation rests before repeating its blink");
   expect(codex::lookDirectionIndex(359.0F) == 0, "359 degrees wraps to zero");
   expect(codex::lookDirectionIndex(22.6F) == 1, "look angle snaps to 22.5 degrees");
 
   codex::AnimationPlayer player;
   player.set(codex::Animation::Waving, 100);
-  expect(player.frame(319) == 0, "animation keeps the first frame for its duration");
-  expect(player.frame(320) == 1, "animation advances at the exact frame boundary");
+  expect(player.frame(399) == 0, "animation keeps the first frame for its duration");
+  expect(player.frame(400) == 1, "animation advances at the exact frame boundary");
 }
 
 void testAudioPlans() {

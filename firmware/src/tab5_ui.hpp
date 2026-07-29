@@ -82,6 +82,11 @@ class Tab5Ui {
   void drawSkadiBackdrop();
   void drawFeibiBackdrop();
   void pushCanvasRegion(const Rect& bounds);
+  void pushScrolledCanvasRegion(
+      const Rect& bounds,
+      std::int16_t previous_scroll,
+      std::int16_t current_scroll,
+      const Rect& scrollbar);
   void drawChevron(
       const Rect& bounds,
       bool points_right,

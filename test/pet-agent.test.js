@@ -69,6 +69,23 @@ test("pet chat runs in an ephemeral read-only Codex thread", async () => {
   agent.close();
 });
 
+test("Skadi chat addresses the user as 博士 and starts a new persona thread", async () => {
+  const store = new DeskStore({ selectedPetId: "chibi-skadi-v2" });
+  const bridge = new FakeBridge();
+  const agent = new PetAgent({ bridge, store, cwd: "/workspace" });
+
+  await agent.chat("你好");
+  assert.match(bridge.calls[0].params.developerInstructions, /称呼用户为“博士”/);
+  assert.match(bridge.calls[0].params.developerInstructions, /不要称呼用户为“指挥官”/);
+
+  store.setSelectedPet("codex-core");
+  await agent.chat("切换以后呢？");
+  const threadStarts = bridge.calls.filter(({ method }) => method === "thread/start");
+  assert.equal(threadStarts.length, 2);
+  assert.doesNotMatch(threadStarts[1].params.developerInstructions, /称呼用户为“博士”/);
+  agent.close();
+});
+
 test("pet chat rejects overlap instead of losing the first reply", async () => {
   const store = new DeskStore();
   const bridge = new FakeBridge({ autoComplete: false });

@@ -134,11 +134,17 @@ try {
     throw new Error("Tab5 动画必须缓存整行动画帧并局部提交，不能逐帧读取 SD");
   }
   if (
-    !tab5Ui.includes("kTaskScrollFrameIntervalMs = 33") ||
-    !tab5Ui.includes("pushCanvasRegion({464, 288, 780, 390})") ||
-    !tab5Ui.includes("pushCanvasRegion({464, 170, 780, 500})")
+    !tab5Ui.includes("kTaskScrollFrameIntervalMs = 16") ||
+    !tab5Ui.includes("pushScrolledCanvasRegion(") ||
+    !tab5Ui.includes("M5.Display.copyRect(") ||
+    !tab5Ui.includes("pushCanvasRegion(exposed)")
   ) {
-    throw new Error("Tab5 任务与会话滚动必须以约 30 FPS 局部提交，不能重绘标题");
+    throw new Error("Tab5 任务与会话滚动必须以约 60 FPS 原地移动，并只补绘暴露区域");
+  }
+  if (
+    !tab5Ui.includes('? (skadi ? "YOU // 博士" : "YOU // 指挥官")')
+  ) {
+    throw new Error("Tab5 的 Skadi 会话必须称呼用户为博士");
   }
   if (!tab5Ui.includes("drawTruncated(detail, detail_x, 28, 872 - detail_x)")) {
     throw new Error("Tab5 顶部任务详情必须按剩余宽度截断，不能覆盖时钟");

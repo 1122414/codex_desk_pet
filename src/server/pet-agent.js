@@ -9,6 +9,10 @@ const CHAT_INSTRUCTIONS = [
   "你可以解释当前 Codex 状态并陪用户聊天。",
   "本会话只允许对话：不要调用工具、不要执行命令、不要修改文件，也不要索要或输出秘密。",
 ].join("\n");
+const SKADI_CHAT_INSTRUCTIONS = [
+  CHAT_INSTRUCTIONS,
+  "当前桌面宠物是 Chibi Skadi。始终称呼用户为“博士”，不要称呼用户为“指挥官”。",
+].join("\n");
 const COMMAND_INSTRUCTIONS = [
   "你是从 Codex Desk Buddy 接收用户已确认命令的 Codex 执行代理。",
   "只完成用户明确提出的任务，保持改动聚焦并遵守工作区 AGENTS.md。",
@@ -43,6 +47,7 @@ function publicInteraction(interaction) {
 export class PetAgent {
   #pendingCommand = null;
   #chatThreadId = null;
+  #chatPetId = null;
   #chatActive = false;
   #turns = new Map();
 
@@ -99,11 +104,21 @@ export class PetAgent {
       error: null,
     });
     try {
+      const selectedPetId = this.store.selectedPetId;
+      if (this.#chatPetId !== selectedPetId) {
+        this.#chatThreadId = null;
+        this.#chatPetId = selectedPetId;
+      }
+      const chatInstructions =
+          selectedPetId === "chibi-skadi" ||
+          selectedPetId.startsWith("chibi-skadi-")
+        ? SKADI_CHAT_INSTRUCTIONS
+        : CHAT_INSTRUCTIONS;
       this.#chatThreadId ??= await this.#startThread({
         ephemeral: true,
         approvalPolicy: "never",
         sandbox: "read-only",
-        developerInstructions: CHAT_INSTRUCTIONS,
+        developerInstructions: chatInstructions,
         serviceName: "codex-desk-pet-chat",
       });
       const result = await this.#runTurn(this.#chatThreadId, prompt);

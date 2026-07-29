@@ -54,7 +54,7 @@ constexpr std::int16_t kDetailMessageRowHeight = 124;
 constexpr std::int16_t kTouchMoveThreshold = 8;
 constexpr std::int16_t kRegionChunkRows = 64;
 constexpr std::int16_t kRegionBufferWidth = 808;
-constexpr std::uint64_t kTaskScrollFrameIntervalMs = 33;
+constexpr std::uint64_t kTaskScrollFrameIntervalMs = 16;
 constexpr std::uint64_t kPetButtonReleaseGuardMs = 120;
 constexpr std::uint8_t kPetAnimationRowFrames = 8;
 constexpr std::uint16_t kBundledPetWidth = 192;
@@ -354,7 +354,11 @@ void Tab5Ui::render(
               now_ms - last_task_scroll_render_at_ms_ >=
                   kTaskScrollFrameIntervalMs)) {
         drawTaskList(snapshot, now_ms);
-        pushCanvasRegion({464, 288, 780, 390});
+        pushScrolledCanvasRegion(
+            kTaskListArea,
+            rendered_task_scroll_pixels_,
+            task_scroll_pixels_,
+            {1232, 288, 12, 390});
         rendered_task_scroll_pixels_ = task_scroll_pixels_;
         last_task_scroll_render_at_ms_ = now_ms;
       }
@@ -368,7 +372,11 @@ void Tab5Ui::render(
               now_ms - last_task_scroll_render_at_ms_ >=
                   kTaskScrollFrameIntervalMs)) {
         drawThreadMessages(snapshot);
-        pushCanvasRegion({464, 170, 780, 500});
+        pushScrolledCanvasRegion(
+            kThreadDetailArea,
+            rendered_detail_scroll_pixels_,
+            detail_scroll_pixels_,
+            {1232, 170, 12, 500});
         rendered_detail_scroll_pixels_ = detail_scroll_pixels_;
         last_task_scroll_render_at_ms_ = now_ms;
       }
@@ -2034,7 +2042,7 @@ void Tab5Ui::drawThreadMessages(const Snapshot& snapshot) {
     canvas_.setTextColor(bubble_accent, bubble);
     canvas_.drawString(
         user
-            ? "YOU // 指挥官"
+            ? (skadi ? "YOU // 博士" : "YOU // 指挥官")
             : feibi
                 ? "FEIBI // CODEX"
                 : skadi ? "SKADI // CODEX" : "CODEX // 助手",
@@ -2088,6 +2096,49 @@ void Tab5Ui::pushCanvasRegion(const Rect& bounds) {
         region_pixels_);
   }
   M5.Display.endWrite();
+}
+
+void Tab5Ui::pushScrolledCanvasRegion(
+    const Rect& bounds,
+    const std::int16_t previous_scroll,
+    const std::int16_t current_scroll,
+    const Rect& scrollbar) {
+  const auto delta = static_cast<std::int32_t>(current_scroll) -
+      static_cast<std::int32_t>(previous_scroll);
+  const auto distance = std::abs(delta);
+  if (
+      previous_scroll < 0 ||
+      distance == 0 ||
+      distance >= bounds.height / 2) {
+    pushCanvasRegion(bounds);
+    pushCanvasRegion(scrollbar);
+    return;
+  }
+
+  Rect exposed = bounds;
+  if (delta > 0) {
+    M5.Display.copyRect(
+        bounds.x,
+        bounds.y,
+        bounds.width,
+        bounds.height - distance,
+        bounds.x,
+        bounds.y + distance);
+    exposed.y = static_cast<std::int16_t>(
+        bounds.y + bounds.height - distance);
+    exposed.height = static_cast<std::int16_t>(distance);
+  } else {
+    M5.Display.copyRect(
+        bounds.x,
+        bounds.y + distance,
+        bounds.width,
+        bounds.height - distance,
+        bounds.x,
+        bounds.y);
+    exposed.height = static_cast<std::int16_t>(distance);
+  }
+  pushCanvasRegion(exposed);
+  pushCanvasRegion(scrollbar);
 }
 
 void Tab5Ui::drawChevron(
