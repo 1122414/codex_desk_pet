@@ -102,7 +102,7 @@ class Tab5Ui {
   static constexpr std::int16_t kScreenWidth = 1280;
   static constexpr std::int16_t kScreenHeight = 720;
   static constexpr Rect kPetArea{24, 88, 408, 608};
-  static constexpr Rect kPetSpriteArea{36, 108, 384, 416};
+  static constexpr Rect kPetSpriteArea{36, 124, 384, 416};
   static constexpr Rect kPreviousPetButton{44, 636, 64, 44};
   static constexpr Rect kNextPetButton{348, 636, 64, 44};
   static constexpr Rect kVoiceChatButton{116, 626, 72, 56};

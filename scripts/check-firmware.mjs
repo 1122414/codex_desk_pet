@@ -56,6 +56,10 @@ try {
     path.join(root, "firmware", "src", "tab5_ui.cpp"),
     "utf8",
   );
+  const tab5UiHeader = await readFile(
+    path.join(root, "firmware", "src", "tab5_ui.hpp"),
+    "utf8",
+  );
   if (
     !tab5Ui.includes('"/bundled-pet/r%uf%u.rle"') ||
     tab5Ui.includes("drawPng(")
@@ -94,12 +98,26 @@ try {
   }
   if (
     !tab5Ui.includes("kTouchMoveThreshold = 8") ||
+    !tab5Ui.includes("const auto clicked = detail.wasClicked();") ||
+    !tab5Ui.includes("detail.wasFlicked()") ||
+    !tab5Ui.includes("detail.wasDragged()") ||
     !tab5Ui.includes(
       "touchMovedBeyondSlop(\n                  task_touch_start_, point, kTouchMoveThreshold)",
     ) ||
-    !tab5Ui.includes("if (task_touch_moved_)")
+    !tab5Ui.includes("if (task_touch_moved_)") ||
+    !tab5Ui.includes(
+      "if (clicked && !was_moved && kTaskListArea.contains(point))",
+    ) ||
+    tab5Ui.includes("kTaskListArea.contains(last_touch_)")
   ) {
-    throw new Error("Tab5 任务列表必须区分点击与任意方向滑动，滑动松手不能打开会话");
+    throw new Error("Tab5 任务列表只能由系统确认的点击打开，滑动或丢失释放不能打开会话");
+  }
+  if (
+    !tab5UiHeader.includes("kPetSpriteArea{36, 124, 384, 416}") ||
+    !tab5Ui.includes('drawString("CHIBI SKADI // TIDAL LINK", 404, 98)') ||
+    !tab5Ui.includes('drawString("FEIBI // STARLIGHT DESK", 404, 98)')
+  ) {
+    throw new Error("Tab5 Pet 帧区域必须避开 Skadi 与菲比主题标题");
   }
   if (
     !tab5Ui.includes(

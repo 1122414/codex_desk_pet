@@ -496,6 +496,14 @@ UiAction Tab5Ui::pollTouch(
     };
     last_touch_ = point;
     const auto released = detail.wasReleased();
+    const auto clicked = detail.wasClicked();
+    const auto hardware_moved =
+        detail.wasFlickStart() ||
+        detail.isFlicking() ||
+        detail.wasFlicked() ||
+        detail.wasDragStart() ||
+        detail.isDragging() ||
+        detail.wasDragged();
     const auto pressed =
         !released && (detail.wasPressed() || !touch_active_);
     const auto phase = released ? TouchPhase::Released
@@ -615,6 +623,9 @@ UiAction Tab5Ui::pollTouch(
         }
         if (task_touch_active_) {
           const auto delta = task_touch_start_.y - point.y;
+          if (hardware_moved) {
+            task_touch_moved_ = true;
+          }
           if (touchMovedBeyondSlop(
                   task_touch_start_, point, kTouchMoveThreshold)) {
             task_touch_moved_ = true;
@@ -649,6 +660,9 @@ UiAction Tab5Ui::pollTouch(
       }
       if (task_touch_active_) {
         const auto delta = task_touch_start_.y - point.y;
+        if (hardware_moved) {
+          task_touch_moved_ = true;
+        }
         if (touchMovedBeyondSlop(
                 task_touch_start_, point, kTouchMoveThreshold)) {
           task_touch_moved_ = true;
@@ -663,7 +677,7 @@ UiAction Tab5Ui::pollTouch(
           const auto was_moved = task_touch_moved_;
           task_touch_active_ = false;
           task_touch_moved_ = false;
-          if (!was_moved && kTaskListArea.contains(point)) {
+          if (clicked && !was_moved && kTaskListArea.contains(point)) {
             const auto content_y =
                 task_scroll_start_pixels_ +
                 task_touch_start_.y -
@@ -716,25 +730,8 @@ UiAction Tab5Ui::pollTouch(
     return {};
   }
   if (task_touch_active_) {
-    const auto was_moved = task_touch_moved_;
     task_touch_active_ = false;
     task_touch_moved_ = false;
-    if (
-        !thread_detail_.visible &&
-        !was_moved &&
-        kTaskListArea.contains(last_touch_)) {
-      const auto content_y =
-          task_scroll_start_pixels_ +
-          task_touch_start_.y -
-          kTaskListArea.y;
-      const auto index = static_cast<std::size_t>(
-          std::max<std::int32_t>(content_y, 0) / kTaskRowHeight);
-      if (index < snapshot.tasks.size()) {
-        return {
-            UiActionType::OpenThread,
-            String(snapshot.tasks[index].id.c_str())};
-      }
-    }
     return {};
   }
   if (voice_touch_active_) {
@@ -1053,7 +1050,7 @@ void Tab5Ui::drawPet(const Snapshot& snapshot, const std::uint64_t now_ms) {
   canvas_.setTextColor(text, panel);
   canvas_.setTextSize(1);
   canvas_.setTextDatum(top_left);
-  drawTruncated(pet_name, 62, 546, 332);
+  drawTruncated(pet_name, 62, 550, 332);
   canvas_.setTextColor(stateColor(snapshot.state, skadi, feibi), panel);
   canvas_.setTextDatum(middle_center);
   canvas_.drawString(stateLabel(snapshot.state), 228, 590);
