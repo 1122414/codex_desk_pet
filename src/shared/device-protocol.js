@@ -12,7 +12,7 @@ import { PET_ATLAS, STANDARD_ANIMATIONS } from "./pet-spec.js";
 export const DEVICE_PROTOCOL_VERSION = 4;
 export const DEVICE_INFO_VERSION = 2;
 export const DEVICE_BOARD_ID = "m5stack-tab5-k145";
-export const DEVICE_FIRMWARE_VERSION = "0.4.2";
+export const DEVICE_FIRMWARE_VERSION = "0.4.3";
 export const MINIMUM_DEVICE_FIRMWARE_VERSION = "0.2.0";
 export const HEARTBEAT_INTERVAL_MS = 5_000;
 export const CONNECTION_TIMEOUT_MS = 15_000;
@@ -68,6 +68,11 @@ export const TRANSPORT_PROFILES = Object.freeze({
 export const RELIABLE_MESSAGE_TYPES = Object.freeze(
   MESSAGE_TYPES.filter((type) => !["ack", "heartbeat", "error"].includes(type)),
 );
+
+export function isReliableMessage(type, payload = null) {
+  return RELIABLE_MESSAGE_TYPES.includes(type) &&
+    !(type === "event" && payload?.event === "voice.audio");
+}
 
 export const HANDSHAKE_MESSAGE_TYPES = Object.freeze([
   "hello",

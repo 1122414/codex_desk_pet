@@ -7,7 +7,6 @@ import {
   HEARTBEAT_INTERVAL_MS,
   PetResourceAssembler,
   ProtocolError,
-  RELIABLE_MESSAGE_TYPES,
   ReliableOutbox,
   SequenceWindow,
   TRANSPORT_PROFILES,
@@ -22,6 +21,7 @@ import {
   deriveSessionId,
   encryptEnvelopePayload,
   isEncryptedEnvelope,
+  isReliableMessage,
   normalizeDeviceInfo,
   validateEnvelope,
   verifyHandshakeProof,
@@ -309,7 +309,7 @@ export class DeviceSession extends EventEmitter {
     this.emit("closed");
   }
 
-  #send(type, payload, reliable = RELIABLE_MESSAGE_TYPES.includes(type)) {
+  #send(type, payload, reliable = isReliableMessage(type, payload)) {
     if (reliable && this.#outbox.size >= this.maxReliableInFlight) {
       if (type === "snapshot") {
         const queuedSnapshot = this.#reliableQueue.find((entry) => entry.type === "snapshot");
@@ -405,7 +405,7 @@ export class DeviceSession extends EventEmitter {
       }
       return;
     }
-    const reliable = RELIABLE_MESSAGE_TYPES.includes(envelope.type);
+    const reliable = isReliableMessage(envelope.type, envelope.payload);
     if (reliable) {
       const observation = this.#receiveWindow.observe(envelope);
       if (observation.status === "duplicate") {

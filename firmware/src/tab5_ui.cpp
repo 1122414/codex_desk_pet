@@ -926,7 +926,7 @@ void Tab5Ui::drawNormal(
           ? (feibi ? kFeibiRose : skadi ? kSkadiCoral : kRed)
           : panel_light);
   canvas_.drawString(
-      voice_chat_recording ? "结束" : "对话",
+      voice_chat_recording ? "停止" : "对话",
       kVoiceChatButton.x + kVoiceChatButton.width / 2,
       kVoiceChatButton.y + kVoiceChatButton.height / 2);
   canvas_.setTextColor(
@@ -935,7 +935,7 @@ void Tab5Ui::drawNormal(
           ? (feibi ? kFeibiRose : skadi ? kSkadiCoral : kRed)
           : panel_light);
   canvas_.drawString(
-      voice_command_recording ? "结束" : "命令",
+      voice_command_recording ? "停止" : "命令",
       kVoiceCommandButton.x + kVoiceCommandButton.width / 2,
       kVoiceCommandButton.y + kVoiceCommandButton.height / 2);
   canvas_.setTextColor(

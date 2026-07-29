@@ -77,6 +77,60 @@ test("device and bridge mutually authenticate before the encrypted initial snaps
   await waitFor(() => bridge.pendingAcknowledgements === 0 && device.pendingAcknowledgements === 0);
 });
 
+test("consecutive live voice chunks arrive before the next reliable command", async (t) => {
+  const commands = [];
+  const { bridge, device } = createSessions({
+    commandHandler: async (payload) => {
+      commands.push(payload);
+      return null;
+    },
+  });
+  t.after(() => {
+    bridge.close();
+    device.close();
+  });
+  const events = [];
+  bridge.on("event", (event) => events.push(event));
+  bridge.start({ autoTick: false });
+  device.start({ autoTick: false });
+  await waitFor(() =>
+    bridge.ready &&
+    device.ready &&
+    bridge.pendingAcknowledgements === 0 &&
+    device.pendingAcknowledgements === 0,
+  );
+
+  device.sendEvent({
+    event: "voice.audio",
+    data: Buffer.from([1, 2, 3, 4]).toString("base64"),
+    sampleRate: 16_000,
+    numChannels: 1,
+    samplesPerChannel: 2,
+  });
+  device.sendEvent({
+    event: "voice.audio",
+    data: Buffer.from([5, 6, 7, 8]).toString("base64"),
+    sampleRate: 16_000,
+    numChannels: 1,
+    samplesPerChannel: 2,
+  });
+  device.sendCommand("voice.stop", {}, randomUUID());
+
+  await waitFor(() =>
+    events.length === 2 &&
+    commands.length === 1 &&
+    device.pendingAcknowledgements === 0,
+  );
+  assert.deepEqual(
+    events.map(({ data }) => data),
+    [
+      Buffer.from([1, 2, 3, 4]).toString("base64"),
+      Buffer.from([5, 6, 7, 8]).toString("base64"),
+    ],
+  );
+  assert.equal(commands[0].command, "voice.stop");
+});
+
 test("an authenticated session rejects a plaintext downgrade and closes the link", async (t) => {
   const { bridge, device, transports } = createSessions();
   t.after(() => {

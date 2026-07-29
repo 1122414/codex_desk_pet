@@ -232,8 +232,8 @@ try {
   }
   if (
     tab5Ui.includes('voice_recording_ ? "松开"') ||
-    !tab5Ui.includes('voice_chat_recording ? "结束" : "对话"') ||
-    !tab5Ui.includes('voice_command_recording ? "结束" : "命令"')
+    !tab5Ui.includes('voice_chat_recording ? "停止" : "对话"') ||
+    !tab5Ui.includes('voice_command_recording ? "停止" : "命令"')
   ) {
     throw new Error("Tab5 语音必须仅让当前模式采用单击开始、再次单击结束");
   }

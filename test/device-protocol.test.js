@@ -20,6 +20,7 @@ import {
   encryptEnvelopePayload,
   evaluateDeviceCompatibility,
   isEncryptedEnvelope,
+  isReliableMessage,
   normalizeWifiProvisioning,
   parseEnvelope,
   serializeEnvelope,
@@ -33,6 +34,13 @@ test("protocol creates valid versioned envelopes and acknowledgements", () => {
   const ack = createAck(message, 2);
   assert.equal(ack.payload.acknowledgedSequence, 1);
   assert.equal(ack.payload.acknowledgedId, "message-0001");
+});
+
+test("live voice audio events are non-reliable while other events remain reliable", () => {
+  assert.equal(isReliableMessage("event", { event: "voice.audio" }), false);
+  assert.equal(isReliableMessage("event", { event: "command.result" }), true);
+  assert.equal(isReliableMessage("snapshot", { revision: 1 }), true);
+  assert.equal(isReliableMessage("heartbeat", {}), false);
 });
 
 test("protocol rejects unsupported commands", () => {
