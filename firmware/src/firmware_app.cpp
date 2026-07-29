@@ -123,7 +123,9 @@ void FirmwareApp::loop() {
   if (voice_was_recording && !voice_.recording()) {
     audio_.setPaused(false);
     ui_.setVoiceRecording(false);
-    connection_detail_ = "语音链路中断";
+    connection_detail_ = voice_.lastError().isEmpty()
+        ? "语音链路中断"
+        : voice_.lastError();
   }
   const auto camera_was_uploading = camera_.uploading();
   camera_.poll();
@@ -381,7 +383,9 @@ void FirmwareApp::handleUiAction(const UiAction& action) {
                   : "正在听，再点一次结束";
         } else {
           audio_.setPaused(false);
-          connection_detail_ = "麦克风启动失败";
+          connection_detail_ = voice_.lastError().isEmpty()
+              ? "麦克风启动失败"
+              : voice_.lastError();
         }
       }
       break;

@@ -60,23 +60,38 @@ bool UsbTransport::sendText(const String& message) {
   constexpr std::size_t kChunkBytes = 128;
   constexpr std::uint64_t kWriteTimeoutMs = 3'000;
   const auto started_at = static_cast<std::uint64_t>(millis());
+  const auto write_all = [started_at](
+                             const std::uint8_t* data,
+                             const std::size_t length) {
+    std::size_t offset = 0;
+    while (offset < length) {
+      offset += Serial.write(data + offset, length - offset);
+      if (
+          offset < length &&
+          static_cast<std::uint64_t>(millis()) - started_at >=
+              kWriteTimeoutMs) {
+        return false;
+      }
+      if (offset < length) delay(1);
+    }
+    return true;
+  };
   std::size_t offset = 0;
   while (offset < message.length()) {
     const auto chunk = std::min<std::size_t>(
         kChunkBytes,
         message.length() - offset);
-    const auto written = Serial.write(
-        reinterpret_cast<const std::uint8_t*>(message.c_str() + offset),
-        chunk);
-    offset += written;
-    if (
-        written == 0 &&
-        static_cast<std::uint64_t>(millis()) - started_at >= kWriteTimeoutMs) {
+    if (!write_all(
+            reinterpret_cast<const std::uint8_t*>(
+                message.c_str() + offset),
+            chunk)) {
       return false;
     }
+    offset += chunk;
     delay(1);
   }
-  if (Serial.write('\n') != 1) return false;
+  constexpr std::uint8_t newline = '\n';
+  if (!write_all(&newline, 1)) return false;
   Serial.flush();
   return true;
 }

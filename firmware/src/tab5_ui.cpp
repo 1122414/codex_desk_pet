@@ -552,6 +552,18 @@ UiAction Tab5Ui::pollTouch(
       pet_button_blocked_action_ = UiActionType::None;
       pet_button_quiet_since_ms_ = 0;
     }
+    if (voice_button_release_blocked_) {
+      const auto blocked_button =
+          kVoiceChatButton.contains(point) ||
+          kVoiceCommandButton.contains(point);
+      if (blocked_button) {
+        voice_button_quiet_since_ms_ = 0;
+        input_.cancel();
+        return {};
+      }
+      voice_button_release_blocked_ = false;
+      voice_button_quiet_since_ms_ = 0;
+    }
     if (!confirmation_visible) {
       if (
           pressed &&
@@ -573,6 +585,14 @@ UiAction Tab5Ui::pollTouch(
         pet_button_release_blocked_ = true;
         pet_button_blocked_action_ = action;
         pet_button_quiet_since_ms_ = 0;
+        input_.cancel();
+        return {};
+      }
+      if (voice_touch_active_) {
+        if (!released) return {};
+        voice_touch_active_ = false;
+        voice_button_release_blocked_ = true;
+        voice_button_quiet_since_ms_ = 0;
         input_.cancel();
         return {};
       }
@@ -600,12 +620,6 @@ UiAction Tab5Ui::pollTouch(
               : UiAction{};
         }
         return {UiActionType::VoiceStart, pressed_mode};
-      }
-      if (voice_touch_active_) {
-        if (released) {
-          voice_touch_active_ = false;
-        }
-        return {};
       }
       if (thread_detail_.visible) {
         if (pressed && kThreadBackTouchArea.contains(point)) {
@@ -731,6 +745,26 @@ UiAction Tab5Ui::pollTouch(
     }
     return {};
   }
+  if (voice_touch_active_) {
+    voice_touch_active_ = false;
+    voice_button_release_blocked_ = true;
+    voice_button_quiet_since_ms_ = 0;
+    touch_active_ = false;
+    input_.cancel();
+    return {};
+  }
+  if (voice_button_release_blocked_) {
+    if (voice_button_quiet_since_ms_ == 0) {
+      voice_button_quiet_since_ms_ = now_ms;
+    } else if (
+        now_ms >= voice_button_quiet_since_ms_ &&
+        now_ms - voice_button_quiet_since_ms_ >=
+            kPetButtonReleaseGuardMs) {
+      voice_button_release_blocked_ = false;
+      voice_button_quiet_since_ms_ = 0;
+    }
+    return {};
+  }
   if (!touch_active_) return {};
   touch_active_ = false;
   if (!paired) {
@@ -740,10 +774,6 @@ UiAction Tab5Ui::pollTouch(
   if (task_touch_active_) {
     task_touch_active_ = false;
     task_touch_moved_ = false;
-    return {};
-  }
-  if (voice_touch_active_) {
-    voice_touch_active_ = false;
     return {};
   }
   if (camera_touch_active_) {

@@ -12,7 +12,7 @@ import { PET_ATLAS, STANDARD_ANIMATIONS } from "./pet-spec.js";
 export const DEVICE_PROTOCOL_VERSION = 4;
 export const DEVICE_INFO_VERSION = 2;
 export const DEVICE_BOARD_ID = "m5stack-tab5-k145";
-export const DEVICE_FIRMWARE_VERSION = "0.4.3";
+export const DEVICE_FIRMWARE_VERSION = "0.4.4";
 export const MINIMUM_DEVICE_FIRMWARE_VERSION = "0.2.0";
 export const HEARTBEAT_INTERVAL_MS = 5_000;
 export const CONNECTION_TIMEOUT_MS = 15_000;

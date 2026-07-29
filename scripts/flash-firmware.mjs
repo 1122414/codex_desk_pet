@@ -31,7 +31,7 @@ if (
 ) {
   throw new Error(
     "用法：npm run flash:firmware -- --port /dev/cu.usbmodemXXXX " +
-    "[--release dist/firmware/v0.4.3] [--erase]",
+    "[--release dist/firmware/v0.4.4] [--erase]",
   );
 }
 

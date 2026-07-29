@@ -91,6 +91,13 @@ try {
     throw new Error("Tab5 宠物切换键必须只隔离同一按键的释放，不能全局吞触摸");
   }
   if (
+    !tab5Ui.includes("voice_touch_active_") ||
+    !tab5Ui.includes("voice_button_release_blocked_") ||
+    !tab5Ui.includes("voice_button_quiet_since_ms_")
+  ) {
+    throw new Error("Tab5 语音按钮必须隔离同一次按压的触摸抖动，不能立即反向停止");
+  }
+  if (
     !tab5Ui.includes("kThreadBackTouchArea.contains(point)") ||
     !tab5Ui.includes("return {UiActionType::CloseThread, {}};")
   ) {
@@ -229,6 +236,17 @@ try {
     )
   ) {
     throw new Error("Tab5 收到语音结果后必须结束录音并恢复按钮");
+  }
+  const deviceVoice = await readFile(
+    path.join(root, "firmware", "src", "device_voice.cpp"),
+    "utf8",
+  );
+  if (
+    !deviceVoice.includes("kMaximumConsecutiveSendFailures") ||
+    !deviceVoice.includes("语音音频连续发送失败") ||
+    deviceVoice.includes("if (!sendCompletedChunk() || !beginChunk()) stop();")
+  ) {
+    throw new Error("Tab5 语音不能因单个音频分片发送失败而立即结束录音");
   }
   if (
     tab5Ui.includes('voice_recording_ ? "松开"') ||
