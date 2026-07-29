@@ -201,9 +201,9 @@ npm run smoke:codex
 - 当前 Codex App Server 没有公开 Pet 列表或 Pet 选择事件。MVP 由 Desk Bridge 同步触屏和电脑控制面板，但不会写入 Codex 原生客户端的私有设置。
 - Hooks 能让设备看到其他 Codex 客户端的 Running、Needs input 和 Completed 生命周期，并把设备对 `PermissionRequest` 的明确允许/拒绝返回原客户端。详情不完整、超过设备显示上限、Bridge 不可用或 115 秒超时时不代替用户决定，Codex 回到原生审批流程。
 - 当前等级根据“正在展示的线程”的累计 Token 计算，每 50,000 Token 一级；它不是 Codex 官方等级。
-- 完整 Tab5 v0.4.1 固件已经通过真实 ESP32-P4 工具链编译并写入真机；普通升级保留 NVS 中的配对与网络配置。任务卡只有在 M5 触摸驱动明确确认点击时才会进入会话，flick/drag 和丢失释放帧都会取消；Pet 动画降低循环频率，主题标题也已移出动画局部刷新区。设备回报协议 v4、USB+BLE 双链路、microSD 与离线中文语音数据健康，当前保持 `chibi-skadi-v2`。滑动手感、主题标题观感、摄像头画面、Wi‑Fi 射频、扬声器听感、电量曲线和 72 小时长稳仍需物理验收。
+- 完整 Tab5 v0.4.2 固件已经通过真实 ESP32-P4 工具链编译并写入真机；普通升级保留 NVS 中的配对与网络配置。任务卡只有在 M5 触摸驱动明确确认点击时才会进入会话，flick/drag 和丢失释放帧都会取消；任务与会话滚动改为屏内搬移旧画面并只补绘暴露条带，目标刷新间隔为 16 ms；Pet 动画循环进一步放慢，Skadi 的界面与 LLM 对话统一称用户为“博士”。设备回报协议 v4、USB+BLE 双链路、microSD 与离线中文语音数据健康，当前保持 `chibi-skadi-v2`。滑动手感、摄像头画面、Wi‑Fi 射频、扬声器听感、电量曲线和 72 小时长稳仍需物理验收。
 - 设备固件已链接 Espressif ESP-SR v1.2.0 离线中文 TTS；六种状态、Pet 安装/切换和配对都在独立音频任务中播报，缺失或损坏的 `voice_data` 会安全降级为不同音型。真机语音分区已完成烧录、映射和 CRC 完整性校验，音质与音量仍需真机试听。
 - BLE 只承担状态、Pet 选择和审批等小消息，不传 Pet 素材、PCM 语音或 JPEG 图片。ChatGPT 登录下的语音识别在电脑本地完成，LLM 回复和视觉理解继续使用电脑上已登录的 Codex App Server，当前 MVP 均不要求额外 API Key；若将来做成脱离用户电脑的独立产品，必须改用产品服务端 API、用户自带凭据或本地模型，不能把个人 ChatGPT 订阅当作可分发的 API 凭据。电脑关机时设备保留本地动画、时间和最近缓存状态，但不会伪造新的 Codex 信息。
 - 控制面板固定监听 `127.0.0.1`；真机只连接独立的 `4318` 设备端口。设备 payload 已做应用层加密，但公网部署仍需额外的防火墙、WSS/反向代理和产品运维方案。
 
-详细链路约束见 [设备协议](docs/device-protocol.md)，跨客户端状态见 [Codex Hooks](docs/codex-hooks.md)，音频实现与许可边界见 [固件音频](docs/firmware-audio.md)，故障注入边界见 [稳定性验证](docs/stability.md)，首次使用见 [安装与恢复](docs/install-and-recovery.md)，逐项结论见 [验收矩阵](docs/acceptance.md)，当前收尾路线见 [2026-07-28_001.md](2026-07-28_001.md)。
+详细链路约束见 [设备协议](docs/device-protocol.md)，跨客户端状态见 [Codex Hooks](docs/codex-hooks.md)，音频实现与许可边界见 [固件音频](docs/firmware-audio.md)，故障注入边界见 [稳定性验证](docs/stability.md)，首次使用见 [安装与恢复](docs/install-and-recovery.md)，逐项结论见 [验收矩阵](docs/acceptance.md)，当前性能收尾见 [2026-07-29_001.md](2026-07-29_001.md)。

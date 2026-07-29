@@ -47,7 +47,7 @@ npm run install:codex-hooks
 npm run release:firmware
 ```
 
-输出目录为 `dist/firmware/v0.4.1/`，其中包括：
+输出目录为 `dist/firmware/v0.4.2/`，其中包括：
 
 - `codex-desk-buddy-tab5-factory.bin`：首次安装或完整恢复使用的整机镜像。
 - `bootloader.bin`、`partitions.bin`、`boot_app0.bin`、`firmware.bin`、`voice_data.bin`、`spiffs.bin`：按固定偏移拆分的组件。
