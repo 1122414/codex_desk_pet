@@ -24,6 +24,15 @@ const DEFAULT_TELEMETRY = Object.freeze({
 });
 const MAX_DEVICE_TASKS = 12;
 const WEEKLY_WINDOW_MINUTES = 7 * 24 * 60;
+const CARE_STATUSES = new Set([
+  "idle",
+  "observing",
+  "thinking",
+  "speaking",
+  "listening",
+  "acting",
+  "failed",
+]);
 
 function safeInteger(value) {
   const number = Number(value);
@@ -87,12 +96,51 @@ function serializeUserInput(request) {
   return { ...publicRequest };
 }
 
+function boundedCareText(value, maximumLength, fallback = "") {
+  return typeof value === "string" ? value.slice(0, maximumLength) : fallback;
+}
+
+function careTimestamp(value) {
+  return Number.isFinite(value) && value >= 0 ? Math.floor(value) : null;
+}
+
+function normalizeCareEvent(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return {
+    id: boundedCareText(value.id, 128) || null,
+    type: boundedCareText(value.type, 64) || "unknown",
+    occurredAt: careTimestamp(value.occurredAt),
+    summary: boundedCareText(value.summary, 320),
+  };
+}
+
+function normalizeCareState(value = {}) {
+  const status = value.status ?? "idle";
+  if (!CARE_STATUSES.has(status)) throw new Error("Care status is invalid");
+  return {
+    status,
+    enabled: value.enabled === undefined ? true : Boolean(value.enabled),
+    nextObservationAt: careTimestamp(value.nextObservationAt),
+    lastObservationAt: careTimestamp(value.lastObservationAt),
+    lastInteractionAt: careTimestamp(value.lastInteractionAt),
+    conversationId: boundedCareText(value.conversationId, 128) || null,
+    summary: boundedCareText(value.summary, 400),
+    recentEvent: normalizeCareEvent(value.recentEvent),
+    error: boundedCareText(value.error, 500) || null,
+    updatedAt: careTimestamp(value.updatedAt),
+  };
+}
+
 export class DeskStore extends EventEmitter {
   #revision = 0;
   #threads = new Map();
   #approvals = new Map();
 
-  constructor({ selectedPetId = "codex-core", tokensPerLevel = 50_000 } = {}) {
+  constructor({
+    selectedPetId = "codex-core",
+    tokensPerLevel = 50_000,
+    care = {},
+  } = {}) {
     super();
     this.selectedPetId = selectedPetId;
     this.tokensPerLevel = tokensPerLevel;
@@ -132,6 +180,7 @@ export class DeskStore extends EventEmitter {
       error: null,
       updatedAt: null,
     };
+    this.care = normalizeCareState(care);
   }
 
   get revision() {
@@ -415,6 +464,26 @@ export class DeskStore extends EventEmitter {
     this.#changed("vision");
   }
 
+  setCare(patch) {
+    this.care = normalizeCareState({
+      ...this.care,
+      ...patch,
+      updatedAt: Date.now(),
+    });
+    this.#changed("care");
+  }
+
+  setCareMemory(memory) {
+    const profile = memory?.profile;
+    const recentEvent = memory?.recentEvent;
+    this.setCare({
+      summary: typeof profile?.summary === "string" ? profile.summary : "",
+      conversationId: profile?.recentConversation?.threadId ?? null,
+      lastInteractionAt: profile?.recentConversation?.updatedAt ?? recentEvent?.occurredAt ?? null,
+      recentEvent,
+    });
+  }
+
   snapshot(now = Date.now()) {
     const threads = [...this.#threads.values()];
     const selected = selectDisplayThread(threads, { now });
@@ -505,6 +574,10 @@ export class DeskStore extends EventEmitter {
       companion: { ...this.companion },
       voice: { ...this.voice },
       vision: { ...this.vision },
+      care: {
+        ...this.care,
+        recentEvent: this.care.recentEvent ? { ...this.care.recentEvent } : null,
+      },
       telemetry: { ...this.telemetry },
       capabilities: {
         approvalDecisions: ["accept", "decline"],

@@ -228,3 +228,41 @@ test("passive token refresh does not reorder the task list", () => {
   assert.deepEqual(snapshot.tasks.map(({ id }) => id), ["newer", "older"]);
   assert.equal(snapshot.tasks[1].tokens, 99_999);
 });
+
+test("desk store exposes only a bounded care summary and validates state transitions", () => {
+  const store = new DeskStore({ care: { enabled: false } });
+  store.setCare({
+    status: "listening",
+    conversationId: "care-thread-1",
+    summary: "状".repeat(1_000),
+    error: "错".repeat(1_000),
+    nextObservationAt: 123_456,
+  });
+  store.setCareMemory({
+    profile: {
+      summary: "正在讨论 Bug",
+      recentConversation: {
+        threadId: "care-thread-2",
+        updatedAt: 120_000,
+      },
+      preferences: Array.from({ length: 100 }, (_, index) => `偏好 ${index}`),
+    },
+    recentEvent: {
+      id: "event-1",
+      type: "conversation.user_reply",
+      occurredAt: 120_000,
+      summary: "回".repeat(1_000),
+      data: { privateTranscript: "不应进入快照" },
+    },
+  });
+
+  const care = store.snapshot().care;
+  assert.equal(care.enabled, false);
+  assert.equal(care.status, "listening");
+  assert.equal(care.conversationId, "care-thread-2");
+  assert.equal(care.summary, "正在讨论 Bug");
+  assert.equal(care.recentEvent.summary.length, 320);
+  assert.equal(Object.hasOwn(care.recentEvent, "data"), false);
+  assert.equal(JSON.stringify(care).includes("privateTranscript"), false);
+  assert.throws(() => store.setCare({ status: "unknown" }), /Care status/);
+});

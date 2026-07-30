@@ -1,4 +1,5 @@
 import { CodexBridge } from "./codex-bridge.js";
+import { CareMemoryRepository } from "./care-memory-repository.js";
 import { DeviceCredentialRepository } from "./device-credential-repository.js";
 import { DeviceHub } from "./device-hub.js";
 import { DeviceWebSocketServer } from "./device-websocket-server.js";
@@ -24,7 +25,20 @@ await catalog.refresh();
 const settings = new SettingsRepository();
 const saved = await settings.load();
 const selectedPetId = catalog.has(saved.selectedPetId) ? saved.selectedPetId : "codex-core";
-const store = new DeskStore({ selectedPetId });
+const store = new DeskStore({
+  selectedPetId,
+  care: { enabled: saved.care.enabled },
+});
+const careMemory = new CareMemoryRepository();
+const refreshCareMemory = (memory) => store.setCareMemory(memory);
+careMemory.on("diagnostic", ({ message }) => console.warn(`[care-memory] ${message}`));
+careMemory.on("change", refreshCareMemory);
+try {
+  refreshCareMemory(await careMemory.load());
+} catch (error) {
+  console.warn(`Care memory is unavailable: ${error.message}`);
+  store.setCare({ status: "failed", error: error.message });
+}
 const hookApprovalBroker = new HookApprovalBroker({ store });
 const bridge = new CodexBridge({ store, mode, hookApprovalBroker });
 bridge.on("diagnostic", (message) => {
@@ -114,6 +128,8 @@ async function shutdown() {
   await bleManager.close();
   await usbManager.close();
   await deviceHub.close();
+  careMemory.off("change", refreshCareMemory);
+  await careMemory.close();
   await bridge.stop();
 }
 
