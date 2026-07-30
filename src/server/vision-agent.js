@@ -19,6 +19,7 @@ export class VisionAgent {
   constructor({
     store,
     careAgent,
+    settings = null,
     root = path.join(os.tmpdir(), "codex-desk-vision"),
     timeoutMs = CAPTURE_TIMEOUT_MS,
   } = {}) {
@@ -27,6 +28,7 @@ export class VisionAgent {
     }
     this.store = store;
     this.careAgent = careAgent;
+    this.settings = settings;
     this.root = root;
     this.timeoutMs = timeoutMs;
   }
@@ -182,10 +184,13 @@ export class VisionAgent {
       const reply = this.#boundedText(result.say);
       this.store.setVision({ status: "completed", reply, error: null });
       capture.session.sendEvent({
-        event: "vision.reply",
+        event: "care.reply",
+        source: "observation",
         ok: true,
         text: reply,
-        silent: reply === "",
+        continueListening: result.continueListening,
+        nextObservationMinutes: result.nextObservationMinutes,
+        autoListenSeconds: await this.#autoListenSeconds(),
       });
     } finally {
       await rm(imagePath, { force: true });
@@ -200,9 +205,13 @@ export class VisionAgent {
     });
     try {
       capture.session.sendEvent({
-        event: "vision.reply",
+        event: "care.reply",
+        source: "observation",
         ok: false,
         text: this.#boundedText(error.message),
+        continueListening: false,
+        nextObservationMinutes: null,
+        autoListenSeconds: 20,
       });
     } catch {
       // The device may have disconnected.
@@ -215,5 +224,15 @@ export class VisionAgent {
     let end = maximumBytes;
     while (end > 0 && (source[end] & 0xc0) === 0x80) end -= 1;
     return source.subarray(0, end).toString("utf8");
+  }
+
+  async #autoListenSeconds() {
+    if (!this.settings?.load) return 20;
+    try {
+      const value = (await this.settings.load())?.care?.autoListenSeconds;
+      return Number.isInteger(value) && value >= 5 && value <= 60 ? value : 20;
+    } catch {
+      return 20;
+    }
   }
 }

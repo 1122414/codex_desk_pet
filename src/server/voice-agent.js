@@ -3,6 +3,7 @@ const MAX_AUDIO_CHUNK_BYTES = 2_048;
 const MAX_PENDING_CHUNKS = 64;
 const TRANSCRIPT_SETTLE_MS = 2_500;
 const CLOSED_SETTLE_MS = 120;
+const DEFAULT_AUTO_LISTEN_SECONDS = 20;
 const VOICE_INSTRUCTIONS = [
   "你是 Codex Desk Buddy 的语音转写会话。",
   "准确识别用户的普通话语音，不执行命令，不调用工具，不修改文件。",
@@ -23,6 +24,8 @@ export class VoiceAgent {
     bridge,
     store,
     petAgent,
+    careAgent = null,
+    settings = null,
     cwd = process.cwd(),
     transcriptSettleMs = TRANSCRIPT_SETTLE_MS,
     closedSettleMs = CLOSED_SETTLE_MS,
@@ -33,6 +36,8 @@ export class VoiceAgent {
     this.bridge = bridge;
     this.store = store;
     this.petAgent = petAgent;
+    this.careAgent = careAgent;
+    this.settings = settings;
     this.cwd = cwd;
     this.transcriptSettleMs = transcriptSettleMs;
     this.closedSettleMs = closedSettleMs;
@@ -47,7 +52,8 @@ export class VoiceAgent {
     if (!["usb", "wifi"].includes(session.transport?.kind)) {
       throw new Error("实时语音首版需要 USB 或 Wi-Fi 链路");
     }
-    if (!["chat", "command"].includes(mode)) throw new Error("语音模式无效");
+    if (!["chat", "command", "care"].includes(mode)) throw new Error("语音模式无效");
+    if (mode === "care" && !this.careAgent) throw new Error("主动关怀语音服务不可用");
     if (!this.bridge.client?.running) throw new Error("Codex App Server 当前未连接");
     await this.stop(session.deviceId, { silent: true });
 
@@ -241,6 +247,23 @@ export class VoiceAgent {
     clearTimeout(entry.finalizeTimer);
     const transcript = entry.transcriptParts.join(" ").trim();
     if (!transcript) {
+      if (entry.mode === "care") {
+        this.store.setVoice({
+          status: "completed",
+          transcript: null,
+          error: null,
+        });
+        entry.session.sendEvent({
+          event: "care.reply",
+          source: "voice",
+          ok: true,
+          text: "",
+          continueListening: false,
+          nextObservationMinutes: null,
+          autoListenSeconds: await this.#autoListenSeconds(),
+        });
+        return;
+      }
       this.store.setVoice({
         status: "failed",
         transcript: null,
@@ -265,6 +288,23 @@ export class VoiceAgent {
         });
         return;
       }
+      if (entry.mode === "care") {
+        const result = await this.careAgent.respondToText(transcript, {
+          deviceId: entry.deviceId,
+          state: { source: "voice" },
+        });
+        this.store.setVoice({ status: "completed" });
+        entry.session.sendEvent({
+          event: "care.reply",
+          source: "voice",
+          ok: true,
+          text: this.#boundedDeviceText(result.say),
+          continueListening: result.continueListening,
+          nextObservationMinutes: result.nextObservationMinutes,
+          autoListenSeconds: await this.#autoListenSeconds(),
+        });
+        return;
+      }
       const result = await this.petAgent.chat(transcript);
       this.store.setVoice({ status: "completed" });
       entry.session.sendEvent({
@@ -284,13 +324,37 @@ export class VoiceAgent {
     clearTimeout(entry.finalizeTimer);
     this.store.setVoice({ status: "failed", error: error.message });
     try {
-      entry.session.sendEvent({
-        event: "voice.reply",
-        ok: false,
-        text: this.#boundedDeviceText(error.message),
-      });
+      if (entry.mode === "care") {
+        entry.session.sendEvent({
+          event: "care.reply",
+          source: "voice",
+          ok: false,
+          text: this.#boundedDeviceText(error.message),
+          continueListening: false,
+          nextObservationMinutes: null,
+          autoListenSeconds: DEFAULT_AUTO_LISTEN_SECONDS,
+        });
+      } else {
+        entry.session.sendEvent({
+          event: "voice.reply",
+          ok: false,
+          text: this.#boundedDeviceText(error.message),
+        });
+      }
     } catch {
       // The transport may already be closed.
+    }
+  }
+
+  async #autoListenSeconds() {
+    if (!this.settings?.load) return DEFAULT_AUTO_LISTEN_SECONDS;
+    try {
+      const value = (await this.settings.load())?.care?.autoListenSeconds;
+      return Number.isInteger(value) && value >= 5 && value <= 60
+        ? value
+        : DEFAULT_AUTO_LISTEN_SECONDS;
+    } catch {
+      return DEFAULT_AUTO_LISTEN_SECONDS;
     }
   }
 

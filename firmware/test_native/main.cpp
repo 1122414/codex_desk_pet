@@ -15,6 +15,7 @@
 #include "codex_core/resource.hpp"
 #include "codex_core/sequence.hpp"
 #include "codex_core/types.hpp"
+#include "codex_core/voice_activity.hpp"
 
 namespace {
 
@@ -77,6 +78,36 @@ void testAudioPlans() {
   expect(
       codex::audioPlan(codex::AudioCue::PetInstalled).chinese_phrase != nullptr,
       "Pet installation has an offline Chinese phrase");
+}
+
+void testVoiceActivity() {
+  std::vector<std::int16_t> silence(640, 0);
+  std::vector<std::int16_t> speech(640, 2'000);
+  codex::VoiceActivityDetector detector;
+  detector.begin(1'000, 20'000);
+  expect(
+      detector.observe(silence.data(), silence.size(), 20'999) ==
+          codex::VoiceActivityResult::Listening,
+      "automatic listening stays quiet before its maximum duration");
+  expect(
+      detector.observe(silence.data(), silence.size(), 21'000) ==
+          codex::VoiceActivityResult::NoSpeechTimeout,
+      "automatic listening exits quietly after twenty seconds without speech");
+
+  detector.begin(30'000, 20'000);
+  expect(
+      detector.observe(speech.data(), speech.size(), 31'000) ==
+          codex::VoiceActivityResult::Listening &&
+          detector.heardSpeech(),
+      "voice activity marks the first spoken chunk");
+  expect(
+      detector.observe(silence.data(), silence.size(), 32'499) ==
+          codex::VoiceActivityResult::Listening,
+      "voice activity waits for the full silence tail");
+  expect(
+      detector.observe(silence.data(), silence.size(), 32'500) ==
+          codex::VoiceActivityResult::SpeechEnded,
+      "voice activity ends after one and a half seconds of silence");
 }
 
 void testModel() {
@@ -318,6 +349,7 @@ void testStressCycles() {
 int main() {
   testAnimations();
   testAudioPlans();
+  testVoiceActivity();
   testModel();
   testInput();
   testReconnectAndSequence();

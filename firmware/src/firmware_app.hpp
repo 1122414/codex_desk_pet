@@ -30,7 +30,11 @@ class FirmwareApp {
       JsonObject result,
       String& error);
   void handleSnapshot(const Snapshot& snapshot);
-  void handleProtocolEvent(const String& type, JsonObjectConst payload);
+  void handleProtocolEvent(
+      DeviceProtocolClient& client,
+      const String& type,
+      JsonObjectConst payload);
+  void startPendingCareListening();
   void handleUiAction(const UiAction& action);
   void updateTelemetry(std::uint64_t now_ms);
   void syncClock(std::uint64_t now_ms);
@@ -67,6 +71,9 @@ class FirmwareApp {
   bool ntp_started_ = false;
   bool rtc_synced_ = false;
   bool have_local_telemetry_ = false;
+  bool pending_care_listen_ = false;
+  std::uint8_t pending_care_listen_seconds_ = 20;
+  DeviceProtocolClient* pending_care_client_ = nullptr;
   std::uint64_t wifi_reboot_at_ = 0;
 };
 

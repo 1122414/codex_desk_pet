@@ -408,7 +408,7 @@ bool DeviceProtocolClient::sendCompanionDecision(
 }
 
 bool DeviceProtocolClient::sendVoiceStart(const String& mode) {
-  if (mode != "chat" && mode != "command") return false;
+  if (mode != "chat" && mode != "command" && mode != "care") return false;
   return sendCommand(
       "voice.start",
       [&mode](JsonObject payload) { payload["mode"] = mode; });

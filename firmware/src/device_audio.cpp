@@ -45,13 +45,18 @@ bool DeviceAudio::begin() {
 bool DeviceAudio::enqueue(const AudioCue cue) {
   if (queue_ == nullptr || paused_) return false;
   AudioRequest request;
+  request.id = next_request_id_.fetch_add(1);
   request.cue = cue;
-  return xQueueOverwrite(queue_, &request) == pdPASS;
+  last_enqueued_request_.store(request.id);
+  if (xQueueOverwrite(queue_, &request) == pdPASS) return true;
+  last_completed_request_.store(request.id);
+  return false;
 }
 
 bool DeviceAudio::enqueuePhrase(const String& phrase) {
   if (queue_ == nullptr || paused_ || phrase.isEmpty()) return false;
   AudioRequest request;
+  request.id = next_request_id_.fetch_add(1);
   request.custom_phrase = true;
   const auto bytes = std::min<std::size_t>(
       phrase.length(),
@@ -64,7 +69,11 @@ bool DeviceAudio::enqueuePhrase(const String& phrase) {
     --safe_bytes;
   }
   request.phrase[safe_bytes] = '\0';
-  return safe_bytes > 0 && xQueueOverwrite(queue_, &request) == pdPASS;
+  if (safe_bytes == 0) return false;
+  last_enqueued_request_.store(request.id);
+  if (xQueueOverwrite(queue_, &request) == pdPASS) return true;
+  last_completed_request_.store(request.id);
+  return false;
 }
 
 void DeviceAudio::taskEntry(void* context) {
@@ -81,6 +90,7 @@ void DeviceAudio::run() {
     if (!voice_ready_ || phrase == nullptr || !speak(phrase)) {
       playFallback(plan);
     }
+    last_completed_request_.store(request.id);
   }
 }
 
@@ -222,7 +232,7 @@ void DeviceAudio::playFallback(const AudioPlan& plan) {
 }
 
 bool DeviceAudio::interrupted() const {
-  return queue_ != nullptr && uxQueueMessagesWaiting(queue_) > 0;
+  return paused_ || (queue_ != nullptr && uxQueueMessagesWaiting(queue_) > 0);
 }
 
 }  // namespace codex::firmware

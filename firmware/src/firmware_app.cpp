@@ -113,8 +113,22 @@ void FirmwareApp::loop() {
   if (voice_was_recording && !voice_.recording()) {
     audio_.setPaused(false);
     ui_.setVoiceRecording(false);
-    connection_detail_ = "语音链路中断";
+    switch (voice_.lastStopReason()) {
+      case VoiceStopReason::SpeechComplete:
+      case VoiceStopReason::Manual:
+        connection_detail_ = "正在识别";
+        break;
+      case VoiceStopReason::NoSpeechTimeout:
+        connection_detail_ = "已结束聆听";
+        break;
+      case VoiceStopReason::LinkError:
+        connection_detail_ = "语音链路中断";
+        break;
+      case VoiceStopReason::None:
+        break;
+    }
   }
+  startPendingCareListening();
   const auto camera_was_uploading = camera_.uploading();
   camera_.poll();
   if (camera_was_uploading && !camera_.uploading()) {
@@ -144,8 +158,8 @@ void FirmwareApp::configureProtocol(DeviceProtocolClient& client) {
   client.setSnapshotHandler([this](const Snapshot& snapshot) { handleSnapshot(snapshot); });
   client.setSecretHandler([this](const String& secret) { applyPairingSecret(secret); });
   client.setEventHandler(
-      [this](const String& type, const JsonObjectConst payload) {
-        handleProtocolEvent(type, payload);
+      [this, &client](const String& type, const JsonObjectConst payload) {
+        handleProtocolEvent(client, type, payload);
       });
   client.setStateHandler(
       [this](const bool connected, const String& detail) {
@@ -275,6 +289,7 @@ void FirmwareApp::handleSnapshot(const Snapshot& snapshot) {
 }
 
 void FirmwareApp::handleProtocolEvent(
+    DeviceProtocolClient& client,
     const String& type,
     const JsonObjectConst payload) {
   if (type.startsWith("resource.")) {
@@ -307,6 +322,32 @@ void FirmwareApp::handleProtocolEvent(
     if (payload["ok"] | false) audio_.enqueuePhrase(reply);
   } else if (event == "voice.command.queued") {
     connection_detail_ = "语音命令等待确认";
+  } else if (event == "care.reply") {
+    pending_care_listen_ = false;
+    pending_care_client_ = nullptr;
+    const String reply = payload["text"] | "";
+    const String source = payload["source"] | "voice";
+    if (!(payload["ok"] | false)) {
+      connection_detail_ = reply.isEmpty() ? "关怀对话失败" : reply;
+      return;
+    }
+    const auto speaking = !reply.isEmpty() && audio_.enqueuePhrase(reply);
+    const auto continue_listening = payload["continueListening"] | false;
+    const auto requested_seconds = payload["autoListenSeconds"] | 20;
+    if (continue_listening) {
+      pending_care_listen_ = true;
+      pending_care_client_ = &client;
+      pending_care_listen_seconds_ = static_cast<std::uint8_t>(
+          std::clamp(requested_seconds, 5, 60));
+    }
+    if (speaking) {
+      connection_detail_ = reply;
+    } else if (continue_listening) {
+      connection_detail_ = "准备聆听";
+    } else {
+      connection_detail_ =
+          source == "observation" ? "观察完成" : "对话结束";
+    }
   } else if (event == "vision.reply") {
     const String reply = payload["text"] | "照片分析失败";
     const auto silent = payload["silent"] | false;
@@ -315,6 +356,40 @@ void FirmwareApp::handleProtocolEvent(
       audio_.enqueuePhrase(reply);
     }
   }
+}
+
+void FirmwareApp::startPendingCareListening() {
+  if (
+      !pending_care_listen_ ||
+      audio_.busy() ||
+      voice_.recording() ||
+      camera_.uploading() ||
+      pet_store_.transferActive()) {
+    return;
+  }
+  auto* client = pending_care_client_;
+  pending_care_listen_ = false;
+  pending_care_client_ = nullptr;
+  if (
+      client == nullptr ||
+      !client->ready() ||
+      (strcmp(client->transportKind(), "usb") != 0 &&
+       strcmp(client->transportKind(), "wifi") != 0)) {
+    connection_detail_ = "自动聆听需要 USB 或 Wi-Fi";
+    return;
+  }
+  audio_.setPaused(true);
+  if (voice_.start(
+          *client,
+          "care",
+          true,
+          pending_care_listen_seconds_)) {
+    ui_.setVoiceRecording(true);
+    connection_detail_ = "正在听";
+    return;
+  }
+  audio_.setPaused(false);
+  connection_detail_ = "麦克风启动失败";
 }
 
 void FirmwareApp::handleUiAction(const UiAction& action) {
@@ -349,6 +424,8 @@ void FirmwareApp::handleUiAction(const UiAction& action) {
       }
       break;
     case UiActionType::VoiceStart:
+      pending_care_listen_ = false;
+      pending_care_client_ = nullptr;
       if (client == nullptr) {
         connection_detail_ = "语音需要连接电脑";
       } else if (camera_.uploading()) {

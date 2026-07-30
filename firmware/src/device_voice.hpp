@@ -5,16 +5,30 @@
 #include <array>
 #include <cstdint>
 
+#include "codex_core/voice_activity.hpp"
 #include "device_protocol.hpp"
 
 namespace codex::firmware {
 
+enum class VoiceStopReason : std::uint8_t {
+  None,
+  Manual,
+  SpeechComplete,
+  NoSpeechTimeout,
+  LinkError,
+};
+
 class DeviceVoice {
  public:
-  bool start(DeviceProtocolClient& client, const String& mode);
+  bool start(
+      DeviceProtocolClient& client,
+      const String& mode,
+      bool automatic_stop = false,
+      std::uint8_t maximum_duration_seconds = 20);
   void poll();
-  bool stop();
+  bool stop(VoiceStopReason reason = VoiceStopReason::Manual);
   bool recording() const { return recording_; }
+  VoiceStopReason lastStopReason() const { return last_stop_reason_; }
 
  private:
   static constexpr std::uint32_t kSampleRate = 16'000;
@@ -24,9 +38,12 @@ class DeviceVoice {
   bool sendCompletedChunk();
 
   DeviceProtocolClient* client_ = nullptr;
+  VoiceActivityDetector activity_;
   std::array<std::int16_t, kSamplesPerChunk> samples_{};
   bool recording_ = false;
   bool chunk_pending_ = false;
+  bool automatic_stop_ = false;
+  VoiceStopReason last_stop_reason_ = VoiceStopReason::None;
 };
 
 }  // namespace codex::firmware

@@ -65,8 +65,14 @@ const careAgent = new CareAgent({
   memory: careMemory,
   conversation,
 });
-const voiceAgent = new VoiceAgent({ bridge, store, petAgent });
-const visionAgent = new VisionAgent({ store, careAgent });
+const voiceAgent = new VoiceAgent({
+  bridge,
+  store,
+  petAgent,
+  careAgent,
+  settings,
+});
+const visionAgent = new VisionAgent({ store, careAgent, settings });
 const deviceHub = new DeviceHub({
   store,
   bridge,

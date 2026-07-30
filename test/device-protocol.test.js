@@ -98,8 +98,17 @@ test("protocol rejects malformed command payloads before they reach the Bridge",
       mode: "command",
     },
   }));
-  assert.throws(() => createEnvelope({
+  assert.doesNotThrow(() => createEnvelope({
     sequence: 6,
+    type: "command",
+    payload: {
+      command: "voice.start",
+      commandId: "command-voice-care-0003",
+      mode: "care",
+    },
+  }));
+  assert.throws(() => createEnvelope({
+    sequence: 7,
     type: "command",
     payload: {
       command: "camera.capture",
@@ -108,7 +117,7 @@ test("protocol rejects malformed command payloads before they reach the Bridge",
     },
   }), /camera capture reason/);
   assert.doesNotThrow(() => createEnvelope({
-    sequence: 7,
+    sequence: 8,
     type: "command",
     payload: {
       command: "camera.capture",

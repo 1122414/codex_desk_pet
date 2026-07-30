@@ -17,6 +17,8 @@ function createFixture() {
   };
   const chatCalls = [];
   const commandCalls = [];
+  const careCalls = [];
+  const careReplies = [];
   const petAgent = {
     chat: async (text) => {
       chatCalls.push(text);
@@ -28,6 +30,21 @@ function createFixture() {
     },
   };
   const events = [];
+  const careAgent = {
+    respondToText: async (text, context) => {
+      careCalls.push({ text, context });
+      return careReplies.shift() ?? {
+        say: `关怀：${text}`,
+        continueListening: false,
+        nextObservationMinutes: 12,
+        action: null,
+        memory: null,
+      };
+    },
+  };
+  const settings = {
+    load: async () => ({ care: { autoListenSeconds: 20 } }),
+  };
   const session = {
     ready: true,
     deviceId: "tab5-voice-1",
@@ -39,6 +56,8 @@ function createFixture() {
     bridge,
     store,
     petAgent,
+    careAgent,
+    settings,
     transcriptSettleMs: 1,
     closedSettleMs: 1,
   });
@@ -48,6 +67,8 @@ function createFixture() {
     requests,
     chatCalls,
     commandCalls,
+    careCalls,
+    careReplies,
     events,
     session,
     store,
@@ -56,6 +77,19 @@ function createFixture() {
 
 async function settle() {
   await new Promise((resolve) => setTimeout(resolve, 15));
+}
+
+async function finishTurn(fixture, text) {
+  fixture.bridge.emit("notification", "thread/realtime/transcript/done", {
+    threadId: "voice-thread-1",
+    role: "user",
+    text,
+  });
+  await fixture.agent.stop(fixture.session.deviceId);
+  fixture.bridge.emit("notification", "thread/realtime/closed", {
+    threadId: "voice-thread-1",
+  });
+  await settle();
 }
 
 test("voice chat streams PCM into Codex Realtime and returns a bounded reply", async (t) => {
@@ -129,6 +163,80 @@ test("voice command is queued for explicit confirmation instead of executing", a
   assert.equal(fixture.store.snapshot().voice.status, "awaiting-confirmation");
 });
 
+test("care voice completes three automatic rounds in one CareAgent context", async (t) => {
+  const fixture = createFixture();
+  t.after(() => fixture.agent.close());
+  fixture.careReplies.push(
+    {
+      say: "听起来你卡住了，具体是哪一步？",
+      continueListening: true,
+      nextObservationMinutes: 5,
+    },
+    {
+      say: "是编译报错，还是运行结果不对？",
+      continueListening: true,
+      nextObservationMinutes: 8,
+    },
+    {
+      say: "好，那你先处理，我晚点再来看看。",
+      continueListening: false,
+      nextObservationMinutes: 20,
+    },
+  );
+
+  for (const text of ["这个问题卡了很久", "是编译时报错", "我知道怎么改了"]) {
+    assert.deepEqual(
+      await fixture.agent.start(fixture.session, { mode: "care" }),
+      { accepted: true, mode: "care" },
+    );
+    await finishTurn(fixture, text);
+  }
+
+  assert.deepEqual(
+    fixture.careCalls.map(({ text }) => text),
+    ["这个问题卡了很久", "是编译时报错", "我知道怎么改了"],
+  );
+  assert.ok(fixture.careCalls.every(({ context }) =>
+    context.deviceId === "tab5-voice-1" && context.state.source === "voice"));
+  assert.deepEqual(fixture.chatCalls, []);
+  assert.deepEqual(fixture.commandCalls, []);
+  assert.deepEqual(
+    fixture.events.map(({ event, continueListening, nextObservationMinutes }) => ({
+      event,
+      continueListening,
+      nextObservationMinutes,
+    })),
+    [
+      { event: "care.reply", continueListening: true, nextObservationMinutes: 5 },
+      { event: "care.reply", continueListening: true, nextObservationMinutes: 8 },
+      { event: "care.reply", continueListening: false, nextObservationMinutes: 20 },
+    ],
+  );
+  assert.ok(fixture.events.every(({ autoListenSeconds }) => autoListenSeconds === 20));
+});
+
+test("silent care timeout exits without calling the CareAgent", async (t) => {
+  const fixture = createFixture();
+  t.after(() => fixture.agent.close());
+  await fixture.agent.start(fixture.session, { mode: "care" });
+  await fixture.agent.stop(fixture.session.deviceId);
+  fixture.bridge.emit("notification", "thread/realtime/closed", {
+    threadId: "voice-thread-1",
+  });
+  await settle();
+
+  assert.deepEqual(fixture.careCalls, []);
+  assert.deepEqual(fixture.events, [{
+    event: "care.reply",
+    source: "voice",
+    ok: true,
+    text: "",
+    continueListening: false,
+    nextObservationMinutes: null,
+    autoListenSeconds: 20,
+  }]);
+});
+
 test("voice rejects BLE audio and disconnect cancels without acting", async (t) => {
   const fixture = createFixture();
   t.after(() => fixture.agent.close());
@@ -152,4 +260,3 @@ test("voice rejects BLE audio and disconnect cancels without acting", async (t) 
   assert.deepEqual(fixture.commandCalls, []);
   assert.equal(fixture.store.snapshot().voice.status, "idle");
 });
-

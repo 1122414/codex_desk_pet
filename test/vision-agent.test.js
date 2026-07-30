@@ -17,7 +17,11 @@ test("camera JPEG is authenticated, reassembled, analyzed, and removed", async (
   const careAgent = {
     observeImage: async (imagePath, context) => {
       observations.push({ image: await readFile(imagePath), context });
-      return { say: "我看到桌面前有一个人。" };
+      return {
+        say: "我看到桌面前有一个人。",
+        continueListening: true,
+        nextObservationMinutes: 7,
+      };
     },
   };
   const store = new DeskStore();
@@ -72,10 +76,13 @@ test("camera JPEG is authenticated, reassembled, analyzed, and removed", async (
     },
   }]);
   assert.deepEqual(events, [{
-    event: "vision.reply",
+    event: "care.reply",
+    source: "observation",
     ok: true,
     text: "我看到桌面前有一个人。",
-    silent: false,
+    continueListening: true,
+    nextObservationMinutes: 7,
+    autoListenSeconds: 20,
   }]);
   assert.equal(store.snapshot().vision.status, "completed");
 });

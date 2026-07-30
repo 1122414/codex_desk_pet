@@ -379,6 +379,7 @@ UiAction Tab5Ui::pollTouch(
            kVoiceCommandButton.contains(point))) {
         input_.cancel();
         voice_touch_active_ = true;
+        if (voice_recording_) return {};
         return {
             UiActionType::VoiceStart,
             kVoiceCommandButton.contains(point) ? "command" : "chat"};

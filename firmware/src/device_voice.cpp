@@ -2,8 +2,16 @@
 
 namespace codex::firmware {
 
-bool DeviceVoice::start(DeviceProtocolClient& client, const String& mode) {
-  if (recording_ || (mode != "chat" && mode != "command")) return false;
+bool DeviceVoice::start(
+    DeviceProtocolClient& client,
+    const String& mode,
+    const bool automatic_stop,
+    const std::uint8_t maximum_duration_seconds) {
+  if (
+      recording_ ||
+      (mode != "chat" && mode != "command" && mode != "care")) {
+    return false;
+  }
   if (strcmp(client.transportKind(), "usb") != 0 &&
       strcmp(client.transportKind(), "wifi") != 0) {
     return false;
@@ -20,8 +28,13 @@ bool DeviceVoice::start(DeviceProtocolClient& client, const String& mode) {
   client_ = &client;
   recording_ = true;
   chunk_pending_ = false;
+  automatic_stop_ = automatic_stop;
+  last_stop_reason_ = VoiceStopReason::None;
+  activity_.begin(
+      millis(),
+      static_cast<std::uint32_t>(maximum_duration_seconds) * 1'000U);
   if (!beginChunk()) {
-    stop();
+    stop(VoiceStopReason::LinkError);
     return false;
   }
   return true;
@@ -29,10 +42,23 @@ bool DeviceVoice::start(DeviceProtocolClient& client, const String& mode) {
 
 void DeviceVoice::poll() {
   if (!recording_ || !chunk_pending_ || M5.Mic.isRecording() != 0) return;
-  if (!sendCompletedChunk() || !beginChunk()) stop();
+  const auto activity_result = automatic_stop_
+      ? activity_.observe(samples_.data(), samples_.size(), millis())
+      : VoiceActivityResult::Listening;
+  if (!sendCompletedChunk()) {
+    stop(VoiceStopReason::LinkError);
+    return;
+  }
+  if (activity_result != VoiceActivityResult::Listening) {
+    stop(activity_result == VoiceActivityResult::NoSpeechTimeout
+        ? VoiceStopReason::NoSpeechTimeout
+        : VoiceStopReason::SpeechComplete);
+    return;
+  }
+  if (!beginChunk()) stop(VoiceStopReason::LinkError);
 }
 
-bool DeviceVoice::stop() {
+bool DeviceVoice::stop(const VoiceStopReason reason) {
   if (!recording_) return false;
   if (chunk_pending_ && M5.Mic.isRecording() == 0) sendCompletedChunk();
   M5.Mic.end();
@@ -41,6 +67,8 @@ bool DeviceVoice::stop() {
   client_ = nullptr;
   recording_ = false;
   chunk_pending_ = false;
+  automatic_stop_ = false;
+  last_stop_reason_ = reason;
   return sent;
 }
 

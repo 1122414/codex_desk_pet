@@ -324,7 +324,10 @@ function validatePayload(type, payload) {
         throw new ProtocolError("wifiRssi is invalid");
       }
     }
-    if (payload.command === "voice.start" && !["chat", "command"].includes(payload.mode)) {
+    if (
+      payload.command === "voice.start" &&
+      !["chat", "command", "care"].includes(payload.mode)
+    ) {
       throw new ProtocolError("voice mode is invalid");
     }
     if (

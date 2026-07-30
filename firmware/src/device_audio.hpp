@@ -7,6 +7,7 @@
 #include <freertos/task.h>
 
 #include <array>
+#include <atomic>
 
 #include "codex_core/audio.hpp"
 #include "esp_tts_compat.hpp"
@@ -20,6 +21,9 @@ class DeviceAudio {
   bool enqueuePhrase(const String& phrase);
   void setPaused(bool paused) { paused_ = paused; }
   bool voiceAvailable() const { return voice_ready_; }
+  bool busy() const {
+    return last_completed_request_.load() != last_enqueued_request_.load();
+  }
 
  private:
   static void taskEntry(void* context);
@@ -33,6 +37,7 @@ class DeviceAudio {
   static constexpr std::size_t kMaximumPhraseBytes = 240;
 
   struct AudioRequest {
+    std::uint32_t id = 0;
     AudioCue cue = AudioCue::Ready;
     bool custom_phrase = false;
     std::array<char, kMaximumPhraseBytes + 1> phrase{};
@@ -45,6 +50,9 @@ class DeviceAudio {
   void* voice_data_ = nullptr;
   bool voice_ready_ = false;
   volatile bool paused_ = false;
+  std::atomic<std::uint32_t> next_request_id_{1};
+  std::atomic<std::uint32_t> last_enqueued_request_{0};
+  std::atomic<std::uint32_t> last_completed_request_{0};
 };
 
 }  // namespace codex::firmware
