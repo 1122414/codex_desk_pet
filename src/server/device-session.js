@@ -17,11 +17,11 @@ import {
   createHandshakeNonce,
   createHandshakeProof,
   createPetResourceManifest,
-  createResourceChunks,
   decryptEnvelopePayload,
   deriveSessionId,
   encryptEnvelopePayload,
   isEncryptedEnvelope,
+  iterateResourceChunks,
   normalizeDeviceInfo,
   validateEnvelope,
   verifyHandshakeProof,
@@ -46,6 +46,8 @@ export class DeviceSession extends EventEmitter {
   #started = false;
   #handshakeStartedAt = 0;
   #reliableQueue = [];
+  #resourceTransfers = [];
+  #resourcePumpActive = false;
 
   constructor({
     role,
@@ -139,7 +141,7 @@ export class DeviceSession extends EventEmitter {
   }
 
   get queuedMessages() {
-    return this.#reliableQueue.length;
+    return this.#reliableQueue.length + this.#resourceTransfers.length;
   }
 
   start({ autoTick = true } = {}) {
@@ -243,17 +245,23 @@ export class DeviceSession extends EventEmitter {
   sendResource(pet, data, { missingRanges = null } = {}) {
     if (this.role !== "bridge" || !this.ready) throw new Error("Only an authenticated bridge can send resources");
     const manifest = createPetResourceManifest(pet, data);
-    this.#send("resource.manifest", manifest);
+    const existing = this.#resourceTransfers.find((transfer) => (
+      transfer.manifest.petId === manifest.petId &&
+      transfer.manifest.sha256 === manifest.sha256
+    ));
+    if (existing) return existing.manifest;
     const profile = TRANSPORT_PROFILES[this.transport.kind] ?? TRANSPORT_PROFILES.memory;
-    for (const chunk of createResourceChunks(
+    this.#resourceTransfers.push({
       manifest,
-      data,
-      profile.resourceChunkBytes,
-      missingRanges ?? [{ offset: 0, length: data.length }],
-    )) {
-      this.#send("resource.chunk", chunk);
-    }
-    this.#send("resource.commit", { petId: manifest.petId, sha256: manifest.sha256 });
+      phase: "manifest",
+      chunks: iterateResourceChunks(
+        manifest,
+        data,
+        profile.resourceChunkBytes,
+        missingRanges ?? [{ offset: 0, length: data.length }],
+      ),
+    });
+    this.#pumpResourceTransfers();
     return manifest;
   }
 
@@ -264,6 +272,7 @@ export class DeviceSession extends EventEmitter {
     this.#timer = null;
     this.#outbox.clear();
     this.#reliableQueue = [];
+    this.#resourceTransfers = [];
     this.transport.off("message", this.onTransportMessage);
     this.transport.off("close", this.onTransportClose);
     this.transport.off("error", this.onTransportError);
@@ -323,6 +332,39 @@ export class DeviceSession extends EventEmitter {
     ) {
       const next = this.#reliableQueue.shift();
       this.#transmit(next.type, next.payload, true);
+    }
+    this.#pumpResourceTransfers();
+  }
+
+  #pumpResourceTransfers() {
+    if (this.#resourcePumpActive) return;
+    this.#resourcePumpActive = true;
+    try {
+      while (
+        this.#resourceTransfers.length > 0 &&
+        this.#reliableQueue.length === 0 &&
+        this.#outbox.size < this.maxReliableInFlight &&
+        this.#started
+      ) {
+        const transfer = this.#resourceTransfers[0];
+        if (transfer.phase === "manifest") {
+          this.#transmit("resource.manifest", transfer.manifest, true);
+          transfer.phase = "chunks";
+          continue;
+        }
+        const next = transfer.chunks.next();
+        if (!next.done) {
+          this.#transmit("resource.chunk", next.value, true);
+          continue;
+        }
+        this.#transmit("resource.commit", {
+          petId: transfer.manifest.petId,
+          sha256: transfer.manifest.sha256,
+        }, true);
+        this.#resourceTransfers.shift();
+      }
+    } finally {
+      this.#resourcePumpActive = false;
     }
   }
 

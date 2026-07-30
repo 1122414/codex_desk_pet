@@ -157,10 +157,10 @@ bool DeviceAudio::initializeVoice() {
     return false;
   }
 
-  // The flashed data file is xiaoxin_small. Its pronunciation tables must be
-  // paired with the matching xiaoxin voice set rather than the empty template.
+  // Espressif's separate-partition API expects the generic template here.
+  // The xiaoxin_small payload supplies the concrete voice data.
   voice_ = esp_tts_voice_set_init(
-      &esp_tts_voice_xiaoxin,
+      &esp_tts_voice_template,
       voice_data);
   if (voice_ == nullptr) {
     log_e("语音初始化失败：xiaoxin 声音集创建失败");

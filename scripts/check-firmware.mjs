@@ -140,6 +140,14 @@ try {
   ) {
     throw new Error("Tab5 USB 主机唤醒必须重置协议序号后重新握手");
   }
+  const protocolVersionMaterialUses = deviceProtocol.match(
+    /String\(static_cast<unsigned int>\(kProtocolVersion\)\)/g,
+  )?.length ?? 0;
+  if (protocolVersionMaterialUses !== 3) {
+    throw new Error(
+      "Tab5 握手签名、加密密钥与附加认证数据必须统一使用当前协议版本常量",
+    );
+  }
   if (!deviceProtocol.includes('type != "ack" &&\n      type != "error"')) {
     throw new Error("Tab5 认证前不得对错误报文再次回复错误");
   }

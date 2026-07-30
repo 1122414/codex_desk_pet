@@ -40,7 +40,9 @@ class FirmwareApp {
   void syncClock(std::uint64_t now_ms);
   void requestSelectedPet(std::uint64_t now_ms);
   void selectPetOffset(int offset);
-  void applyPairingSecret(const String& secret);
+  void applyPairingSecret(
+      const String& secret,
+      DeviceProtocolClient* source_client);
   void updateConnectionState();
   DeviceProtocolClient* primaryClient();
   TransportKind primaryTransport() const;

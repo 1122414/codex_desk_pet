@@ -23,7 +23,6 @@ typedef struct {
 typedef void* esp_tts_handle_t;
 
 extern const esp_tts_voice_t esp_tts_voice_template;
-extern const esp_tts_voice_t esp_tts_voice_xiaoxin;
 
 esp_tts_voice_t* esp_tts_voice_set_init(
     const esp_tts_voice_t* voice_template,

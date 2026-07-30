@@ -867,7 +867,7 @@ export function createPetResourceManifest(pet, data) {
   return manifest;
 }
 
-export function createResourceChunks(
+export function* iterateResourceChunks(
   manifest,
   data,
   chunkSize,
@@ -879,21 +879,28 @@ export function createResourceChunks(
     throw new RangeError("Resource chunk size is invalid");
   }
   validateMissingRanges(ranges, data.length);
-  const chunks = [];
   for (const range of ranges) {
     const end = range.offset + range.length;
     for (let offset = range.offset; offset < end; offset += chunkSize) {
       const chunk = data.subarray(offset, Math.min(offset + chunkSize, end));
-      chunks.push({
+      yield {
         petId: manifest.petId,
         sha256: manifest.sha256,
         offset,
         data: chunk.toString("base64"),
         chunkSha256: createHash("sha256").update(chunk).digest("hex"),
-      });
+      };
     }
   }
-  return chunks;
+}
+
+export function createResourceChunks(
+  manifest,
+  data,
+  chunkSize,
+  ranges = [{ offset: 0, length: data.length }],
+) {
+  return [...iterateResourceChunks(manifest, data, chunkSize, ranges)];
 }
 
 export class PetResourceAssembler {

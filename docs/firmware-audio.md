@@ -7,7 +7,7 @@
 `npm run setup:firmware-tts` 从 Espressif 官方仓库的固定 commit `2f8c4b0459db5bbb39abd77adae27962d6d94bcb` 下载：
 
 - ESP32-P4 TTS 静态库；
-- 包含 `xiaoxin` 声音集的静态库；
+- ESP-TTS 声音模板静态库；
 - `xiaoxin_small` 中文语音数据；
 - 原始头文件和 Espressif 许可。
 
@@ -25,7 +25,7 @@
 - 用户在控制面板点击“停止当前对话”时，Bridge 发送 `care.stop`。设备会取消待启动的自动聆听、停止当前关怀播报并退出录音；这个动作不改变主动关怀总开关。
 - 关怀状态使用现有 Pet 动画表达：观察/思考为 `reviewing`，说话为 `waving`，聆听为 `waiting`，执行动作为 `running`。
 - 队列只保留最新事件。审批、错误等新状态到来时会停止旧播报，避免过期提示继续播放。
-- `voice_data` 在首次初始化时以内部 RAM 小块从 Flash 读取、使用 ESP ROM 的流式 CRC32 校验完整数据，再存入 Tab5 的 PSRAM，并与同一套 `xiaoxin` 发音表绑定。Tab5 的 P4 SHA 加速器在这份大流式负载下会给出不稳定结果，运行时因此使用稳定的 ROM CRC32；发布和烧录流程仍对原始 TTS 文件及完整工厂镜像做 SHA‑256 校验。分区缺失、数据损坏、TTS 初始化失败或播放失败时自动使用有区分度的非阻塞音型。
+- `voice_data` 在首次初始化时以内部 RAM 小块从 Flash 读取、使用 ESP ROM 的流式 CRC32 校验完整数据，再存入 Tab5 的 PSRAM，并按 Espressif 的独立分区接口交给通用声音模板加载。Tab5 的 P4 SHA 加速器在这份大流式负载下会给出不稳定结果，运行时因此使用稳定的 ROM CRC32；发布和烧录流程仍对原始 TTS 文件及完整工厂镜像做 SHA‑256 校验。分区缺失、数据损坏、TTS 初始化失败或播放失败时自动使用有区分度的非阻塞音型。
 
 ## Flash 布局
 

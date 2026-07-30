@@ -226,6 +226,36 @@ test("large pet transfers use a bounded ACK window before installing", async (t)
   assert.equal(bridge.queuedMessages, 0);
 });
 
+test("pet transfer streams beyond the reliable queue limit without buffering every chunk", async (t) => {
+  const { bridge, device, transports } = createSessions({
+    transportKind: "usb",
+    sessionOptions: { maxQueuedReliable: 2 },
+  });
+  t.after(() => {
+    bridge.close();
+    device.close();
+  });
+  bridge.start({ autoTick: false });
+  device.start({ autoTick: false });
+  await waitFor(() => bridge.ready && device.ready && bridge.pendingAcknowledgements === 0);
+
+  transports.right.holdNext();
+  const resourceStarted = new Promise((resolve) => device.once("resourceStarted", resolve));
+  assert.doesNotThrow(() => {
+    bridge.sendResource(
+      { id: "streamed-pet", displayName: "Streamed Pet", spriteVersionNumber: 2 },
+      Buffer.alloc(64_000, 0x5e),
+    );
+  });
+  assert.equal(bridge.pendingAcknowledgements, 1);
+  assert.equal(bridge.queuedMessages, 1);
+
+  await resourceStarted;
+  transports.right.flushHeld();
+  await waitFor(() => device.resourceCache.get("streamed-pet") !== null, 1_500);
+  assert.equal(bridge.queuedMessages, 0);
+});
+
 test("snapshots remain responsive while a large resource waits in the reliable queue", async (t) => {
   const { bridge, device, transports } = createSessions({
     transportKind: "usb",

@@ -175,7 +175,10 @@ void FirmwareApp::loop() {
 
 void FirmwareApp::configureProtocol(DeviceProtocolClient& client) {
   client.setSnapshotHandler([this](const Snapshot& snapshot) { handleSnapshot(snapshot); });
-  client.setSecretHandler([this](const String& secret) { applyPairingSecret(secret); });
+  client.setSecretHandler(
+      [this, &client](const String& secret) {
+        applyPairingSecret(secret, &client);
+      });
   client.setEventHandler(
       [this, &client](const String& type, const JsonObjectConst payload) {
         handleProtocolEvent(client, type, payload);
@@ -628,18 +631,19 @@ void FirmwareApp::selectPetOffset(const int offset) {
   audio_.enqueue(AudioCue::PetSwitched);
 }
 
-void FirmwareApp::applyPairingSecret(const String& secret) {
+void FirmwareApp::applyPairingSecret(
+    const String& secret,
+    DeviceProtocolClient* source_client) {
   if (pairing_secret_ == secret) return;
   if (!config_store_.savePairingSecret(secret)) {
     connection_detail_ = "配对凭据保存失败";
     return;
   }
   pairing_secret_ = secret;
-  usb_client_.setPairingSecret(secret);
-  wifi_client_.setPairingSecret(secret);
-  ble_client_.setPairingSecret(secret);
+  if (source_client != &usb_client_) usb_client_.setPairingSecret(secret);
+  if (source_client != &wifi_client_) wifi_client_.setPairingSecret(secret);
+  if (source_client != &ble_client_) ble_client_.setPairingSecret(secret);
   connection_detail_ = "配对成功";
-  audio_.enqueue(AudioCue::PairingSucceeded);
 }
 
 void FirmwareApp::updateConnectionState() {

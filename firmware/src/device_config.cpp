@@ -79,6 +79,10 @@ bool DeviceConfigStore::savePairingSecret(const String& secret) {
   if (!writeString("pair_secret", secret)) {
     return false;
   }
+  if (preferences_.getString("pair_secret") != secret) {
+    preferences_.remove("pair_secret");
+    return false;
+  }
   config_.pairing_secret = secret;
   return true;
 }
