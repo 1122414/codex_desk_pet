@@ -105,6 +105,49 @@
             </div>
           </section>
 
+          <section class="panel-section care-section">
+            <div class="section-title-row">
+              <div>
+                <span class="section-label">PROACTIVE CARE</span>
+                <h2>主动关怀</h2>
+              </div>
+              <button id="care-enabled" class="toggle-button" type="button" aria-pressed="false">主动关怀 关</button>
+            </div>
+            <div class="care-runtime">
+              <span id="care-status" class="care-status" data-status="idle">待命</span>
+              <span id="care-next-observation">等待安排下一次观察</span>
+            </div>
+            <div class="care-number-grid">
+              <label>最短观察（分钟）<input id="care-minimum-minutes" type="number" min="1" max="120" step="1"></label>
+              <label>最长观察（分钟）<input id="care-maximum-minutes" type="number" min="1" max="120" step="1"></label>
+              <label>自动聆听（秒）<input id="care-auto-listen-seconds" type="number" min="5" max="60" step="1"></label>
+            </div>
+            <label class="field-label" for="care-persona">AI 人设</label>
+            <textarea id="care-persona" maxlength="2000" rows="4"></textarea>
+            <fieldset class="care-actions-fieldset">
+              <legend>允许执行的动作</legend>
+              <div id="care-action-list" class="care-action-list"></div>
+            </fieldset>
+            <details class="provision-panel care-presets">
+              <summary>应用与媒体预设</summary>
+              <div class="care-preset-fields">
+                <label for="care-app-presets">应用预设（每行：ID | 名称 | Bundle ID）</label>
+                <textarea id="care-app-presets" rows="3" placeholder="music | 网易云音乐 | com.netease.163music"></textarea>
+                <label for="care-media-presets">媒体预设（每行：ID | 名称 | HTTP(S) URL）</label>
+                <textarea id="care-media-presets" rows="3" placeholder="focus | 专注音乐 | https://example.com/focus"></textarea>
+              </div>
+            </details>
+            <div class="care-control-actions">
+              <button id="care-save" class="primary-button" type="button">保存设置</button>
+              <button id="care-observe-now" class="command-button" type="button">立即观察</button>
+              <button id="care-stop" class="dialog-cancel" type="button">停止本轮对话</button>
+            </div>
+            <div class="care-history">
+              <span class="field-label">最近活动</span>
+              <ol id="care-events"><li>暂无关怀活动</li></ol>
+            </div>
+          </section>
+
           <section class="panel-section">
             <div class="section-title-row">
               <div>

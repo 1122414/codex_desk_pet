@@ -177,8 +177,9 @@ test("care device controls are correlated, bounded, and return previous values",
   const credentials = new DeviceCredentialRepository(path.join(root, "devices.json"));
   const secret = "9".repeat(64);
   await credentials.pair({ deviceId: "tab5-care-1", secret });
+  const store = new DeskStore();
   const hub = new DeviceHub({
-    store: new DeskStore(),
+    store,
     bridge: { decideApproval: async () => null },
     catalog: new PetCatalog(path.join(root, "pets"), {
       deviceAssetConverter: passthroughDeviceConverter,
@@ -192,6 +193,8 @@ test("care device controls are correlated, bounded, and return previous values",
   const transports = createMemoryTransportPair({ kind: "usb" });
   const bridgeSession = hub.attachTransport(transports.left);
   const received = [];
+  const events = [];
+  const snapshots = [];
   const device = new DeviceSession({
     role: "device",
     transport: transports.right,
@@ -206,6 +209,8 @@ test("care device controls are correlated, bounded, and return previous values",
     },
   });
   t.after(() => device.close());
+  device.on("event", (event) => events.push(event));
+  device.on("snapshot", (snapshot) => snapshots.push(snapshot));
   device.start();
   await waitFor(() => bridgeSession.ready && device.ready);
 
@@ -234,6 +239,12 @@ test("care device controls are correlated, bounded, and return previous values",
     () => hub.setDeviceVolume("tab5-care-1", 101),
     /控制参数/,
   );
+
+  store.setCare({ status: "listening" });
+  await waitFor(() => snapshots.at(-1)?.presentation?.animation === "waiting");
+  assert.equal(snapshots.at(-1).presentation.state, "needs-input");
+  assert.deepEqual(hub.stopCareConversation(), { notifiedDevices: 1 });
+  await waitFor(() => events.some(({ event }) => event === "care.stop"));
 });
 
 test("proactive camera capture uses the highest-priority USB/Wi-Fi session and correlates its result", async (t) => {

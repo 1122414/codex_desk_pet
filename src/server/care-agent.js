@@ -168,6 +168,7 @@ export class CareAgent {
   #threadId = null;
   #turnQueue = Promise.resolve();
   #closed = false;
+  #generation = 0;
 
   constructor({
     bridge,
@@ -224,15 +225,29 @@ export class CareAgent {
     }));
   }
 
+  stopConversation() {
+    const conversationId = this.#threadId;
+    this.#generation += 1;
+    this.#threadId = null;
+    this.store.setCare({
+      status: "idle",
+      conversationId: null,
+      error: null,
+    });
+    return { stopped: Boolean(conversationId), conversationId };
+  }
+
   close() {
     this.#closed = true;
   }
 
   async #run({ kind, text = null, imagePath = null, context = {} }) {
     if (this.#closed) throw new Error("主动关怀服务已关闭");
+    const generation = this.#generation;
     const settings = await this.settings.load();
     const memory = await this.memory.load();
     const careSettings = settings.care;
+    if (generation !== this.#generation) return this.#stoppedResult(careSettings);
     const now = this.now();
     this.store.setCare({
       status: kind === "observation" ? "observing" : "thinking",
@@ -258,29 +273,41 @@ export class CareAgent {
           };
       let memoryError = null;
       try {
-        await this.#persist(result, { kind, text, context, now });
+        await this.#persist(result, {
+          kind,
+          text,
+          context,
+          now,
+          conversationId: this.#threadId,
+        });
       } catch (error) {
         memoryError = error;
       }
+      if (generation !== this.#generation) return this.#stoppedResult(careSettings);
       this.#completeStore(result, { kind, now, memoryError });
       return result;
     }
 
     try {
-      this.#threadId ??= await this.conversation.startThread({
-        cwd: this.cwd,
-        ephemeral: true,
-        approvalPolicy: "never",
-        sandbox: "read-only",
-        developerInstructions: buildDeveloperInstructions({
-          persona: memory.profile.persona || careSettings.persona,
-          allowedActions: careSettings.allowedActions,
-        }),
-        serviceName: "codex-desk-care",
-      });
+      let threadId = this.#threadId;
+      if (!threadId) {
+        threadId = await this.conversation.startThread({
+          cwd: this.cwd,
+          ephemeral: true,
+          approvalPolicy: "never",
+          sandbox: "read-only",
+          developerInstructions: buildDeveloperInstructions({
+            persona: memory.profile.persona || careSettings.persona,
+            allowedActions: careSettings.allowedActions,
+          }),
+          serviceName: "codex-desk-care",
+        });
+        if (generation !== this.#generation) return this.#stoppedResult(careSettings);
+        this.#threadId = threadId;
+      }
       this.store.setCare({
         status: "thinking",
-        conversationId: this.#threadId,
+        conversationId: threadId,
       });
       const currentContext = this.#context({
         kind,
@@ -309,7 +336,8 @@ export class CareAgent {
             ].join("\n"),
             text_elements: [],
           }];
-      const turn = await this.conversation.runTurn(this.#threadId, input);
+      const turn = await this.conversation.runTurn(threadId, input);
+      if (generation !== this.#generation) return this.#stoppedResult(careSettings);
       let result;
       let responseError = null;
       try {
@@ -326,21 +354,37 @@ export class CareAgent {
           turn,
           context,
           now,
+          threadId,
         });
         result = resolved.result;
         actionMemoryError = resolved.memoryError;
         responseError ??= resolved.responseError;
       }
+      if (generation !== this.#generation) return this.#stoppedResult(careSettings);
       let memoryError = null;
       try {
-        await this.#persist(result, { kind, text, context, now });
+        await this.#persist(result, {
+          kind,
+          text,
+          context,
+          now,
+          conversationId: threadId,
+        });
       } catch (error) {
         memoryError = error;
       }
+      if (generation !== this.#generation) return this.#stoppedResult(careSettings);
       memoryError ??= actionMemoryError;
-      this.#completeStore(result, { kind, now, memoryError, responseError });
+      this.#completeStore(result, {
+        kind,
+        now,
+        memoryError,
+        responseError,
+        conversationId: threadId,
+      });
       return result;
     } catch (error) {
+      if (generation !== this.#generation) return this.#stoppedResult(careSettings);
       this.#threadId = null;
       this.store.setCare({
         status: "failed",
@@ -385,10 +429,22 @@ export class CareAgent {
     };
   }
 
+  #stoppedResult(careSettings) {
+    return {
+      say: "",
+      continueListening: false,
+      nextObservationMinutes: careSettings.observationMinimumMinutes,
+      action: null,
+      memory: null,
+      stopped: true,
+    };
+  }
+
   async #resolveAction(result, {
     turn,
     context,
     now,
+    threadId,
   }) {
     const proposed = result.action;
     this.store.setCare({ status: "acting", error: null });
@@ -396,7 +452,7 @@ export class CareAgent {
     try {
       if (!this.actionService) throw new Error("关怀动作服务不可用");
       actionResult = await this.actionService.execute(proposed, {
-        idempotencyKey: `${this.#threadId}:${turn.turnId ?? JSON.stringify(proposed)}`,
+        idempotencyKey: `${threadId}:${turn.turnId ?? JSON.stringify(proposed)}`,
         deviceId: typeof context.deviceId === "string" ? context.deviceId : null,
       });
     } catch (error) {
@@ -414,7 +470,7 @@ export class CareAgent {
         type: "action.requested",
         occurredAt: now,
         deviceId: typeof context.deviceId === "string" ? context.deviceId : null,
-        conversationId: this.#threadId,
+        conversationId: threadId,
         summary: proposed.name,
         data: proposed,
       });
@@ -422,7 +478,7 @@ export class CareAgent {
         type: "action.completed",
         occurredAt: this.now(),
         deviceId: typeof context.deviceId === "string" ? context.deviceId : null,
-        conversationId: this.#threadId,
+        conversationId: threadId,
         summary: actionResult.message,
         data: actionResult,
       });
@@ -433,7 +489,7 @@ export class CareAgent {
     let finalResult;
     let responseError = null;
     try {
-      const followUp = await this.conversation.runTurn(this.#threadId, [{
+      const followUp = await this.conversation.runTurn(threadId, [{
         type: "text",
         text: [
           `白名单动作执行结果（可信系统数据）：${JSON.stringify(actionResult)}`,
@@ -466,8 +522,13 @@ export class CareAgent {
     };
   }
 
-  async #persist(result, { kind, text, context, now }) {
-    const conversationId = this.#threadId;
+  async #persist(result, {
+    kind,
+    text,
+    context,
+    now,
+    conversationId,
+  }) {
     await this.memory.appendEvent({
       type: kind === "observation" ? "observation.completed" : "conversation.user_reply",
       occurredAt: now,
@@ -510,10 +571,11 @@ export class CareAgent {
     now,
     memoryError,
     responseError = null,
+    conversationId = this.#threadId,
   }) {
     this.store.setCare({
       status: result.say ? "speaking" : "idle",
-      conversationId: this.#threadId,
+      conversationId,
       lastObservationAt: kind === "observation"
         ? now
         : this.store.snapshot().care.lastObservationAt,

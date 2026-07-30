@@ -235,6 +235,58 @@ test("silent care timeout exits without calling the CareAgent", async (t) => {
     nextObservationMinutes: null,
     autoListenSeconds: 20,
   }]);
+  assert.equal(fixture.store.snapshot().care.status, "idle");
+});
+
+test("care voice exposes listening state and can be cancelled without producing a reply", async (t) => {
+  const fixture = createFixture();
+  t.after(() => fixture.agent.close());
+  await fixture.agent.start(fixture.session, { mode: "care" });
+  assert.equal(fixture.store.snapshot().care.status, "listening");
+
+  assert.deepEqual(await fixture.agent.stopCareConversation(), {
+    stoppedSessions: 1,
+  });
+  assert.equal(fixture.store.snapshot().voice.status, "idle");
+  assert.equal(fixture.store.snapshot().care.status, "idle");
+  assert.equal(
+    fixture.requests.filter(({ method }) => method === "thread/realtime/stop").length,
+    1,
+  );
+  fixture.bridge.emit("notification", "thread/realtime/closed", {
+    threadId: "voice-thread-1",
+  });
+  await settle();
+  assert.deepEqual(fixture.events, []);
+});
+
+test("cancelling while care voice starts cannot re-enter listening", async (t) => {
+  const fixture = createFixture();
+  t.after(() => fixture.agent.close());
+  let releaseThread;
+  fixture.bridge.client.request = async (method, params) => {
+    fixture.requests.push({ method, params });
+    if (method === "thread/start") {
+      return new Promise((resolve) => {
+        releaseThread = () => resolve({ thread: { id: "voice-thread-1" } });
+      });
+    }
+    return {};
+  };
+
+  const starting = fixture.agent.start(fixture.session, { mode: "care" });
+  await Promise.resolve();
+  assert.equal(typeof releaseThread, "function");
+  assert.deepEqual(await fixture.agent.stopCareConversation(), {
+    stoppedSessions: 1,
+  });
+  releaseThread();
+  assert.deepEqual(await starting, { accepted: false, stopped: true });
+  assert.equal(fixture.store.snapshot().care.status, "idle");
+  assert.equal(
+    fixture.requests.filter(({ method }) => method === "thread/realtime/start").length,
+    0,
+  );
 });
 
 test("voice rejects BLE audio and disconnect cancels without acting", async (t) => {

@@ -26,6 +26,7 @@ bool DeviceVoice::start(
     return false;
   }
   client_ = &client;
+  mode_ = mode;
   recording_ = true;
   chunk_pending_ = false;
   automatic_stop_ = automatic_stop;

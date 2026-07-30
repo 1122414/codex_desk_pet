@@ -74,6 +74,8 @@ class FirmwareApp {
   bool pending_care_listen_ = false;
   std::uint8_t pending_care_listen_seconds_ = 20;
   DeviceProtocolClient* pending_care_client_ = nullptr;
+  bool care_animation_override_ = false;
+  Animation care_animation_ = Animation::Idle;
   std::uint64_t wifi_reboot_at_ = 0;
 };
 

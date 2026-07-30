@@ -7,6 +7,7 @@ import {
   CARE_ACTION_NAMES,
   DEFAULT_CARE_SETTINGS,
   SettingsRepository,
+  validateCareSettingsPatch,
 } from "../src/server/settings-repository.js";
 
 test("care settings are bounded and partial saves preserve existing values", async () => {
@@ -79,4 +80,64 @@ test("invalid care setting types fall back to safe defaults", async () => {
   assert.equal(saved.care.persona, DEFAULT_CARE_SETTINGS.persona);
   assert.deepEqual(saved.care.appPresets, []);
   assert.deepEqual(saved.care.mediaPresets, []);
+});
+
+test("care settings API validation rejects malformed values instead of silently normalizing them", () => {
+  const valid = validateCareSettingsPatch({
+    observationMinimumMinutes: 3,
+    observationMaximumMinutes: 12,
+    autoListenSeconds: 18,
+    persona: "  简短、自然地陪伴我  ",
+    allowedActions: ["open_app", "schedule_follow_up"],
+    appPresets: [{
+      id: "music",
+      label: "音乐",
+      bundleId: "com.example.music",
+    }],
+    mediaPresets: [{
+      id: "focus",
+      label: "专注",
+      url: "https://example.com/focus",
+    }],
+  });
+  assert.equal(valid.persona, "简短、自然地陪伴我");
+  assert.equal(valid.autoListenSeconds, 18);
+  assert.deepEqual(valid.allowedActions, ["open_app", "schedule_follow_up"]);
+
+  assert.throws(
+    () => validateCareSettingsPatch({ observationMinimumMinutes: 30 }, {
+      ...DEFAULT_CARE_SETTINGS,
+      observationMaximumMinutes: 20,
+    }),
+    /最短观察间隔/,
+  );
+  assert.throws(
+    () => validateCareSettingsPatch({ autoListenSeconds: "20" }),
+    /自动聆听/,
+  );
+  assert.throws(
+    () => validateCareSettingsPatch({ unknown: true }),
+    /未知/,
+  );
+  assert.throws(
+    () => validateCareSettingsPatch({
+      appPresets: [{
+        id: "music",
+        label: "音乐",
+        bundleId: "com.example.music",
+        command: "open anything",
+      }],
+    }),
+    /应用预设/,
+  );
+  assert.throws(
+    () => validateCareSettingsPatch({
+      mediaPresets: [{
+        id: "script",
+        label: "脚本",
+        url: "javascript:alert(1)",
+      }],
+    }),
+    /HTTP/,
+  );
 });

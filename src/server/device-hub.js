@@ -10,6 +10,13 @@ import { DeviceSession } from "./device-session.js";
 import { PairingCodeManager } from "./device-credential-repository.js";
 
 const TRANSPORT_PRIORITY = Object.freeze({ usb: 3, wifi: 2, ble: 1, memory: 0 });
+const CARE_PRESENTATIONS = Object.freeze({
+  observing: { state: "reviewing", animation: "review" },
+  thinking: { state: "reviewing", animation: "review" },
+  speaking: { state: "running", animation: "waving" },
+  listening: { state: "needs-input", animation: "waiting" },
+  acting: { state: "running", animation: "running" },
+});
 
 export class DeviceHub extends EventEmitter {
   #sessions = new Set();
@@ -138,6 +145,16 @@ export class DeviceHub extends EventEmitter {
       "device.volume.set",
       value,
     );
+  }
+
+  stopCareConversation() {
+    let notifiedDevices = 0;
+    for (const session of this.#sessions) {
+      if (!session.ready) continue;
+      session.sendEvent({ event: "care.stop" });
+      notifiedDevices += 1;
+    }
+    return { notifiedDevices };
   }
 
   attachTransport(transport) {
@@ -500,8 +517,12 @@ export class DeviceHub extends EventEmitter {
   }
 
   #deviceSnapshot(snapshot) {
+    const carePresentation = CARE_PRESENTATIONS[snapshot.care?.status] ?? null;
     return {
       ...snapshot,
+      presentation: carePresentation
+        ? { ...snapshot.presentation, ...carePresentation, previewing: false }
+        : snapshot.presentation,
       approval: snapshot.approval ? {
         id: snapshot.approval.id,
         kind: snapshot.approval.kind,

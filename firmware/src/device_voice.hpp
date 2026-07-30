@@ -29,6 +29,7 @@ class DeviceVoice {
   bool stop(VoiceStopReason reason = VoiceStopReason::Manual);
   bool recording() const { return recording_; }
   VoiceStopReason lastStopReason() const { return last_stop_reason_; }
+  const String& mode() const { return mode_; }
 
  private:
   static constexpr std::uint32_t kSampleRate = 16'000;
@@ -38,6 +39,7 @@ class DeviceVoice {
   bool sendCompletedChunk();
 
   DeviceProtocolClient* client_ = nullptr;
+  String mode_;
   VoiceActivityDetector activity_;
   std::array<std::int16_t, kSamplesPerChunk> samples_{};
   bool recording_ = false;

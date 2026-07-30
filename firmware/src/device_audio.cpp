@@ -44,6 +44,7 @@ bool DeviceAudio::begin() {
 
 bool DeviceAudio::enqueue(const AudioCue cue) {
   if (queue_ == nullptr || paused_) return false;
+  cancel_requested_.store(false);
   AudioRequest request;
   request.id = next_request_id_.fetch_add(1);
   request.cue = cue;
@@ -55,6 +56,7 @@ bool DeviceAudio::enqueue(const AudioCue cue) {
 
 bool DeviceAudio::enqueuePhrase(const String& phrase) {
   if (queue_ == nullptr || paused_ || phrase.isEmpty()) return false;
+  cancel_requested_.store(false);
   AudioRequest request;
   request.id = next_request_id_.fetch_add(1);
   request.custom_phrase = true;
@@ -74,6 +76,13 @@ bool DeviceAudio::enqueuePhrase(const String& phrase) {
   if (xQueueOverwrite(queue_, &request) == pdPASS) return true;
   last_completed_request_.store(request.id);
   return false;
+}
+
+void DeviceAudio::cancel() {
+  cancel_requested_.store(true);
+  if (queue_ != nullptr) xQueueReset(queue_);
+  M5.Speaker.stop(kSpeakerChannel);
+  last_completed_request_.store(last_enqueued_request_.load());
 }
 
 void DeviceAudio::taskEntry(void* context) {
@@ -232,7 +241,9 @@ void DeviceAudio::playFallback(const AudioPlan& plan) {
 }
 
 bool DeviceAudio::interrupted() const {
-  return paused_ || (queue_ != nullptr && uxQueueMessagesWaiting(queue_) > 0);
+  return cancel_requested_.load() ||
+      paused_ ||
+      (queue_ != nullptr && uxQueueMessagesWaiting(queue_) > 0);
 }
 
 }  // namespace codex::firmware

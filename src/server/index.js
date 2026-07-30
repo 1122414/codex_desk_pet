@@ -161,6 +161,10 @@ const server = new DeskHttpServer({
   hookToken,
   hookApprovalBroker,
   petAgent,
+  careAgent,
+  voiceAgent,
+  observationScheduler,
+  careMemory,
 });
 server.onError = (error) => console.error(error);
 const address = await server.listen({ port: Number(process.env.PORT ?? 4317) });

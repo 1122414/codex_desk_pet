@@ -95,6 +95,10 @@ export class VoiceAgent {
       });
       entry.threadId = response?.thread?.id;
       if (!entry.threadId) throw new Error("Codex 没有返回语音会话");
+      if (this.#sessions.get(session.deviceId) !== entry || entry.stopping) {
+        entry.resolveReady(false);
+        return { accepted: false, stopped: true };
+      }
       await this.bridge.client.request("thread/realtime/start", {
         threadId: entry.threadId,
         clientManagedHandoffs: true,
@@ -105,13 +109,22 @@ export class VoiceAgent {
         transport: { type: "websocket" },
         version: "v3",
       });
+      if (this.#sessions.get(session.deviceId) !== entry || entry.stopping) {
+        await this.bridge.client.request("thread/realtime/stop", {
+          threadId: entry.threadId,
+        }).catch(() => {});
+        entry.resolveReady(false);
+        return { accepted: false, stopped: true };
+      }
       entry.resolveReady(true);
       this.store.setVoice({ status: "listening" });
+      if (mode === "care") this.store.setCare({ status: "listening", error: null });
       return { accepted: true, mode };
     } catch (error) {
       entry.resolveReady(false);
       this.#sessions.delete(session.deviceId);
       this.store.setVoice({ status: "failed", error: error.message });
+      if (mode === "care") this.store.setCare({ status: "failed", error: error.message });
       throw error;
     }
   }
@@ -198,6 +211,35 @@ export class VoiceAgent {
     }
   }
 
+  async stopCareConversation() {
+    const entries = [...this.#sessions.values()]
+      .filter((entry) => entry.mode === "care");
+    for (const entry of entries) {
+      if (this.#sessions.get(entry.deviceId) !== entry) continue;
+      this.#sessions.delete(entry.deviceId);
+      clearTimeout(entry.finalizeTimer);
+      entry.stopping = true;
+      entry.resolveReady(false);
+      await entry.audioChain.catch(() => {});
+      if (entry.threadId && this.bridge.client?.running) {
+        await this.bridge.client.request("thread/realtime/stop", {
+          threadId: entry.threadId,
+        }).catch(() => {});
+      }
+    }
+    if (entries.length) {
+      this.store.setVoice({
+        status: "idle",
+        mode: null,
+        transcript: null,
+        error: null,
+        deviceId: null,
+      });
+      this.store.setCare({ status: "idle", error: null });
+    }
+    return { stoppedSessions: entries.length };
+  }
+
   async disconnect(session) {
     const entry = this.#sessions.get(session?.deviceId);
     if (!entry || entry.session !== session) return;
@@ -216,6 +258,7 @@ export class VoiceAgent {
       error: null,
       deviceId: null,
     });
+    if (entry.mode === "care") this.store.setCare({ status: "idle", error: null });
   }
 
   #handleNotification(method, params) {
@@ -262,6 +305,7 @@ export class VoiceAgent {
           nextObservationMinutes: null,
           autoListenSeconds: await this.#autoListenSeconds(),
         });
+        this.store.setCare({ status: "idle", error: null });
         return;
       }
       this.store.setVoice({
@@ -327,6 +371,7 @@ export class VoiceAgent {
     this.store.setVoice({ status: "failed", error: error.message });
     try {
       if (entry.mode === "care") {
+        this.store.setCare({ status: "failed", error: error.message });
         entry.session.sendEvent({
           event: "care.reply",
           source: "voice",

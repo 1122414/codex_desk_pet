@@ -33,10 +33,20 @@ class FakeConversation {
 
   async runTurn(threadId, input) {
     this.turns.push({ threadId, input });
-    const reply = this.replies.shift();
+    const reply = await this.replies.shift();
     if (reply instanceof Error) throw reply;
     return { threadId, turnId: `turn-${this.turns.length}`, reply };
   }
+}
+
+async function waitFor(check, timeoutMs = 1_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const value = check();
+    if (value) return value;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("Timed out waiting for care state");
 }
 
 async function fixture(replies, { actionService = null } = {}) {
@@ -138,6 +148,40 @@ test("CareAgent recreates a failed thread and resumes from persisted memory", as
   assert.equal(conversation.turns[0].threadId, "care-thread-1");
   assert.equal(conversation.turns[1].threadId, "care-thread-2");
   assert.match(conversation.turns[1].input[0].text, /上次聊到构建失败/);
+  agent.close();
+});
+
+test("stopping a care conversation suppresses an in-flight reply and starts fresh next time", async () => {
+  let releaseReply;
+  const pendingReply = new Promise((resolve) => {
+    releaseReply = resolve;
+  });
+  const { agent, conversation, store } = await fixture([
+    pendingReply,
+    jsonReply({ say: "这是新的对话。", continueListening: true }),
+  ]);
+
+  const pending = agent.respondToText("先聊这一轮");
+  await waitFor(() => conversation.turns.length === 1);
+  const stopped = agent.stopConversation();
+  assert.deepEqual(stopped, {
+    stopped: true,
+    conversationId: "care-thread-1",
+  });
+  assert.equal(store.snapshot().care.status, "idle");
+  assert.equal(store.snapshot().care.conversationId, null);
+
+  releaseReply(jsonReply({ say: "这句不应再播报。", continueListening: true }));
+  const suppressed = await pending;
+  assert.equal(suppressed.say, "");
+  assert.equal(suppressed.continueListening, false);
+  assert.equal(suppressed.stopped, true);
+  assert.equal(store.snapshot().care.status, "idle");
+
+  const next = await agent.respondToText("重新开始");
+  assert.equal(next.say, "这是新的对话。");
+  assert.equal(conversation.starts.length, 2);
+  assert.equal(conversation.turns[1].threadId, "care-thread-2");
   agent.close();
 });
 

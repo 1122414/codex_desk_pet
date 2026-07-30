@@ -14,6 +14,7 @@ import {
   normalizeCodexHookApproval,
   normalizeCodexHookEvent,
 } from "./codex-hook.js";
+import { validateCareSettingsPatch } from "./settings-repository.js";
 
 const MAX_BODY_BYTES = 16 * 1024;
 const BRIDGE_VERSION = "0.2.0";
@@ -104,6 +105,10 @@ export class DeskHttpServer {
     hookToken = null,
     hookApprovalBroker = null,
     petAgent = null,
+    careAgent = null,
+    voiceAgent = null,
+    observationScheduler = null,
+    careMemory = null,
     publicDirectory = path.join(PROJECT_ROOT, "public"),
   }) {
     this.store = store;
@@ -114,6 +119,10 @@ export class DeskHttpServer {
     this.hookToken = hookToken;
     this.hookApprovalBroker = hookApprovalBroker;
     this.petAgent = petAgent;
+    this.careAgent = careAgent;
+    this.voiceAgent = voiceAgent;
+    this.observationScheduler = observationScheduler;
+    this.careMemory = careMemory;
     this.publicDirectory = path.resolve(publicDirectory);
     this.#server = createServer((req, res) => {
       this.#handle(req, res).catch((error) => {
@@ -196,6 +205,27 @@ export class DeskHttpServer {
     if (req.method === "GET" && route === "/api/devices") {
       if (!this.deviceHub) throw new HttpError(503, "Device service is unavailable");
       json(res, 200, { devices: this.deviceHub.listDevices() });
+      return;
+    }
+    if (req.method === "GET" && route === "/api/care/settings") {
+      json(res, 200, { care: (await this.settings.load()).care });
+      return;
+    }
+    if (req.method === "GET" && route === "/api/care/events") {
+      if (!this.careMemory) throw new HttpError(503, "主动关怀记忆服务不可用");
+      const rawLimit = url.searchParams.get("limit");
+      const limit = rawLimit === null ? 20 : Number(rawLimit);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+        throw new HttpError(400, "limit 必须是 1～100 的整数");
+      }
+      await this.careMemory.load();
+      const events = this.careMemory.listEvents({ limit }).map((event) => ({
+        id: event.id,
+        type: event.type,
+        occurredAt: event.occurredAt,
+        summary: event.summary,
+      }));
+      json(res, 200, { events });
       return;
     }
     if (req.method === "GET" && route === "/api/diagnostics") {
@@ -325,6 +355,53 @@ export class DeskHttpServer {
         await this.settings.save({ selectedPetId: body.petId });
         this.store.setSelectedPet(body.petId);
         json(res, 200, { ok: true, selectedId: body.petId });
+        return;
+      }
+      if (route === "/api/care/settings") {
+        if (!this.observationScheduler) throw new HttpError(503, "主动关怀调度服务不可用");
+        try {
+          const current = await this.settings.load();
+          const care = validateCareSettingsPatch(body.care, current.care);
+          const saved = await this.settings.save({ care });
+          await this.observationScheduler.refreshSettings();
+          json(res, 200, { ok: true, care: saved.care });
+        } catch (error) {
+          throw new HttpError(
+            error instanceof TypeError || error instanceof RangeError ? 400 : 503,
+            error.message,
+          );
+        }
+        return;
+      }
+      if (route === "/api/care/observe") {
+        if (!this.observationScheduler) throw new HttpError(503, "主动关怀调度服务不可用");
+        const result = await this.observationScheduler.requestNow("manual");
+        if (!result.accepted) {
+          const reason = {
+            disabled: "主动关怀当前已关闭",
+            unavailable: "当前没有可拍照的 Tab5",
+            busy: "主动关怀当前正忙",
+            "duplicate-guard": "仍在重复观察保护期内",
+          }[result.reason] ?? "当前无法立即观察";
+          throw new HttpError(409, reason);
+        }
+        json(res, 202, { ok: true, ...result });
+        return;
+      }
+      if (route === "/api/care/stop") {
+        if (!this.careAgent) throw new HttpError(503, "主动关怀对话服务不可用");
+        const conversation = this.careAgent.stopConversation();
+        const voice = this.voiceAgent
+          ? await this.voiceAgent.stopCareConversation()
+          : { stoppedSessions: 0 };
+        const devices = this.deviceHub?.stopCareConversation?.() ?? { notifiedDevices: 0 };
+        json(res, 200, {
+          ok: true,
+          conversation,
+          voice,
+          devices,
+          enabled: this.store.snapshot().care.enabled,
+        });
         return;
       }
       if (route === "/api/companion/chat") {

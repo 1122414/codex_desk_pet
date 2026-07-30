@@ -109,6 +109,7 @@ void FirmwareApp::loop() {
   wifi_client_.poll(now_ms);
   ble_client_.poll(now_ms);
   const auto voice_was_recording = voice_.recording();
+  const auto voice_was_care = voice_.mode() == "care";
   voice_.poll();
   if (voice_was_recording && !voice_.recording()) {
     audio_.setPaused(false);
@@ -127,8 +128,22 @@ void FirmwareApp::loop() {
       case VoiceStopReason::None:
         break;
     }
+    if (voice_was_care) {
+      care_animation_override_ = true;
+      care_animation_ = Animation::Review;
+    }
   }
   startPendingCareListening();
+  if (
+      care_animation_override_ &&
+      care_animation_ == Animation::Waving &&
+      !audio_.busy()) {
+    if (pending_care_listen_) {
+      care_animation_ = Animation::Waiting;
+    } else {
+      care_animation_override_ = false;
+    }
+  }
   const auto camera_was_uploading = camera_.uploading();
   camera_.poll();
   if (camera_was_uploading && !camera_.uploading()) {
@@ -146,8 +161,12 @@ void FirmwareApp::loop() {
   const auto& selected_pet_id = model_.snapshot().selected_pet_id;
   const auto transfer_progress =
       selected_pet_id == "chibi-skadi" ? 0 : pet_store_.transferProgress();
+  auto display_snapshot = model_.snapshot();
+  if (care_animation_override_) {
+    display_snapshot.animation = care_animation_;
+  }
   ui_.render(
-      model_.snapshot(), now_ms, paired(), connection_detail_, transfer_progress);
+      display_snapshot, now_ms, paired(), connection_detail_, transfer_progress);
   if (wifi_reboot_at_ != 0 && now_ms >= wifi_reboot_at_) {
     ESP.restart();
   }
@@ -245,6 +264,8 @@ bool FirmwareApp::handleDeviceCommand(
       ui_.setCameraBusy(false);
       return false;
     }
+    care_animation_override_ = true;
+    care_animation_ = Animation::Review;
     ui_.setCameraBusy(true);
     connection_detail_ = "照片正在加密发送";
     result["captureId"] = camera_.captureId();
@@ -361,6 +382,7 @@ void FirmwareApp::handleProtocolEvent(
     const String source = payload["source"] | "voice";
     if (!(payload["ok"] | false)) {
       connection_detail_ = reply.isEmpty() ? "关怀对话失败" : reply;
+      care_animation_override_ = false;
       return;
     }
     const auto speaking = !reply.isEmpty() && audio_.enqueuePhrase(reply);
@@ -374,12 +396,26 @@ void FirmwareApp::handleProtocolEvent(
     }
     if (speaking) {
       connection_detail_ = reply;
+      care_animation_override_ = true;
+      care_animation_ = Animation::Waving;
     } else if (continue_listening) {
       connection_detail_ = "准备聆听";
+      care_animation_override_ = true;
+      care_animation_ = Animation::Waiting;
     } else {
       connection_detail_ =
           source == "observation" ? "观察完成" : "对话结束";
+      care_animation_override_ = false;
     }
+  } else if (event == "care.stop") {
+    pending_care_listen_ = false;
+    pending_care_client_ = nullptr;
+    audio_.cancel();
+    if (voice_.recording() && voice_.mode() == "care") voice_.stop();
+    audio_.setPaused(false);
+    ui_.setVoiceRecording(false);
+    care_animation_override_ = false;
+    connection_detail_ = "关怀对话已停止";
   } else if (event == "vision.reply") {
     const String reply = payload["text"] | "照片分析失败";
     const auto silent = payload["silent"] | false;
@@ -417,6 +453,8 @@ void FirmwareApp::startPendingCareListening() {
           true,
           pending_care_listen_seconds_)) {
     ui_.setVoiceRecording(true);
+    care_animation_override_ = true;
+    care_animation_ = Animation::Waiting;
     connection_detail_ = "正在听";
     return;
   }

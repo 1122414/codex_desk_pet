@@ -26,6 +26,34 @@ const ANIMATION_LABELS = {
   review: "审查",
 };
 
+const CARE_STATUS_LABELS = {
+  idle: "待命",
+  observing: "正在观察",
+  thinking: "正在思考",
+  speaking: "正在说话",
+  listening: "正在聆听",
+  acting: "正在执行动作",
+  failed: "关怀失败",
+};
+
+const CARE_PRESENTATIONS = {
+  observing: { state: "reviewing", animation: "review" },
+  thinking: { state: "reviewing", animation: "review" },
+  speaking: { state: "running", animation: "waving" },
+  listening: { state: "needs-input", animation: "waiting" },
+  acting: { state: "running", animation: "running" },
+};
+
+const CARE_ACTION_LABELS = {
+  capture_now: "立即再观察",
+  set_tab5_brightness: "调整 Tab5 亮度",
+  set_tab5_volume: "调整 Tab5 音量",
+  open_app: "打开应用预设",
+  open_media_preset: "打开媒体预设",
+  set_macos_volume: "调整 Mac 音量",
+  schedule_follow_up: "安排后续观察",
+};
+
 const LOOK_ARROWS = ["↑", "↗", "↗", "↗", "→", "↘", "↘", "↘", "↓", "↙", "↙", "↙", "←", "↖", "↖", "↖"];
 
 const elements = Object.fromEntries([
@@ -41,11 +69,17 @@ const elements = Object.fromEntries([
   "wifi-device-id", "wifi-ssid", "wifi-password", "bridge-host", "bridge-port", "provision-wifi",
   "companion-reply", "companion-input", "companion-chat", "companion-command",
   "companion-confirm", "companion-command-text", "companion-decline", "companion-accept",
+  "care-enabled", "care-status", "care-next-observation", "care-minimum-minutes",
+  "care-maximum-minutes", "care-auto-listen-seconds", "care-persona", "care-action-list",
+  "care-app-presets", "care-media-presets", "care-save", "care-observe-now", "care-stop",
+  "care-events",
 ].map((id) => [id, document.getElementById(id)]));
 
 let csrfToken = "";
 let snapshot = null;
 let pets = [];
+let careSettings = null;
+let lastCareEventId = null;
 let localLookDegree = null;
 let localLookTimer = null;
 let toastTimer = null;
@@ -268,6 +302,13 @@ function updateClock() {
   elements["screen-time"].textContent = new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date());
 }
 
+function activePresentation(value = snapshot) {
+  const carePresentation = CARE_PRESENTATIONS[value?.care?.status];
+  return carePresentation
+    ? { ...value.presentation, ...carePresentation, previewing: false }
+    : value?.presentation;
+}
+
 async function render(nextSnapshot) {
   const oldState = snapshot?.presentation.state;
   const oldPetId = snapshot?.pet.selectedId;
@@ -301,12 +342,15 @@ async function render(nextSnapshot) {
   }
 
   const lookDegree = localLookDegree;
-  animator.setAnimation(snapshot.presentation.animation, lookDegree);
+  const presentation = activePresentation();
+  animator.setAnimation(presentation.animation, lookDegree);
   elements["screen-state"].textContent = lookDegree !== null
     ? `看向 ${getLookDirection(lookDegree).degree}°`
-    : snapshot.presentation.previewing
-      ? `预览·${ANIMATION_LABELS[snapshot.presentation.animation]}`
-      : STATE_LABELS[snapshot.presentation.state] || snapshot.presentation.state;
+    : snapshot.care?.status !== "idle" && CARE_STATUS_LABELS[snapshot.care?.status]
+      ? CARE_STATUS_LABELS[snapshot.care.status]
+      : presentation.previewing
+        ? `预览·${ANIMATION_LABELS[presentation.animation]}`
+        : STATE_LABELS[presentation.state] || presentation.state;
   elements["screen-task"].textContent = snapshot.task?.title || "暂无 Codex 任务";
   elements["screen-tokens"].textContent = formatTokens(snapshot.tokens.total);
   elements["screen-level"].textContent = `Lv.${snapshot.tokens.level.level}`;
@@ -323,10 +367,41 @@ async function render(nextSnapshot) {
 
   renderApproval(snapshot.approval);
   renderCompanion(snapshot.companion);
+  renderCare(snapshot.care);
   elements["mock-tools"].hidden = snapshot.connection.mode !== "mock";
-  document.querySelectorAll(".animation-button").forEach((button) => button.classList.toggle("active", button.dataset.animation === snapshot.presentation.animation && localLookDegree === null));
+  document.querySelectorAll(".animation-button").forEach((button) => button.classList.toggle("active", button.dataset.animation === presentation.animation && localLookDegree === null));
 
   if (oldState && oldState !== snapshot.presentation.state) announceState(snapshot.presentation.state);
+}
+
+function renderCare(care) {
+  if (!care) return;
+  const enabled = Boolean(care.enabled);
+  setToggle(elements["care-enabled"], enabled, "主动关怀");
+  elements["care-status"].dataset.status = enabled ? care.status : "idle";
+  elements["care-status"].textContent = enabled
+    ? CARE_STATUS_LABELS[care.status] || care.status
+    : "已关闭";
+  if (!enabled) {
+    elements["care-next-observation"].textContent = "不会自动使用摄像头";
+  } else if (care.error) {
+    elements["care-next-observation"].textContent = care.error;
+  } else if (Number.isFinite(care.nextObservationAt)) {
+    const date = new Date(care.nextObservationAt);
+    const relativeMinutes = Math.max(0, Math.ceil((care.nextObservationAt - Date.now()) / 60_000));
+    elements["care-next-observation"].textContent =
+      `下次约 ${date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })}` +
+      `（${relativeMinutes} 分钟后）`;
+  } else {
+    elements["care-next-observation"].textContent = "等待可用摄像头";
+  }
+  const busy = ["observing", "thinking", "speaking", "listening", "acting"].includes(care.status);
+  elements["care-observe-now"].disabled = !enabled || busy;
+  elements["care-stop"].disabled = !busy && !care.conversationId;
+  if (care.recentEvent?.id && care.recentEvent.id !== lastCareEventId) {
+    lastCareEventId = care.recentEvent.id;
+    loadCareEvents();
+  }
 }
 
 function renderCompanion(companion) {
@@ -395,6 +470,158 @@ function populateControls() {
     button.addEventListener("click", () => previewLook(direction.degree));
     return button;
   }));
+
+  elements["care-action-list"].replaceChildren(...Object.entries(CARE_ACTION_LABELS).map(([name, label]) => {
+    const wrapper = document.createElement("label");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.name = "care-action";
+    checkbox.value = name;
+    wrapper.append(checkbox, document.createTextNode(label));
+    return wrapper;
+  }));
+}
+
+function formatPresetLines(presets, valueKey) {
+  return presets.map((preset) => `${preset.id} | ${preset.label} | ${preset[valueKey]}`).join("\n");
+}
+
+function parsePresetLines(text, valueKey, label) {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length > 20) throw new Error(`${label}最多允许 20 项`);
+  return lines.map((line, index) => {
+    const parts = line.split("|").map((part) => part.trim());
+    if (parts.length !== 3 || parts.some((part) => !part)) {
+      throw new Error(`${label}第 ${index + 1} 行必须使用“ID | 名称 | 值”格式`);
+    }
+    return { id: parts[0], label: parts[1], [valueKey]: parts[2] };
+  });
+}
+
+function renderCareSettings(care) {
+  careSettings = care;
+  elements["care-minimum-minutes"].value = care.observationMinimumMinutes;
+  elements["care-maximum-minutes"].value = care.observationMaximumMinutes;
+  elements["care-auto-listen-seconds"].value = care.autoListenSeconds;
+  elements["care-persona"].value = care.persona;
+  elements["care-app-presets"].value = formatPresetLines(care.appPresets, "bundleId");
+  elements["care-media-presets"].value = formatPresetLines(care.mediaPresets, "url");
+  const allowed = new Set(care.allowedActions);
+  for (const checkbox of elements["care-action-list"].querySelectorAll("input")) {
+    checkbox.checked = allowed.has(checkbox.value);
+  }
+  setToggle(elements["care-enabled"], care.enabled, "主动关怀");
+}
+
+async function loadCareSettings() {
+  const { care } = await fetchJson("/api/care/settings");
+  renderCareSettings(care);
+}
+
+async function loadCareEvents() {
+  try {
+    const { events } = await fetchJson("/api/care/events?limit=12");
+    if (!events.length) {
+      elements["care-events"].replaceChildren(Object.assign(document.createElement("li"), {
+        textContent: "暂无关怀活动",
+      }));
+      return;
+    }
+    elements["care-events"].replaceChildren(...events.slice().reverse().map((event) => {
+      const item = document.createElement("li");
+      const time = document.createElement("time");
+      time.dateTime = new Date(event.occurredAt).toISOString();
+      time.textContent = new Date(event.occurredAt).toLocaleString("zh-CN", {
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+      const summary = document.createElement("span");
+      summary.textContent = event.summary || event.type;
+      summary.title = event.type;
+      item.append(time, summary);
+      return item;
+    }));
+  } catch (error) {
+    elements["care-events"].replaceChildren(Object.assign(document.createElement("li"), {
+      textContent: `活动读取失败：${error.message}`,
+    }));
+  }
+}
+
+async function saveCareSettings(overrides = {}) {
+  const minimum = Number(elements["care-minimum-minutes"].value);
+  const maximum = Number(elements["care-maximum-minutes"].value);
+  const autoListenSeconds = Number(elements["care-auto-listen-seconds"].value);
+  if (
+    !Number.isInteger(minimum) ||
+    !Number.isInteger(maximum) ||
+    minimum < 1 ||
+    maximum > 120 ||
+    minimum > maximum ||
+    !Number.isInteger(autoListenSeconds) ||
+    autoListenSeconds < 5 ||
+    autoListenSeconds > 60
+  ) {
+    throw new Error("观察间隔必须为 1～120 分钟且最短不大于最长；自动聆听必须为 5～60 秒");
+  }
+  const care = {
+    enabled: careSettings?.enabled ?? true,
+    observationMinimumMinutes: minimum,
+    observationMaximumMinutes: maximum,
+    autoListenSeconds,
+    duplicateGuardSeconds: careSettings?.duplicateGuardSeconds ?? 90,
+    persona: elements["care-persona"].value,
+    allowedActions: [...elements["care-action-list"].querySelectorAll("input:checked")]
+      .map((checkbox) => checkbox.value),
+    appPresets: parsePresetLines(elements["care-app-presets"].value, "bundleId", "应用预设"),
+    mediaPresets: parsePresetLines(elements["care-media-presets"].value, "url", "媒体预设"),
+    ...overrides,
+  };
+  const result = await mutate("/api/care/settings", { care });
+  renderCareSettings(result.care);
+  return result.care;
+}
+
+async function toggleCareEnabled() {
+  elements["care-enabled"].disabled = true;
+  try {
+    const enabled = !careSettings?.enabled;
+    const result = await mutate("/api/care/settings", { care: { enabled } });
+    renderCareSettings(result.care);
+    showToast(enabled ? "主动关怀已开启" : "主动关怀已关闭");
+  } catch (error) {
+    showToast(`设置保存失败：${error.message}`);
+  } finally {
+    elements["care-enabled"].disabled = false;
+  }
+}
+
+async function observeNow() {
+  elements["care-observe-now"].disabled = true;
+  try {
+    await mutate("/api/care/observe", {});
+    showToast("已经请求 Tab5 立即拍照观察");
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    if (snapshot) renderCare(snapshot.care);
+  }
+}
+
+async function stopCareConversation() {
+  elements["care-stop"].disabled = true;
+  try {
+    const result = await mutate("/api/care/stop", {});
+    showToast(result.enabled ? "本轮关怀对话已停止，自动关怀仍保持开启" : "本轮关怀对话已停止");
+    await loadCareEvents();
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    if (snapshot) renderCare(snapshot.care);
+  }
 }
 
 async function loadPets() {
@@ -546,7 +773,7 @@ function previewLook(degree) {
   const pet = currentPet();
   if (pet?.spriteVersionNumber !== 2 && pet?.kind !== "builtin") return;
   localLookDegree = degree;
-  animator.setAnimation(snapshot?.presentation.animation ?? "idle", degree);
+  animator.setAnimation(activePresentation()?.animation ?? "idle", degree);
   elements["screen-state"].textContent = `看向 ${getLookDirection(degree).degree}°`;
   document.querySelectorAll(".look-button").forEach((button, index) => button.classList.toggle("active", LOOK_DIRECTIONS[index].degree === getLookDirection(degree).degree));
   clearTimeout(localLookTimer);
@@ -555,8 +782,12 @@ function previewLook(degree) {
 function clearLocalLook() {
   resetLocalLookState();
   if (snapshot) {
-    animator.setAnimation(snapshot.presentation.animation, null);
-    elements["screen-state"].textContent = STATE_LABELS[snapshot.presentation.state] || snapshot.presentation.state;
+    const presentation = activePresentation();
+    animator.setAnimation(presentation.animation, null);
+    elements["screen-state"].textContent =
+      CARE_STATUS_LABELS[snapshot.care?.status] ||
+      STATE_LABELS[presentation.state] ||
+      presentation.state;
   }
 }
 
@@ -720,6 +951,20 @@ function bindInteractions() {
       sendCompanionChat();
     }
   });
+  elements["care-enabled"].addEventListener("click", toggleCareEnabled);
+  elements["care-save"].addEventListener("click", async () => {
+    elements["care-save"].disabled = true;
+    try {
+      await saveCareSettings();
+      showToast("主动关怀设置已保存");
+    } catch (error) {
+      showToast(`设置保存失败：${error.message}`);
+    } finally {
+      elements["care-save"].disabled = false;
+    }
+  });
+  elements["care-observe-now"].addEventListener("click", observeNow);
+  elements["care-stop"].addEventListener("click", stopCareConversation);
 
   elements["sound-toggle"].addEventListener("click", () => {
     soundEnabled = !soundEnabled;
@@ -802,6 +1047,8 @@ async function init() {
     csrfToken = session.csrfToken;
     await loadPets();
     await loadDevices();
+    await loadCareSettings();
+    await loadCareEvents();
     await render(await fetchJson("/api/snapshot"));
     connectEvents();
     setInterval(loadDevices, 5_000);

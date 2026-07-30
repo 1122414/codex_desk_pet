@@ -59,6 +59,7 @@ test("HTTP API requires a same-origin session for state changes", async (t) => {
       deviceId,
       transport: provisioning.ssid === "Desk Wi-Fi" ? "usb" : "invalid",
     }),
+    stopCareConversation: () => ({ notifiedDevices: 1 }),
   };
   const hookToken = "9".repeat(64);
   const petAgent = {
@@ -70,6 +71,45 @@ test("HTTP API requires a same-origin session for state changes", async (t) => {
     },
     decideCommand: async (requestId, decision) => ({ requestId, decision }),
   };
+  let settingsRefreshes = 0;
+  let immediateObservations = 0;
+  let careStops = 0;
+  let voiceStops = 0;
+  const observationScheduler = {
+    refreshSettings: async () => { settingsRefreshes += 1; },
+    requestNow: async () => {
+      immediateObservations += 1;
+      return {
+        accepted: true,
+        deviceId: "core-s3-1",
+        reason: "manual",
+        commandId: "camera-command-1",
+      };
+    },
+  };
+  const careAgent = {
+    stopConversation: () => {
+      careStops += 1;
+      store.setCare({ status: "idle", conversationId: null });
+      return { stopped: true, conversationId: "care-thread-1" };
+    },
+  };
+  const voiceAgent = {
+    stopCareConversation: async () => {
+      voiceStops += 1;
+      return { stoppedSessions: 1 };
+    },
+  };
+  const careMemory = {
+    load: async () => null,
+    listEvents: ({ limit }) => [{
+      id: "care-event-1",
+      type: "conversation.assistant_reply",
+      occurredAt: 1_800_000_000_000,
+      summary: "记得休息一下",
+      data: { private: true },
+    }].slice(-limit),
+  };
   const server = new DeskHttpServer({
     store,
     bridge,
@@ -79,6 +119,10 @@ test("HTTP API requires a same-origin session for state changes", async (t) => {
     hookToken,
     hookApprovalBroker,
     petAgent,
+    careAgent,
+    voiceAgent,
+    observationScheduler,
+    careMemory,
   });
   const address = await server.listen({ port: 0 });
   t.after(async () => server.close());
@@ -91,7 +135,14 @@ test("HTTP API requires a same-origin session for state changes", async (t) => {
   const page = await fetch(base);
   assert.equal(page.status, 200);
   assert.match(page.headers.get("content-security-policy"), /script-src 'self'/);
-  assert.match(await page.text(), /Codex Desk Buddy/);
+  const pageText = await page.text();
+  assert.match(pageText, /Codex Desk Buddy/);
+  assert.match(pageText, /id="care-enabled"/);
+  assert.match(pageText, /id="care-observe-now"/);
+  assert.match(pageText, /id="care-stop"/);
+
+  const appModule = await fetch(`${base}/app.js`);
+  assert.match(await appModule.text(), /CARE_PRESENTATIONS/);
 
   const sharedModule = await fetch(`${base}/shared/pet-spec.js`);
   assert.equal(sharedModule.status, 200);
@@ -122,6 +173,20 @@ test("HTTP API requires a same-origin session for state changes", async (t) => {
   assert.equal(diagnosticBody.hooks.endpointReady, true);
   assert.equal(diagnosticBody.hooks.approvalReady, true);
   assert.equal(diagnosticBody.companion.available, true);
+
+  const careSettingsResponse = await fetch(`${base}/api/care/settings`);
+  assert.equal(careSettingsResponse.status, 200);
+  assert.equal((await careSettingsResponse.json()).care.duplicateGuardSeconds, 90);
+  const careEventsResponse = await fetch(`${base}/api/care/events?limit=1`);
+  assert.deepEqual(await careEventsResponse.json(), {
+    events: [{
+      id: "care-event-1",
+      type: "conversation.assistant_reply",
+      occurredAt: 1_800_000_000_000,
+      summary: "记得休息一下",
+    }],
+  });
+  assert.equal((await fetch(`${base}/api/care/events?limit=101`)).status, 400);
 
   const deniedHook = await fetch(`${base}/api/hooks/codex`, {
     method: "POST",
@@ -228,6 +293,85 @@ test("HTTP API requires a same-origin session for state changes", async (t) => {
   });
   assert.equal(selected.status, 200);
   assert.equal((await selected.json()).selectedId, "codex-core");
+
+  const invalidCareSettings = await fetch(`${base}/api/care/settings`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: cookie,
+      "X-Codex-Desk-CSRF": csrfToken,
+      Origin: base,
+    },
+    body: JSON.stringify({
+      commandId: "care-settings-invalid-0001",
+      care: {
+        observationMinimumMinutes: 40,
+        observationMaximumMinutes: 10,
+      },
+    }),
+  });
+  assert.equal(invalidCareSettings.status, 400);
+
+  const savedCareSettings = await fetch(`${base}/api/care/settings`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: cookie,
+      "X-Codex-Desk-CSRF": csrfToken,
+      Origin: base,
+    },
+    body: JSON.stringify({
+      commandId: "care-settings-save-0001",
+      care: {
+        observationMinimumMinutes: 4,
+        observationMaximumMinutes: 9,
+        autoListenSeconds: 15,
+        allowedActions: ["schedule_follow_up"],
+      },
+    }),
+  });
+  assert.equal(savedCareSettings.status, 200);
+  const savedCare = (await savedCareSettings.json()).care;
+  assert.equal(savedCare.observationMinimumMinutes, 4);
+  assert.equal(savedCare.observationMaximumMinutes, 9);
+  assert.deepEqual(savedCare.allowedActions, ["schedule_follow_up"]);
+  assert.equal(settingsRefreshes, 1);
+
+  const immediateObservation = await fetch(`${base}/api/care/observe`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: cookie,
+      "X-Codex-Desk-CSRF": csrfToken,
+      Origin: base,
+    },
+    body: JSON.stringify({ commandId: "care-observe-now-0001" }),
+  });
+  assert.equal(immediateObservation.status, 202);
+  assert.equal((await immediateObservation.json()).deviceId, "core-s3-1");
+  assert.equal(immediateObservations, 1);
+
+  store.setCare({
+    status: "listening",
+    enabled: true,
+    conversationId: "care-thread-1",
+  });
+  const stoppedCare = await fetch(`${base}/api/care/stop`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: cookie,
+      "X-Codex-Desk-CSRF": csrfToken,
+      Origin: base,
+    },
+    body: JSON.stringify({ commandId: "care-stop-now-0001" }),
+  });
+  assert.equal(stoppedCare.status, 200);
+  const stoppedCareBody = await stoppedCare.json();
+  assert.equal(stoppedCareBody.enabled, true);
+  assert.equal(stoppedCareBody.devices.notifiedDevices, 1);
+  assert.equal(careStops, 1);
+  assert.equal(voiceStops, 1);
 
   const companionChat = await fetch(`${base}/api/companion/chat`, {
     method: "POST",

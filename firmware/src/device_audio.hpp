@@ -19,6 +19,7 @@ class DeviceAudio {
   bool begin();
   bool enqueue(AudioCue cue);
   bool enqueuePhrase(const String& phrase);
+  void cancel();
   void setPaused(bool paused) { paused_ = paused; }
   bool voiceAvailable() const { return voice_ready_; }
   bool busy() const {
@@ -53,6 +54,7 @@ class DeviceAudio {
   std::atomic<std::uint32_t> next_request_id_{1};
   std::atomic<std::uint32_t> last_enqueued_request_{0};
   std::atomic<std::uint32_t> last_completed_request_{0};
+  std::atomic<bool> cancel_requested_{false};
 };
 
 }  // namespace codex::firmware
