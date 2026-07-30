@@ -27,6 +27,7 @@ class FirmwareApp {
       DeviceProtocolClient& client,
       const String& command,
       JsonObjectConst payload,
+      JsonObject result,
       String& error);
   void handleSnapshot(const Snapshot& snapshot);
   void handleProtocolEvent(const String& type, JsonObjectConst payload);

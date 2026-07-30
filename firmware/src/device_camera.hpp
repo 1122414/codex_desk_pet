@@ -15,6 +15,7 @@ class DeviceCamera {
   bool captureAndQueue(DeviceProtocolClient& client, String& error);
   void poll();
   bool uploading() const { return uploading_; }
+  const String& captureId() const { return capture_id_; }
   const String& lastError() const { return error_; }
 
  private:

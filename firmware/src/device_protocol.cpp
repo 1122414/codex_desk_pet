@@ -15,7 +15,7 @@
 namespace codex::firmware {
 namespace {
 
-constexpr std::uint8_t kProtocolVersion = 4;
+constexpr std::uint8_t kProtocolVersion = 5;
 constexpr std::uint8_t kDeviceInfoVersion = 2;
 constexpr std::size_t kAeadKeyBytes = 32;
 constexpr std::size_t kAeadNonceBytes = 12;
@@ -809,13 +809,22 @@ void DeviceProtocolClient::handleReadyMessage(
       return;
     }
     String error;
-    const bool accepted = command_handler_ && command_handler_(command, payload, error);
+    JsonDocument result_document;
+    auto result = result_document.to<JsonObject>();
+    const bool accepted =
+        command_handler_ &&
+        command_handler_(command, payload, result, error);
     sendEnvelope(
         "event",
-        [&command_id, accepted, &error](JsonObject response) {
+        [&command_id, accepted, &error, &result_document](JsonObject response) {
           response["event"] = "command.result";
           response["commandId"] = command_id;
           response["ok"] = accepted;
+          if (accepted && result_document.size() > 0) {
+            response["result"].set(result_document.as<JsonObjectConst>());
+          } else {
+            response["result"] = nullptr;
+          }
           if (!accepted) {
             response["error"] = error.isEmpty() ? "COMMAND_REJECTED" : error;
           }

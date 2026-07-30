@@ -14,10 +14,10 @@ async function settle() {
 test("camera JPEG is authenticated, reassembled, analyzed, and removed", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "codex-desk-vision-test-"));
   const observations = [];
-  const petAgent = {
-    observeImage: async (imagePath) => {
-      observations.push(await readFile(imagePath));
-      return { reply: "我看到桌面前有一个人。" };
+  const careAgent = {
+    observeImage: async (imagePath, context) => {
+      observations.push({ image: await readFile(imagePath), context });
+      return { say: "我看到桌面前有一个人。" };
     },
   };
   const store = new DeskStore();
@@ -28,7 +28,7 @@ test("camera JPEG is authenticated, reassembled, analyzed, and removed", async (
     transport: { kind: "wifi" },
     sendEvent: (event) => events.push(event),
   };
-  const agent = new VisionAgent({ store, petAgent, root });
+  const agent = new VisionAgent({ store, careAgent, root });
   t.after(() => agent.close());
   const jpeg = Buffer.from([0xff, 0xd8, 1, 2, 3, 4, 0xff, 0xd9]);
   const captureId = "0123456789abcdef";
@@ -60,11 +60,22 @@ test("camera JPEG is authenticated, reassembled, analyzed, and removed", async (
   }), true);
   await settle();
 
-  assert.deepEqual(observations, [jpeg]);
+  assert.deepEqual(observations, [{
+    image: jpeg,
+    context: {
+      deviceId: "tab5-vision-1",
+      state: {
+        captureId,
+        width: 1_280,
+        height: 720,
+      },
+    },
+  }]);
   assert.deepEqual(events, [{
     event: "vision.reply",
     ok: true,
     text: "我看到桌面前有一个人。",
+    silent: false,
   }]);
   assert.equal(store.snapshot().vision.status, "completed");
 });
@@ -73,7 +84,7 @@ test("camera transfer rejects BLE and out-of-order chunks", () => {
   const store = new DeskStore();
   const agent = new VisionAgent({
     store,
-    petAgent: { observeImage: async () => ({ reply: "unused" }) },
+    careAgent: { observeImage: async () => ({ say: "unused" }) },
   });
   const session = {
     ready: true,

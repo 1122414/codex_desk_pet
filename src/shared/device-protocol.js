@@ -9,11 +9,11 @@ import {
 } from "node:crypto";
 import { PET_ATLAS, STANDARD_ANIMATIONS } from "./pet-spec.js";
 
-export const DEVICE_PROTOCOL_VERSION = 4;
+export const DEVICE_PROTOCOL_VERSION = 5;
 export const DEVICE_INFO_VERSION = 2;
 export const DEVICE_BOARD_ID = "m5stack-tab5-k145";
-export const DEVICE_FIRMWARE_VERSION = "0.2.0";
-export const MINIMUM_DEVICE_FIRMWARE_VERSION = "0.2.0";
+export const DEVICE_FIRMWARE_VERSION = "0.3.0";
+export const MINIMUM_DEVICE_FIRMWARE_VERSION = "0.3.0";
 export const HEARTBEAT_INTERVAL_MS = 5_000;
 export const CONNECTION_TIMEOUT_MS = 15_000;
 export const MAX_RESOURCE_BYTES = 32 * 1024 * 1024;
@@ -53,6 +53,7 @@ export const DEVICE_COMMANDS = Object.freeze([
   "telemetry.update",
   "voice.start",
   "voice.stop",
+  "camera.capture",
   "state.preview",
   "wifi.provision",
 ]);
@@ -325,6 +326,12 @@ function validatePayload(type, payload) {
     }
     if (payload.command === "voice.start" && !["chat", "command"].includes(payload.mode)) {
       throw new ProtocolError("voice mode is invalid");
+    }
+    if (
+      payload.command === "camera.capture" &&
+      !["scheduled", "follow-up", "manual"].includes(payload.reason)
+    ) {
+      throw new ProtocolError("camera capture reason is invalid");
     }
     if (payload.command === "state.preview" && (
       payload.animation !== null &&

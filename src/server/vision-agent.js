@@ -18,15 +18,15 @@ export class VisionAgent {
 
   constructor({
     store,
-    petAgent,
+    careAgent,
     root = path.join(os.tmpdir(), "codex-desk-vision"),
     timeoutMs = CAPTURE_TIMEOUT_MS,
   } = {}) {
-    if (!store || !petAgent) {
-      throw new TypeError("VisionAgent requires store and petAgent");
+    if (!store || !careAgent) {
+      throw new TypeError("VisionAgent requires store and CareAgent");
     }
     this.store = store;
-    this.petAgent = petAgent;
+    this.careAgent = careAgent;
     this.root = root;
     this.timeoutMs = timeoutMs;
   }
@@ -171,13 +171,21 @@ export class VisionAgent {
     await writeFile(imagePath, capture.buffer, { mode: 0o600 });
     this.store.setVision({ status: "analyzing", error: null });
     try {
-      const result = await this.petAgent.observeImage(imagePath);
-      const reply = this.#boundedText(result.reply);
+      const result = await this.careAgent.observeImage(imagePath, {
+        deviceId: capture.session.deviceId,
+        state: {
+          captureId: capture.captureId,
+          width: capture.width,
+          height: capture.height,
+        },
+      });
+      const reply = this.#boundedText(result.say);
       this.store.setVision({ status: "completed", reply, error: null });
       capture.session.sendEvent({
         event: "vision.reply",
         ok: true,
         text: reply,
+        silent: reply === "",
       });
     } finally {
       await rm(imagePath, { force: true });

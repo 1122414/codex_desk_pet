@@ -172,6 +172,71 @@ test("Wi-Fi provisioning is sent only through an authenticated USB session", asy
   }), /Wi-Fi 配置无效/);
 });
 
+test("proactive camera capture uses the highest-priority USB/Wi-Fi session and correlates its result", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codex-desk-hub-camera-"));
+  const secret = "c".repeat(64);
+  const credentials = new DeviceCredentialRepository(path.join(root, "devices.json"));
+  await credentials.pair({ deviceId: "tab5-camera-1", secret });
+  const hub = new DeviceHub({
+    store: new DeskStore(),
+    bridge: { decideApproval: async () => null },
+    catalog: new PetCatalog(path.join(root, "pets"), {
+      deviceAssetConverter: passthroughDeviceConverter,
+    }),
+    settings: new SettingsRepository(path.join(root, "settings.json")),
+    credentials,
+  });
+  await hub.start();
+  t.after(() => hub.close());
+
+  const received = { usb: [], wifi: [] };
+  const devices = [];
+  for (const kind of ["wifi", "usb"]) {
+    const transports = createMemoryTransportPair({ kind });
+    const bridgeSession = hub.attachTransport(transports.left);
+    const device = new DeviceSession({
+      role: "device",
+      transport: transports.right,
+      deviceId: "tab5-camera-1",
+      secret,
+      commandHandler: async (payload) => {
+        received[kind].push(payload);
+        return { captureId: `${kind}0123456789ab` };
+      },
+      nonceFactory: () => `device_nonce_${kind}_1234567890`,
+    });
+    devices.push(device);
+    t.after(() => device.close());
+    device.start();
+    await waitFor(() => bridgeSession.ready && device.ready);
+  }
+
+  const results = [];
+  hub.on("cameraCaptureResult", (result) => results.push(result));
+  assert.equal(hub.primaryCameraDeviceId(), "tab5-camera-1");
+  const request = hub.requestCameraCapture("tab5-camera-1", {
+    reason: "scheduled",
+  });
+  assert.equal(request.transport, "usb");
+  await waitFor(() => results.length === 1);
+
+  assert.equal(received.usb.length, 1);
+  assert.equal(received.wifi.length, 0);
+  assert.equal(received.usb[0].command, "camera.capture");
+  assert.equal(received.usb[0].reason, "scheduled");
+  assert.deepEqual(results[0], {
+    commandId: request.commandId,
+    deviceId: "tab5-camera-1",
+    ok: true,
+    captureId: "usb0123456789ab",
+    error: null,
+  });
+  assert.throws(
+    () => hub.requestCameraCapture("tab5-camera-1", { reason: "invalid" }),
+    /拍照原因/,
+  );
+});
+
 test("global command deduplication prevents dual-link duplicate approval execution", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "codex-desk-hub-dedupe-"));
   const credentials = new DeviceCredentialRepository(path.join(root, "devices.json"));

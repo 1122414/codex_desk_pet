@@ -155,8 +155,9 @@ void FirmwareApp::configureProtocol(DeviceProtocolClient& client) {
       [this, &client](
           const String& command,
           const JsonObjectConst payload,
+          JsonObject result,
           String& error) {
-        return handleDeviceCommand(client, command, payload, error);
+        return handleDeviceCommand(client, command, payload, result, error);
       });
 }
 
@@ -164,7 +165,45 @@ bool FirmwareApp::handleDeviceCommand(
     DeviceProtocolClient& client,
     const String& command,
     const JsonObjectConst payload,
+    JsonObject result,
     String& error) {
+  if (command == "camera.capture") {
+    const String reason = payload["reason"] | "";
+    if (
+        reason != "scheduled" &&
+        reason != "follow-up" &&
+        reason != "manual") {
+      error = "INVALID_CAPTURE_REASON";
+      return false;
+    }
+    if (
+        strcmp(client.transportKind(), "usb") != 0 &&
+        strcmp(client.transportKind(), "wifi") != 0) {
+      error = "HIGH_BANDWIDTH_TRANSPORT_REQUIRED";
+      return false;
+    }
+    if (voice_.recording()) {
+      error = "VOICE_BUSY";
+      return false;
+    }
+    if (camera_.uploading()) {
+      error = "CAMERA_BUSY";
+      return false;
+    }
+    if (pet_store_.transferActive()) {
+      error = "RESOURCE_TRANSFER_BUSY";
+      return false;
+    }
+    connection_detail_ = "正在主动观察";
+    if (!camera_.captureAndQueue(client, error)) {
+      ui_.setCameraBusy(false);
+      return false;
+    }
+    ui_.setCameraBusy(true);
+    connection_detail_ = "照片正在加密发送";
+    result["captureId"] = camera_.captureId();
+    return true;
+  }
   if (command != "wifi.provision") {
     error = "UNSUPPORTED_COMMAND";
     return false;
@@ -270,8 +309,11 @@ void FirmwareApp::handleProtocolEvent(
     connection_detail_ = "语音命令等待确认";
   } else if (event == "vision.reply") {
     const String reply = payload["text"] | "照片分析失败";
-    connection_detail_ = reply;
-    if (payload["ok"] | false) audio_.enqueuePhrase(reply);
+    const auto silent = payload["silent"] | false;
+    connection_detail_ = silent ? "观察完成" : reply;
+    if ((payload["ok"] | false) && !silent && !reply.isEmpty()) {
+      audio_.enqueuePhrase(reply);
+    }
   }
 }
 

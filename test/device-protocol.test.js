@@ -98,6 +98,24 @@ test("protocol rejects malformed command payloads before they reach the Bridge",
       mode: "command",
     },
   }));
+  assert.throws(() => createEnvelope({
+    sequence: 6,
+    type: "command",
+    payload: {
+      command: "camera.capture",
+      commandId: "command-camera-0001",
+      reason: "continuous-surveillance",
+    },
+  }), /camera capture reason/);
+  assert.doesNotThrow(() => createEnvelope({
+    sequence: 7,
+    type: "command",
+    payload: {
+      command: "camera.capture",
+      commandId: "command-camera-0002",
+      reason: "scheduled",
+    },
+  }));
 });
 
 test("Wi-Fi provisioning accepts only bounded device-safe network settings", () => {

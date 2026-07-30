@@ -14,6 +14,7 @@ const TRANSPORT_PRIORITY = Object.freeze({ usb: 3, wifi: 2, ble: 1, memory: 0 })
 export class DeviceHub extends EventEmitter {
   #sessions = new Set();
   #globalCommands = new CommandDeduplicator(2_048);
+  #pendingCameraCommands = new Map();
   #started = false;
 
   constructor({
@@ -84,6 +85,42 @@ export class DeviceHub extends EventEmitter {
         compatibility,
       };
     });
+  }
+
+  primaryCameraDeviceId() {
+    return this.#cameraSessions()[0]?.deviceId ?? null;
+  }
+
+  requestCameraCapture(deviceId, { reason = "scheduled" } = {}) {
+    if (typeof deviceId !== "string" || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(deviceId)) {
+      throw new Error("设备 ID 无效");
+    }
+    if (!["scheduled", "follow-up", "manual"].includes(reason)) {
+      throw new Error("拍照原因无效");
+    }
+    const session = this.#cameraSessions()
+      .find((candidate) => candidate.deviceId === deviceId);
+    if (!session) throw new Error("没有可用于拍照的 USB 或 Wi-Fi 设备");
+    const commandId = randomUUID();
+    this.#pendingCameraCommands.set(commandId, {
+      commandId,
+      deviceId,
+      session,
+      reason,
+      requestedAt: Date.now(),
+    });
+    try {
+      session.sendCommand("camera.capture", { reason }, commandId);
+    } catch (error) {
+      this.#pendingCameraCommands.delete(commandId);
+      throw error;
+    }
+    return {
+      commandId,
+      deviceId,
+      transport: session.transport.kind,
+      reason,
+    };
   }
 
   attachTransport(transport) {
@@ -160,7 +197,9 @@ export class DeviceHub extends EventEmitter {
     });
     session.on("event", (event) => {
       try {
-        if (event?.event === "voice.audio" && this.voiceAgent) {
+        if (event?.event === "command.result") {
+          this.#handleCameraCommandResult(session, event);
+        } else if (event?.event === "voice.audio" && this.voiceAgent) {
           this.voiceAgent.acceptAudio(session, event);
         } else if (event?.event?.startsWith("vision.") && this.visionAgent) {
           this.visionAgent.acceptEvent(session, event);
@@ -171,6 +210,16 @@ export class DeviceHub extends EventEmitter {
     });
     session.on("closed", () => {
       this.#sessions.delete(session);
+      for (const [commandId, pending] of this.#pendingCameraCommands) {
+        if (pending.session !== session) continue;
+        this.#pendingCameraCommands.delete(commandId);
+        this.emit("cameraCaptureResult", {
+          commandId,
+          deviceId: pending.deviceId,
+          ok: false,
+          error: "拍照链路已断开",
+        });
+      }
       this.voiceAgent?.disconnect(session).catch((error) => {
         this.emit("diagnostic", `Device voice cleanup failed: ${error.message}`);
       });
@@ -216,6 +265,7 @@ export class DeviceHub extends EventEmitter {
     this.store.off("change", this.onStoreChange);
     for (const session of [...this.#sessions]) session.close();
     this.#sessions.clear();
+    this.#pendingCameraCommands.clear();
   }
 
   async #claimPairing(request) {
@@ -225,6 +275,36 @@ export class DeviceHub extends EventEmitter {
       displayName: request.deviceId,
     });
     return { secret: record.secret };
+  }
+
+  #cameraSessions() {
+    return [...this.#sessions]
+      .filter((session) =>
+        session.ready &&
+        ["usb", "wifi"].includes(session.transport.kind) &&
+        session.deviceInfo?.capabilities?.camera === true)
+      .sort((left, right) =>
+        (TRANSPORT_PRIORITY[right.transport.kind] ?? -1) -
+        (TRANSPORT_PRIORITY[left.transport.kind] ?? -1));
+  }
+
+  #handleCameraCommandResult(session, event) {
+    const pending = this.#pendingCameraCommands.get(event.commandId);
+    if (!pending || pending.session !== session) return false;
+    this.#pendingCameraCommands.delete(event.commandId);
+    const result = event.result && typeof event.result === "object" && !Array.isArray(event.result)
+      ? event.result
+      : {};
+    this.emit("cameraCaptureResult", {
+      commandId: event.commandId,
+      deviceId: pending.deviceId,
+      ok: event.ok === true,
+      captureId: typeof result.captureId === "string"
+        ? result.captureId
+        : typeof event.captureId === "string" ? event.captureId : null,
+      error: event.ok === true ? null : String(event.error || "设备拒绝拍照").slice(0, 500),
+    });
+    return true;
   }
 
   async #handleCommand(payload, session) {

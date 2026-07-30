@@ -34,6 +34,7 @@ class DeviceProtocolClient {
   using CommandHandler = std::function<bool(
       const String& command,
       JsonObjectConst payload,
+      JsonObject result,
       String& error)>;
 
   void begin(

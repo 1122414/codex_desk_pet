@@ -33,6 +33,9 @@ class PetStore {
       String& error);
   void checkpoint();
   std::uint8_t transferProgress() const;
+  bool transferActive() const {
+    return tracker_.bytes() != 0 && !tracker_.complete();
+  }
 
  private:
   struct ActiveManifest {
