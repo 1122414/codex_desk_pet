@@ -50,10 +50,20 @@ export class VisionAgent {
   }
 
   disconnect(session) {
+    let interruptedCapture = null;
     for (const [key, capture] of this.#captures) {
       if (capture.session !== session) continue;
       clearTimeout(capture.timer);
       this.#captures.delete(key);
+      interruptedCapture ??= capture;
+    }
+    if (interruptedCapture) {
+      this.store.setVision({
+        status: "failed",
+        captureId: interruptedCapture.captureId,
+        deviceId: session.deviceId,
+        error: "摄像头图片传输中断",
+      });
     }
   }
 

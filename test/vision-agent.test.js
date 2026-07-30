@@ -125,3 +125,32 @@ test("camera transfer rejects BLE and out-of-order chunks", () => {
   }), /分块无效/);
   agent.close();
 });
+
+test("camera transfer interruption leaves a recoverable failed state", () => {
+  const store = new DeskStore();
+  const agent = new VisionAgent({
+    store,
+    careAgent: { observeImage: async () => ({ say: "unused" }) },
+  });
+  const session = {
+    ready: true,
+    deviceId: "tab5-vision-interrupted",
+    transport: { kind: "wifi" },
+  };
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+  agent.acceptEvent(session, {
+    event: "vision.capture.begin",
+    captureId: "0011223344556677",
+    mimeType: "image/jpeg",
+    totalBytes: jpeg.length,
+    width: 1_280,
+    height: 720,
+    sha256: createHash("sha256").update(jpeg).digest("hex"),
+  });
+
+  agent.disconnect(session);
+
+  assert.equal(store.snapshot().vision.status, "failed");
+  assert.equal(store.snapshot().vision.error, "摄像头图片传输中断");
+  agent.close();
+});

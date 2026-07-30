@@ -12,6 +12,7 @@ import { DeskStore } from "../src/server/desk-store.js";
 import { PetCatalog } from "../src/server/pet-catalog.js";
 import { SettingsRepository } from "../src/server/settings-repository.js";
 import { createMemoryTransportPair } from "../src/server/transports/memory-transport.js";
+import { verifyVirtualCare } from "./verify-virtual-care.mjs";
 
 async function waitFor(predicate, message, timeoutMs = 1_500) {
   const startedAt = Date.now();
@@ -205,6 +206,7 @@ export async function verifyVirtualTab5() {
       previewAnimation: store.snapshot().presentation.animation,
       approvalDecision: decisions[0].decision,
       credentialsIsolated: root.startsWith(os.tmpdir()),
+      care: await verifyVirtualCare(),
     };
   } finally {
     for (const device of devices) device.close();
