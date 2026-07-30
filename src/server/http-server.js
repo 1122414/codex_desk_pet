@@ -17,7 +17,7 @@ import {
 import { validateCareSettingsPatch } from "./settings-repository.js";
 
 const MAX_BODY_BYTES = 16 * 1024;
-const BRIDGE_VERSION = "0.2.0";
+const BRIDGE_VERSION = "0.3.0";
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 class HttpError extends Error {

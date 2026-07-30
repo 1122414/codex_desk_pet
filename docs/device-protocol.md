@@ -16,7 +16,7 @@
 
 ```json
 {
-  "version": 4,
+  "version": 5,
   "id": "018f...",
   "sequence": 42,
   "type": "snapshot",
@@ -34,7 +34,7 @@
 
 字段约束：
 
-- `version`：当前固定为 `4`；未知版本必须拒绝，不能按旧版本猜测。
+- `version`：当前固定为 `5`；未知版本必须拒绝，不能按旧版本猜测。
 - `id`：全局消息 ID，用于 ACK 和日志关联。
 - `sequence`：每个方向的可靠消息独立递增。ACK、心跳和错误不占用可靠序号，使用下一个可靠序号作为关联位置，也不推进可靠接收窗口。
 - `type`：配对与认证消息、业务消息、资源消息、`ack`、`heartbeat` 或 `error`。
@@ -57,6 +57,9 @@
 - `telemetry.update`
 - `voice.start`
 - `voice.stop`
+- `camera.capture`
+- `device.brightness.set`
+- `device.volume.set`
 - `state.preview`
 - `wifi.provision`：只允许 Bridge 经已认证的 USB 会话发送，保存网络和 Bridge 地址后设备重启。
 
@@ -121,7 +124,7 @@
 - 每台设备保存独立、可撤销的随机凭据。
 - WebSocket 建连后的设备协议必须完成 HMAC 双向认证；未配对客户端不能进入业务会话。
 - 凭据不得写入日志或前端静态文件。
-- 协议 v4 已提供应用层 AES‑256‑GCM 加密、认证设备信息绑定和独立可靠序号语义，并已通过篡改、方向隔离、设备信息替换、nonce 唯一性和明文降级测试；任务与审批 payload 不再以明文出现。
+- 协议 v5 已提供应用层 AES‑256‑GCM 加密、认证设备信息绑定和独立可靠序号语义，并已通过篡改、方向隔离、设备信息替换、nonce 唯一性和明文降级测试；任务、审批、语音、图片和关怀动作结果 payload 不再以明文出现。
 - 设备服务仍必须与控制面板分端口、限制会话数、保持凭据可撤销。公网部署还需要防火墙、速率限制和 WSS/反向代理，不能只依赖应用层加密。
 
 ## Pet 资源同步
@@ -137,10 +140,14 @@
 - 固件先写 `<pet>.part` 和可恢复区间清单；重复区间必须与已写字节逐字节一致，否则拒绝。
 - 整包 SHA‑256 通过后才重命名为以完整 hash 命名的不可变资源。active 指针使用两个带 generation 的槽位交替发布；更新任一槽位时另一个已验证槽位保持不动，断电后选择最高的可用 generation，损坏则回退上一槽或内置 Pet。
 
-## 语音与视觉事件
+## 语音、视觉与主动关怀
 
 - 设备按住“对话”或“命令”后发送 `voice.start`，随后通过加密 `event` 发送 16 kHz、单声道 PCM 分块，松开时发送 `voice.stop`。
 - Bridge 使用 Codex App Server Realtime 得到文字；对话交给临时只读 Pet 会话，命令只进入设备确认队列，未确认时绝不创建可执行任务。
-- 拍照由设备手动触发。P4 把相机 RGB565 帧硬件编码为不超过 512 KiB 的 JPEG，依次发送 `vision.capture.begin/chunk/end`。
+- 手动拍照或 Bridge 的主动观察调度都会发送 `camera.capture`。P4 把相机 RGB565 帧硬件编码为不超过 512 KiB 的 JPEG，依次发送 `vision.capture.begin/chunk/end`。
 - Bridge 强制校验设备身份、USB/Wi‑Fi 链路、分块顺序、总大小与 SHA‑256；临时文件权限为 `0600`，多模态回合结束后立即删除。
-- 摄像头 MVP 不连续录像、不后台抓拍，也不做人脸身份、健康、情绪或其他敏感属性推断。
+- 主动观察默认在 10～30 分钟内随机触发；AI 可根据本轮结果安排 1～120 分钟内的复查。没有固定 6 小时冷却，每台设备只保留默认 90 秒的技术性重复拍照保护。
+- 图片、用户转写、动作执行结果和后续回复进入同一个只读、禁止工具的 Care 会话。AI 可以返回空话术保持安静，也可以用 `care.reply` 让设备朗读；朗读完成后设备自动进入半双工聆听，静音或超时后发送 `voice.stop`，再由同一个 Care 会话继续回答。
+- `care.reply` 带 `continueListening` 和 `autoListenSeconds`。设备只在 TTS 完成后启动麦克风，不会同时播放和录音；`care.stop` 会取消待启动或正在进行的自动聆听并停止当前关怀音频。
+- AI 只能提议 Bridge 设置中启用的动作：立即观察、安排复查、Tab5 亮度/音量、Mac 音量，以及用户预先配置的应用或媒体。Bridge 再做严格结构校验、范围校验、预设解析、超时和幂等去重；设备调整通过 `device.brightness.set` / `device.volume.set` 下发，并用 `command.result` 回传。
+- 摄像头不会连续录像；每次观察都是一张明确边界的 JPEG。照片仅用于当前 Care 回合并在分析后删除。

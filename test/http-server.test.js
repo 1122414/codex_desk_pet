@@ -167,6 +167,7 @@ test("HTTP API requires a same-origin session for state changes", async (t) => {
   assert.equal((await devices.json()).devices[0].deviceId, "core-s3-1");
   const diagnostics = await fetch(`${base}/api/diagnostics`);
   const diagnosticBody = await diagnostics.json();
+  assert.equal(diagnosticBody.bridgeVersion, "0.3.0");
   assert.equal(diagnosticBody.target.boardId, "m5stack-tab5-k145");
   assert.equal(diagnosticBody.target.protocolVersion, 5);
   assert.equal(diagnosticBody.codex.appServerUserAgent, "codex-desk-mock");

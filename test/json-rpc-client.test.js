@@ -21,10 +21,12 @@ class FakeChild extends EventEmitter {
     this.killed = false;
     this.stdout = new EventEmitter();
     this.stderr = new EventEmitter();
+    this.messages = [];
     this.stdin = {
       writable: true,
       write: (line) => {
         const message = JSON.parse(line);
+        this.messages.push(message);
         if (message.method === "initialize") {
           queueMicrotask(() => {
             this.stdout.emit("data", Buffer.from(`${JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {} })}\n`));
@@ -61,6 +63,7 @@ test("JSON-RPC client can restart cleanly and marks deliberate exits", async () 
 
   await client.start();
   assert.equal(client.running, true);
+  assert.equal(children[0].messages[0].params.clientInfo.version, "0.3.0");
   await client.stop();
   assert.deepEqual(exitDetails, [{ intentional: true }]);
 
