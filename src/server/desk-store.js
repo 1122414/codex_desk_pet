@@ -20,6 +20,7 @@ const DEFAULT_TELEMETRY = Object.freeze({
   charging: true,
   transport: "simulator",
   wifiRssi: null,
+  temperatureC: null,
   lastSeenAt: null,
 });
 const MAX_DEVICE_TASKS = 12;

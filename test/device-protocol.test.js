@@ -63,13 +63,24 @@ test("protocol rejects malformed command payloads before they reach the Bridge",
     sequence: 2,
     type: "command",
     payload: {
+      command: "telemetry.update",
+      commandId: "command-telemetry-2",
+      batteryPercent: 50,
+      charging: false,
+      temperatureC: 130,
+    },
+  }), /temperatureC/);
+  assert.throws(() => createEnvelope({
+    sequence: 3,
+    type: "command",
+    payload: {
       command: "state.preview",
       commandId: "command-preview-1",
       animation: "unknown",
     },
   }), /animation/);
   assert.throws(() => createEnvelope({
-    sequence: 3,
+    sequence: 4,
     type: "command",
     payload: {
       command: "wifi.provision",
@@ -81,7 +92,7 @@ test("protocol rejects malformed command payloads before they reach the Bridge",
     },
   }), /Wi-Fi/);
   assert.throws(() => createEnvelope({
-    sequence: 4,
+    sequence: 5,
     type: "command",
     payload: {
       command: "voice.start",

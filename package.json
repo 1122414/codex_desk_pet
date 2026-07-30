@@ -19,6 +19,7 @@
     "test": "node --test",
     "test:virtual-tab5": "node scripts/verify-virtual-tab5.mjs",
     "test:stability": "node scripts/run-stability.mjs && node scripts/check-firmware.mjs",
+    "acceptance:hardware": "node scripts/run-hardware-care-acceptance.mjs",
     "test:firmware": "node scripts/check-firmware.mjs",
     "setup:firmware-tts": "node scripts/setup-esp-tts.mjs",
     "build:bundled-pet": "node scripts/build-bundled-pet.mjs",

@@ -229,6 +229,7 @@ export class DeskHttpServer {
       return;
     }
     if (req.method === "GET" && route === "/api/diagnostics") {
+      const memory = process.memoryUsage();
       json(res, 200, {
         bridgeVersion: BRIDGE_VERSION,
         target: {
@@ -244,6 +245,16 @@ export class DeskHttpServer {
         companion: {
           available: Boolean(this.petAgent),
           pendingCommand: this.petAgent?.pendingCommand ?? null,
+        },
+        runtime: {
+          pid: process.pid,
+          uptimeSeconds: Math.floor(process.uptime()),
+          memory: {
+            rssBytes: memory.rss,
+            heapUsedBytes: memory.heapUsed,
+            heapTotalBytes: memory.heapTotal,
+            externalBytes: memory.external,
+          },
         },
         devices: this.deviceHub?.listDevices() ?? [],
       });
@@ -449,12 +460,22 @@ export class DeskHttpServer {
         if (!Number.isFinite(body.batteryPercent) || body.batteryPercent < 0 || body.batteryPercent > 100) {
           throw new HttpError(400, "batteryPercent must be between 0 and 100");
         }
+        if (body.temperatureC !== undefined && body.temperatureC !== null && (
+          !Number.isFinite(body.temperatureC) ||
+          body.temperatureC < -40 ||
+          body.temperatureC > 125
+        )) {
+          throw new HttpError(400, "temperatureC must be between -40 and 125");
+        }
         if (!["simulator", "usb", "wifi", "ble"].includes(body.transport)) throw new HttpError(400, "transport is invalid");
         this.store.setTelemetry({
           batteryPercent: Math.round(body.batteryPercent),
           charging: Boolean(body.charging),
           transport: body.transport,
           wifiRssi: Number.isFinite(body.wifiRssi) ? Math.round(body.wifiRssi) : null,
+          temperatureC: Number.isFinite(body.temperatureC)
+            ? Math.round(body.temperatureC * 10) / 10
+            : null,
         });
         json(res, 200, { ok: true });
         return;

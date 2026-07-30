@@ -325,6 +325,13 @@ function validatePayload(type, payload) {
       )) {
         throw new ProtocolError("wifiRssi is invalid");
       }
+      if (payload.temperatureC !== undefined && payload.temperatureC !== null && (
+        !Number.isFinite(payload.temperatureC) ||
+        payload.temperatureC < -40 ||
+        payload.temperatureC > 125
+      )) {
+        throw new ProtocolError("temperatureC is invalid");
+      }
     }
     if (
       payload.command === "voice.start" &&

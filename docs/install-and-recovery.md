@@ -124,4 +124,28 @@ Tab5 的旧版固件已完成整机烧录、USB 枚举、应用升级、屏幕�
 - USB 加密配网、2.4 GHz Wi‑Fi、电脑睡眠与路由器重启后的恢复。
 - 不同 microSD 的兼容性、真实断电恢复和连续 24 小时主动关怀运行，并记录观察数、失败恢复、重复动作、内存、电量和温升。
 
+## 运行最终真机验收
+
+确认 Bridge、Codex 和 Tab5 都在线后，在另一个终端启动：
+
+```bash
+npm run acceptance:hardware -- --device-id <控制面板显示的设备 ID>
+```
+
+记录器默认运行 24 小时、每 30 秒采样，并要求在期间完成：
+
+1. 至少一次由普通调度触发的 `scheduled` 主动观察。
+2. 同一个 Care 会话内至少五次用户回复和五次 AI 回复。
+3. Tab5 亮度、Tab5 音量、Mac 音量、应用或媒体预设、立即再拍和动态复查六组动作。
+4. 一次可恢复的 Wi‑Fi 断开/重连；可以在设备已经通过 Wi‑Fi 工作时重启路由器或短暂关闭网络。
+5. 最终设备和 Codex 都在线，没有失败动作、5 秒内的重复动作、持续超过 10 分钟的同一忙状态，Bridge RSS 首尾窗口增长不超过 32 MiB。
+
+报告会以 `0600` 权限原子写入 `output/hardware-care-acceptance/`，包括全部检查项、采样、电量、RSS、温度和关怀事件。按 `Ctrl+C` 会先写出部分报告；之后使用输出中显示的路径恢复：
+
+```bash
+npm run acceptance:hardware -- --resume output/hardware-care-acceptance/<报告>.json
+```
+
+`--trigger-observation` 可用于烧录后的快速预检，但最终报告仍要求至少一次真正的 `scheduled` 观察。`--no-require-wifi-reconnect` 只适合短时预检，不能用于关闭最终阶段。
+
 Secure Boot、Flash Encryption 和签名升级需要正式生产密钥与真机 eFuse 流程；eFuse 操作不可逆，因此不在无硬件、无量产密钥阶段假装完成。

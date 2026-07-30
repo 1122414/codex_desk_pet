@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <string>
 #include <utility>
@@ -530,16 +531,24 @@ bool DeviceProtocolClient::sendVisionEnd(const String& capture_id) {
 bool DeviceProtocolClient::sendTelemetry(
     const std::uint8_t battery_percent,
     const bool charging,
-    const std::int16_t wifi_rssi) {
+    const std::int16_t wifi_rssi,
+    const float temperature_c) {
   return sendCommand(
       "telemetry.update",
-      [battery_percent, charging, wifi_rssi](JsonObject payload) {
+      [battery_percent, charging, wifi_rssi, temperature_c](JsonObject payload) {
         payload["batteryPercent"] = std::min<std::uint8_t>(battery_percent, 100);
         payload["charging"] = charging;
         if (wifi_rssi < 0 && wifi_rssi >= -127) {
           payload["wifiRssi"] = wifi_rssi;
         } else {
           payload["wifiRssi"] = nullptr;
+        }
+        if (std::isfinite(temperature_c) &&
+            temperature_c >= -40.0F &&
+            temperature_c <= 125.0F) {
+          payload["temperatureC"] = temperature_c;
+        } else {
+          payload["temperatureC"] = nullptr;
         }
       });
 }

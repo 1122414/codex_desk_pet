@@ -113,9 +113,55 @@ const refreshObservationAvailability = () => {
 const handleCameraCaptureResult = (result) => {
   observationScheduler.handleCaptureResult(result);
 };
-deviceHub.on("deviceConnected", refreshObservationAvailability);
-deviceHub.on("deviceDisconnected", refreshObservationAvailability);
+const recordAcceptanceEvent = (event) => {
+  careMemory.appendEvent(event).catch((error) => {
+    if (process.env.CODEX_DESK_DEBUG === "1") {
+      console.warn(`[care-memory] ${error.message}`);
+    }
+  });
+};
+const handleDeviceConnected = (details) => {
+  refreshObservationAvailability();
+  recordAcceptanceEvent({
+    type: "device.connected",
+    deviceId: details.deviceId,
+    summary: `${details.transport} 已连接`,
+    data: { transport: details.transport },
+  });
+};
+const handleDeviceDisconnected = (details) => {
+  refreshObservationAvailability();
+  recordAcceptanceEvent({
+    type: "device.disconnected",
+    deviceId: details.deviceId,
+    summary: `${details.transport} 已断开`,
+    data: { transport: details.transport },
+  });
+};
+const handleCaptureRequested = (details) => {
+  recordAcceptanceEvent({
+    type: "observation.requested",
+    deviceId: details.deviceId,
+    summary: details.reason,
+    data: {
+      reason: details.reason,
+      transport: details.transport ?? null,
+      commandId: details.commandId ?? null,
+    },
+  });
+};
+const handleCaptureFailed = (details) => {
+  recordAcceptanceEvent({
+    type: "observation.failed",
+    deviceId: details.deviceId ?? null,
+    summary: String(details.error || "摄像头观察失败").slice(0, 500),
+  });
+};
+deviceHub.on("deviceConnected", handleDeviceConnected);
+deviceHub.on("deviceDisconnected", handleDeviceDisconnected);
 deviceHub.on("cameraCaptureResult", handleCameraCaptureResult);
+observationScheduler.on("captureRequested", handleCaptureRequested);
+observationScheduler.on("captureFailed", handleCaptureFailed);
 deviceHub.on("diagnostic", (message) => {
   if (process.env.CODEX_DESK_DEBUG === "1") console.warn(`[device] ${message}`);
 });
@@ -187,9 +233,11 @@ async function shutdown() {
   await usbManager.close();
   observationScheduler.stop();
   careActionService.close();
-  deviceHub.off("deviceConnected", refreshObservationAvailability);
-  deviceHub.off("deviceDisconnected", refreshObservationAvailability);
+  deviceHub.off("deviceConnected", handleDeviceConnected);
+  deviceHub.off("deviceDisconnected", handleDeviceDisconnected);
   deviceHub.off("cameraCaptureResult", handleCameraCaptureResult);
+  observationScheduler.off("captureRequested", handleCaptureRequested);
+  observationScheduler.off("captureFailed", handleCaptureFailed);
   await deviceHub.close();
   careMemory.off("change", refreshCareMemory);
   await careMemory.close();

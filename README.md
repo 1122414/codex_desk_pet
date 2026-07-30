@@ -14,6 +14,7 @@ Codex Desk Buddy 是面向 M5Stack Tab5 Kit（SKU `K145`，ESP32-P4 + ESP32-C6�
 - 9 个标准动画；v2 Pet 和内置 Pet 支持 16 个看向方向。
 - 触摸/滑动、屏幕左右键、电脑下拉框、键盘方向键切换 Pet，所有界面共享 Bridge 选择状态。
 - 浏览器和设备端中文语音提示、非阻塞提示音、时钟、电池、当前线程 Token 和等级进度。
+- 真机每 30 秒上报电量、充电状态、Wi‑Fi RSSI 和 ESP32-P4 芯片温度；Bridge 诊断同时提供 RSS/堆内存，供 24 小时验收记录器分析趋势。
 - Pet 对话通过临时只读 Codex 会话完成；语音对话使用 Codex App Server Realtime，语音命令先转写并在设备上明确确认后才创建可执行任务。
 - Tab5 自带 2MP MIPI 摄像头可手动拍照，ESP32-P4 硬件编码 JPEG，经已认证的 USB/Wi‑Fi 加密分块传输后交给临时只读多模态会话观察；图片分析后立即删除。
 - 主动关怀默认在 10～30 分钟内随机选择下一次观察；AI 可以保持安静、主动开口或建议更早复查。没有 6 小时冷却，只有默认 90 秒的技术性重复拍照保护。
@@ -175,6 +176,7 @@ npm run doctor
 npm run check
 npm run test:stability
 npm run smoke:codex
+npm run acceptance:hardware -- --device-id <已配对设备 ID>
 ```
 
 - `npm test`：运行领域、协议、审批、配对、传输、Pet 资源与 HTTP 安全测试。
@@ -188,6 +190,7 @@ npm run smoke:codex
 - `npm run flash:firmware -- --port <串口>`：验证发布包后写入明确指定的 Tab5；只有显式增加 `--erase` 才会先整片擦除。
 - `npm run test:stability`：运行可复现的长循环与故障注入，打印每类实际完成次数，再运行固件核心压力测试。
 - `npm run smoke:codex`：真实启动 App Server 并读取最近线程，然后立即关闭。
+- `npm run acceptance:hardware`：连接真机后每 30 秒保存一次原子检查点，连续 24 小时记录定时观察、同一会话五轮对话、白名单动作、重复/失败、Wi‑Fi 重连、Bridge RSS、电量和芯片温度；中断后可用 `--resume <报告路径>` 继续。
 
 ## 重要边界
 

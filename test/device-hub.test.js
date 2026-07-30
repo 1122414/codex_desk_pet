@@ -109,9 +109,11 @@ test("USB pairing provisions a secret and authenticated device commands update t
     batteryPercent: 63,
     charging: false,
     wifiRssi: -61,
+    temperatureC: 42.75,
   }, randomUUID());
   await waitFor(() => store.snapshot().telemetry.batteryPercent === 63);
   assert.equal(store.snapshot().telemetry.transport, "usb");
+  assert.equal(store.snapshot().telemetry.temperatureC, 42.8);
   assert.equal(hub.listDevices()[0].primaryTransport, "usb");
   assert.equal(hub.listDevices()[0].deviceInfo.boardId, "m5stack-tab5-k145");
   assert.equal(hub.listDevices()[0].compatibility.status, "compatible");

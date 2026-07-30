@@ -468,6 +468,9 @@ export class DeviceHub extends EventEmitter {
           charging: Boolean(payload.charging),
           transport: session.transport.kind,
           wifiRssi: Number.isFinite(payload.wifiRssi) ? Math.round(payload.wifiRssi) : null,
+          temperatureC: Number.isFinite(payload.temperatureC)
+            ? Math.round(payload.temperatureC * 10) / 10
+            : null,
           deviceId: session.deviceId,
         });
         return { accepted: true };

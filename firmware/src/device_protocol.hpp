@@ -83,7 +83,8 @@ class DeviceProtocolClient {
   bool sendTelemetry(
       std::uint8_t battery_percent,
       bool charging,
-      std::int16_t wifi_rssi);
+      std::int16_t wifi_rssi,
+      float temperature_c);
   bool requestResource(
       const String& pet_id,
       const String& installed_sha256 = "",

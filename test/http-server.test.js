@@ -170,6 +170,7 @@ test("HTTP API requires a same-origin session for state changes", async (t) => {
   assert.equal(diagnosticBody.bridgeVersion, "0.3.0");
   assert.equal(diagnosticBody.target.boardId, "m5stack-tab5-k145");
   assert.equal(diagnosticBody.target.protocolVersion, 5);
+  assert.ok(diagnosticBody.runtime.memory.rssBytes > 0);
   assert.equal(diagnosticBody.codex.appServerUserAgent, "codex-desk-mock");
   assert.equal(diagnosticBody.hooks.endpointReady, true);
   assert.equal(diagnosticBody.hooks.approvalReady, true);

@@ -566,7 +566,10 @@ void FirmwareApp::updateTelemetry(const std::uint64_t now_ms) {
   model_.updateTelemetryLocally(telemetry);
   if (auto* client = primaryClient(); client != nullptr) {
     client->sendTelemetry(
-        telemetry.battery_percent, telemetry.charging, telemetry.wifi_rssi);
+        telemetry.battery_percent,
+        telemetry.charging,
+        telemetry.wifi_rssi,
+        temperatureRead());
   }
 }
 

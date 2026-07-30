@@ -151,3 +151,4 @@
 - `care.reply` 带 `continueListening` 和 `autoListenSeconds`。设备只在 TTS 完成后启动麦克风，不会同时播放和录音；`care.stop` 会取消待启动或正在进行的自动聆听并停止当前关怀音频。
 - AI 只能提议 Bridge 设置中启用的动作：立即观察、安排复查、Tab5 亮度/音量、Mac 音量，以及用户预先配置的应用或媒体。Bridge 再做严格结构校验、范围校验、预设解析、超时和幂等去重；设备调整通过 `device.brightness.set` / `device.volume.set` 下发，并用 `command.result` 回传。
 - 摄像头不会连续录像；每次观察都是一张明确边界的 JPEG。照片仅用于当前 Care 回合并在分析后删除。
+- `telemetry.update` 每 30 秒上报电量、充电状态、Wi‑Fi RSSI 和 ESP32-P4 芯片温度；温度必须在 -40～125 °C 范围内。Bridge 同时在本机诊断中暴露 RSS/堆内存，用于 24 小时真机趋势验收。
