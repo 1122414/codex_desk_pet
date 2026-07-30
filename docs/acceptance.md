@@ -50,7 +50,7 @@ npm run release:firmware
 git diff --check
 ```
 
-- `check` 检查全部 JavaScript 语法，运行 165 项领域、协议、HTTP、语音、视觉和虚拟设备测试，并用 C++17 重新编译固件核心测试。
+- `check` 检查全部 JavaScript 语法，运行 168 项领域、协议、HTTP、语音、视觉、虚拟设备和工具链选择测试，并用 C++17 重新编译固件核心测试。
 - `test:virtual-tab5` 在临时目录完成一次性 USB 配对、AES 加密、双链路、最大规格 V2 Pet、审批，以及主动观察、三轮自动对话、动作和故障恢复。
 - `test:stability` 打印 501 个认证会话、500 次链路切换、250 次资源恢复和各类故障的实际计数。
 - `doctor` 检查 Node、Codex 登录/App Server Schema、Hooks、PlatformIO 和 v0.3.0 发布包；不读取线程标题或凭据。
@@ -59,7 +59,7 @@ git diff --check
 
 ## 2026-07-30 软件复验结果
 
-- `npm run check`：165/165 测试和固件核心检查通过。
+- `npm run check`：168/168 测试和固件核心检查通过。
 - `npm run test:virtual-tab5`：配对、加密双链路、Pet、审批和完整主动关怀闭环通过；三轮自动语音共用一个 Care 线程，动作各执行一次。
 - `npm run test:stability`：501 个认证会话、500 次链路切换、250 次资源恢复和全部固定种子故障注入通过。
 - 浏览器控制面板：桌面与 760 px 视口均无横向溢出，主动关怀设置保存/恢复、立即观察无设备提示和停止入口通过，控制台 0 错误。

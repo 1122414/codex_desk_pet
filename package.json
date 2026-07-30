@@ -22,7 +22,7 @@
     "test:firmware": "node scripts/check-firmware.mjs",
     "setup:firmware-tts": "node scripts/setup-esp-tts.mjs",
     "build:bundled-pet": "node scripts/build-bundled-pet.mjs",
-    "build:firmware": "pio run -d firmware",
+    "build:firmware": "node scripts/run-platformio.mjs run -d firmware",
     "release:firmware": "node scripts/build-firmware-release.mjs",
     "flash:firmware": "node scripts/flash-firmware.mjs",
     "check": "node scripts/check.mjs",

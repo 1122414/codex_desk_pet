@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { verifyFirmwareRelease } from "../src/server/firmware-release.js";
 import { DEVICE_FIRMWARE_VERSION } from "../src/shared/device-protocol.js";
+import { resolvePlatformioCommand } from "./platformio-command.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const arguments_ = process.argv.slice(2);
@@ -36,7 +37,7 @@ const manifest = await verifyFirmwareRelease(releaseRoot);
 const platformioRoot = process.env.PLATFORMIO_CORE_DIR ??
   path.join(os.homedir(), ".platformio");
 const esptoolPackage = path.join(platformioRoot, "packages", "tool-esptoolpy");
-const pio = process.env.PIO || "pio";
+const pio = resolvePlatformioCommand();
 
 function runEsptool(args) {
   const result = spawnSync(pio, [

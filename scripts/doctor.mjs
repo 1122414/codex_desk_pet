@@ -11,6 +11,7 @@ import {
   DEVICE_FIRMWARE_VERSION,
   DEVICE_PROTOCOL_VERSION,
 } from "../src/shared/device-protocol.js";
+import { resolvePlatformioCommand } from "./platformio-command.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const requiredMethods = [
@@ -141,7 +142,7 @@ try {
 }
 
 try {
-  const pio = process.env.PIO || "pio";
+  const pio = resolvePlatformioCommand();
   report.platformio.version = run(pio, ["--version"]);
   report.platformio.available = true;
 } catch (error) {
