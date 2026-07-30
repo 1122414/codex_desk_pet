@@ -15,6 +15,7 @@ export class DeviceHub extends EventEmitter {
   #sessions = new Set();
   #globalCommands = new CommandDeduplicator(2_048);
   #pendingCameraCommands = new Map();
+  #pendingCareCommands = new Map();
   #started = false;
 
   constructor({
@@ -123,6 +124,22 @@ export class DeviceHub extends EventEmitter {
     };
   }
 
+  setDeviceBrightness(deviceId, value) {
+    return this.#requestCareDeviceValue(
+      deviceId,
+      "device.brightness.set",
+      value,
+    );
+  }
+
+  setDeviceVolume(deviceId, value) {
+    return this.#requestCareDeviceValue(
+      deviceId,
+      "device.volume.set",
+      value,
+    );
+  }
+
   attachTransport(transport) {
     if (!this.#started) throw new Error("DeviceHub is not started");
     if (this.#sessions.size >= this.maxSessions) {
@@ -198,7 +215,9 @@ export class DeviceHub extends EventEmitter {
     session.on("event", (event) => {
       try {
         if (event?.event === "command.result") {
-          this.#handleCameraCommandResult(session, event);
+          if (!this.#handleCameraCommandResult(session, event)) {
+            this.#handleCareCommandResult(session, event);
+          }
         } else if (event?.event === "voice.audio" && this.voiceAgent) {
           this.voiceAgent.acceptAudio(session, event);
         } else if (event?.event?.startsWith("vision.") && this.visionAgent) {
@@ -219,6 +238,12 @@ export class DeviceHub extends EventEmitter {
           ok: false,
           error: "拍照链路已断开",
         });
+      }
+      for (const [commandId, pending] of this.#pendingCareCommands) {
+        if (pending.session !== session) continue;
+        this.#pendingCareCommands.delete(commandId);
+        clearTimeout(pending.timer);
+        pending.reject(new Error("设备控制链路已断开"));
       }
       this.voiceAgent?.disconnect(session).catch((error) => {
         this.emit("diagnostic", `Device voice cleanup failed: ${error.message}`);
@@ -266,6 +291,11 @@ export class DeviceHub extends EventEmitter {
     for (const session of [...this.#sessions]) session.close();
     this.#sessions.clear();
     this.#pendingCameraCommands.clear();
+    for (const pending of this.#pendingCareCommands.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error("设备服务已关闭"));
+    }
+    this.#pendingCareCommands.clear();
   }
 
   async #claimPairing(request) {
@@ -288,6 +318,55 @@ export class DeviceHub extends EventEmitter {
         (TRANSPORT_PRIORITY[left.transport.kind] ?? -1));
   }
 
+  #deviceSessions(deviceId) {
+    return [...this.#sessions]
+      .filter((session) =>
+        session.ready &&
+        session.deviceId === deviceId)
+      .sort((left, right) =>
+        (TRANSPORT_PRIORITY[right.transport.kind] ?? -1) -
+        (TRANSPORT_PRIORITY[left.transport.kind] ?? -1));
+  }
+
+  #requestCareDeviceValue(deviceId, command, value) {
+    if (typeof deviceId !== "string" || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(deviceId)) {
+      throw new Error("设备 ID 无效");
+    }
+    if (
+      !["device.brightness.set", "device.volume.set"].includes(command) ||
+      !Number.isInteger(value) ||
+      value < 0 ||
+      value > 100
+    ) {
+      throw new Error("设备控制参数无效");
+    }
+    const session = this.#deviceSessions(deviceId)[0];
+    if (!session) throw new Error("目标 Tab5 当前未连接");
+    const commandId = randomUUID();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.#pendingCareCommands.delete(commandId);
+        reject(new Error("等待 Tab5 动作结果超时"));
+      }, 10_000);
+      timer.unref?.();
+      this.#pendingCareCommands.set(commandId, {
+        session,
+        deviceId,
+        command,
+        resolve,
+        reject,
+        timer,
+      });
+      try {
+        session.sendCommand(command, { value }, commandId);
+      } catch (error) {
+        clearTimeout(timer);
+        this.#pendingCareCommands.delete(commandId);
+        reject(error);
+      }
+    });
+  }
+
   #handleCameraCommandResult(session, event) {
     const pending = this.#pendingCameraCommands.get(event.commandId);
     if (!pending || pending.session !== session) return false;
@@ -303,6 +382,41 @@ export class DeviceHub extends EventEmitter {
         ? result.captureId
         : typeof event.captureId === "string" ? event.captureId : null,
       error: event.ok === true ? null : String(event.error || "设备拒绝拍照").slice(0, 500),
+    });
+    return true;
+  }
+
+  #handleCareCommandResult(session, event) {
+    const pending = this.#pendingCareCommands.get(event.commandId);
+    if (!pending || pending.session !== session) return false;
+    this.#pendingCareCommands.delete(event.commandId);
+    clearTimeout(pending.timer);
+    if (event.ok !== true) {
+      pending.reject(new Error(
+        String(event.error || "Tab5 拒绝设备控制").slice(0, 500),
+      ));
+      return true;
+    }
+    const result = event.result && typeof event.result === "object" && !Array.isArray(event.result)
+      ? event.result
+      : {};
+    if (
+      !Number.isInteger(result.value) ||
+      result.value < 0 ||
+      result.value > 100 ||
+      !Number.isInteger(result.previousValue) ||
+      result.previousValue < 0 ||
+      result.previousValue > 100
+    ) {
+      pending.reject(new Error("Tab5 返回了无效的设备控制结果"));
+      return true;
+    }
+    pending.resolve({
+      deviceId: pending.deviceId,
+      command: pending.command,
+      transport: session.transport.kind,
+      value: result.value,
+      previousValue: result.previousValue,
     });
     return true;
   }

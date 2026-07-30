@@ -128,6 +128,31 @@ test("scheduler enforces the technical duplicate guard without a six-hour cooldo
   fixture.scheduler.stop();
 });
 
+test("capture_now may bypass its own CareAgent processing state but not active vision", async () => {
+  const fixture = createFixture();
+  fixture.scheduler.setAvailable(true);
+  await fixture.scheduler.start();
+  fixture.store.setCare({ status: "acting" });
+  fixture.store.setVoice({ status: "processing" });
+
+  assert.deepEqual(await fixture.scheduler.requestNow("manual"), {
+    accepted: false,
+    reason: "busy",
+  });
+  assert.equal(
+    (await fixture.scheduler.requestNow("manual", { fromCareAction: true })).accepted,
+    true,
+  );
+  fixture.store.setCare({ status: "acting" });
+  fixture.store.setVoice({ status: "processing" });
+  fixture.store.setVision({ status: "analyzing" });
+  assert.deepEqual(
+    await fixture.scheduler.requestNow("manual", { fromCareAction: true }),
+    { accepted: false, reason: "busy" },
+  );
+  fixture.scheduler.stop();
+});
+
 test("scheduler cancels on disconnect and replans after a high-bandwidth device returns", async () => {
   const fixture = createFixture();
   fixture.scheduler.setAvailable(true);

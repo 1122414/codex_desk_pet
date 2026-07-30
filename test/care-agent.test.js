@@ -39,7 +39,7 @@ class FakeConversation {
   }
 }
 
-async function fixture(replies) {
+async function fixture(replies, { actionService = null } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "codex-desk-care-agent-"));
   const now = 1_800_000_000_000;
   const settings = new SettingsRepository(path.join(root, "settings.json"));
@@ -55,6 +55,7 @@ async function fixture(replies) {
     settings,
     memory,
     conversation,
+    actionService,
     cwd: "/workspace",
     now: () => now,
   });
@@ -168,4 +169,83 @@ test("care response validation enforces ranges, exact fields, and action argumen
     extra: true,
   })), /字段/);
   assert.throws(() => parseCareResponse("```json\n{}\n```"), /有效 JSON/);
+});
+
+test("CareAgent executes a whitelisted action and feeds the result back to the same thread", async () => {
+  const actions = [];
+  const actionService = {
+    execute: async (action, context) => {
+      actions.push({ action, context });
+      return {
+        action: action.name,
+        ok: true,
+        message: "已打开网易云音乐",
+        presetId: action.arguments.presetId,
+        executedAt: 1_800_000_000_000,
+      };
+    },
+  };
+  const { agent, conversation, memory } = await fixture([
+    jsonReply({
+      say: "我来打开。",
+      continueListening: true,
+      action: {
+        name: "open_app",
+        arguments: { presetId: "netease-music" },
+      },
+    }),
+    jsonReply({
+      say: "网易云音乐已经打开了，还想听点什么？",
+      continueListening: true,
+      nextObservationMinutes: 15,
+    }),
+  ], { actionService });
+
+  const result = await agent.respondToText("帮我打开网易云", {
+    deviceId: "tab5-1",
+  });
+  assert.equal(result.say, "网易云音乐已经打开了，还想听点什么？");
+  assert.equal(result.action, null);
+  assert.equal(result.actionResult.ok, true);
+  assert.equal(conversation.turns.length, 2);
+  assert.equal(conversation.turns[0].threadId, "care-thread-1");
+  assert.equal(conversation.turns[1].threadId, "care-thread-1");
+  assert.match(conversation.turns[1].input[0].text, /已打开网易云音乐/);
+  assert.equal(actions[0].context.idempotencyKey, "care-thread-1:turn-1");
+  assert.equal(actions[0].context.deviceId, "tab5-1");
+  assert.deepEqual(
+    memory.listEvents().slice(0, 2).map(({ type }) => type),
+    ["action.requested", "action.completed"],
+  );
+  agent.close();
+});
+
+test("a failed care action remains in the conversation instead of aborting it", async () => {
+  const actionService = {
+    execute: async (action) => ({
+      action: action.name,
+      ok: false,
+      message: "应用预设不存在或未获允许",
+      executedAt: 1_800_000_000_000,
+    }),
+  };
+  const { agent, conversation } = await fixture([
+    jsonReply({
+      action: {
+        name: "open_app",
+        arguments: { presetId: "missing-app" },
+      },
+    }),
+    jsonReply({
+      say: "这个应用不在允许列表里，我没有打开它。",
+      continueListening: true,
+    }),
+  ], { actionService });
+
+  const result = await agent.respondToText("打开那个应用");
+  assert.equal(result.actionResult.ok, false);
+  assert.match(result.say, /允许列表/);
+  assert.equal(conversation.turns.length, 2);
+  assert.match(conversation.turns[1].input[0].text, /未获允许/);
+  agent.close();
 });

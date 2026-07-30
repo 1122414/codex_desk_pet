@@ -125,6 +125,24 @@ test("protocol rejects malformed command payloads before they reach the Bridge",
       reason: "scheduled",
     },
   }));
+  assert.doesNotThrow(() => createEnvelope({
+    sequence: 9,
+    type: "command",
+    payload: {
+      command: "device.brightness.set",
+      commandId: "command-brightness-0001",
+      value: 25,
+    },
+  }));
+  assert.throws(() => createEnvelope({
+    sequence: 10,
+    type: "command",
+    payload: {
+      command: "device.volume.set",
+      commandId: "command-volume-0001",
+      value: 101,
+    },
+  }), /device care value/);
 });
 
 test("Wi-Fi provisioning accepts only bounded device-safe network settings", () => {

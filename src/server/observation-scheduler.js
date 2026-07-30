@@ -131,12 +131,12 @@ export class ObservationScheduler extends EventEmitter {
     return this.#dueAt;
   }
 
-  async requestNow(reason = "manual") {
+  async requestNow(reason = "manual", { fromCareAction = false } = {}) {
     if (!CAPTURE_REASONS.has(reason)) throw new RangeError("Observation reason is invalid");
     if (!this.#started || !this.#settings?.enabled) {
       return { accepted: false, reason: "disabled" };
     }
-    return this.#attempt(reason);
+    return this.#attempt(reason, { fromCareAction });
   }
 
   handleCaptureResult({ deviceId, ok, error = null } = {}) {
@@ -208,9 +208,11 @@ export class ObservationScheduler extends EventEmitter {
     this.#timer?.unref?.();
   }
 
-  async #attempt(reason) {
+  async #attempt(reason, { fromCareAction = false } = {}) {
     if (!this.#available) return { accepted: false, reason: "unavailable" };
-    if (this.#isBusy(this.store.snapshot())) return { accepted: false, reason: "busy" };
+    if (this.#isBusy(this.store.snapshot(), { fromCareAction })) {
+      return { accepted: false, reason: "busy" };
+    }
     const deviceId = this.selectDevice();
     if (typeof deviceId !== "string" || !deviceId) {
       this.setAvailable(false);
@@ -246,9 +248,12 @@ export class ObservationScheduler extends EventEmitter {
     return accepted;
   }
 
-  #isBusy(snapshot) {
-    return BUSY_CARE_STATUSES.has(snapshot?.care?.status) ||
-      BUSY_VOICE_STATUSES.has(snapshot?.voice?.status) ||
+  #isBusy(snapshot, { fromCareAction = false } = {}) {
+    return (!fromCareAction && BUSY_CARE_STATUSES.has(snapshot?.care?.status)) ||
+      (
+        BUSY_VOICE_STATUSES.has(snapshot?.voice?.status) &&
+        !(fromCareAction && snapshot?.voice?.status === "processing")
+      ) ||
       BUSY_VISION_STATUSES.has(snapshot?.vision?.status);
   }
 

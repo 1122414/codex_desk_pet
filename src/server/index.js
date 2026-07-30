@@ -1,5 +1,6 @@
 import { CodexBridge } from "./codex-bridge.js";
 import { CareAgent } from "./care-agent.js";
+import { CareActionService } from "./care-action-service.js";
 import { CareMemoryRepository } from "./care-memory-repository.js";
 import { CodexConversation } from "./codex-conversation.js";
 import { DeviceCredentialRepository } from "./device-credential-repository.js";
@@ -13,6 +14,7 @@ import { PetCatalog } from "./pet-catalog.js";
 import { PetAgent } from "./pet-agent.js";
 import { SettingsRepository } from "./settings-repository.js";
 import { MacBleDeviceManager } from "./transports/macos-ble-device-manager.js";
+import { MacosCareActions } from "./macos-care-actions.js";
 import { ObservationScheduler } from "./observation-scheduler.js";
 import { UsbDeviceManager } from "./transports/usb-cdc-transport.js";
 import { VoiceAgent } from "./voice-agent.js";
@@ -89,6 +91,22 @@ const observationScheduler = new ObservationScheduler({
   selectDevice: () => deviceHub.primaryCameraDeviceId(),
   capture: (deviceId, options) => deviceHub.requestCameraCapture(deviceId, options),
 });
+const macosCareActions = new MacosCareActions({ settings });
+const careActionService = new CareActionService({
+  settings,
+  deviceActions: {
+    setBrightness: (deviceId, value) =>
+      deviceHub.setDeviceBrightness(deviceId, value),
+    setVolume: (deviceId, value) =>
+      deviceHub.setDeviceVolume(deviceId, value),
+  },
+  macosActions: macosCareActions,
+  observationScheduler,
+});
+careActionService.on("diagnostic", (message) => {
+  if (process.env.CODEX_DESK_DEBUG === "1") console.warn(`[care-action] ${message}`);
+});
+careAgent.setActionService(careActionService);
 const refreshObservationAvailability = () => {
   observationScheduler.setAvailable(deviceHub.primaryCameraDeviceId() !== null);
 };
@@ -164,6 +182,7 @@ async function shutdown() {
   await bleManager.close();
   await usbManager.close();
   observationScheduler.stop();
+  careActionService.close();
   deviceHub.off("deviceConnected", refreshObservationAvailability);
   deviceHub.off("deviceDisconnected", refreshObservationAvailability);
   deviceHub.off("cameraCaptureResult", handleCameraCaptureResult);

@@ -181,6 +181,38 @@ bool FirmwareApp::handleDeviceCommand(
     const JsonObjectConst payload,
     JsonObject result,
     String& error) {
+  if (
+      command == "device.brightness.set" ||
+      command == "device.volume.set") {
+    if (!payload["value"].is<int>()) {
+      error = "INVALID_DEVICE_VALUE";
+      return false;
+    }
+    const auto value = payload["value"].as<int>();
+    if (value < 0 || value > 100) {
+      error = "INVALID_DEVICE_VALUE";
+      return false;
+    }
+    const auto to_percent = [](const std::uint8_t raw) {
+      return static_cast<int>(
+          (static_cast<std::uint16_t>(raw) * 100U + 127U) / 255U);
+    };
+    const auto to_raw = [](const int percent) {
+      return static_cast<std::uint8_t>(
+          (static_cast<std::uint16_t>(percent) * 255U + 50U) / 100U);
+    };
+    if (command == "device.brightness.set") {
+      result["previousValue"] = to_percent(M5.Display.getBrightness());
+      M5.Display.setBrightness(to_raw(value));
+      connection_detail_ = "屏幕亮度已调整";
+    } else {
+      result["previousValue"] = to_percent(M5.Speaker.getVolume());
+      M5.Speaker.setVolume(to_raw(value));
+      connection_detail_ = "设备音量已调整";
+    }
+    result["value"] = value;
+    return true;
+  }
   if (command == "camera.capture") {
     const String reason = payload["reason"] | "";
     if (

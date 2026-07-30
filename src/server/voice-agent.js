@@ -302,7 +302,9 @@ export class VoiceAgent {
           continueListening: result.continueListening,
           nextObservationMinutes: result.nextObservationMinutes,
           autoListenSeconds: await this.#autoListenSeconds(),
+          actionStatus: result.actionResult ?? null,
         });
+        this.store.setCare({ status: "idle" });
         return;
       }
       const result = await this.petAgent.chat(transcript);

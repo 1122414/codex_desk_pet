@@ -191,7 +191,9 @@ export class VisionAgent {
         continueListening: result.continueListening,
         nextObservationMinutes: result.nextObservationMinutes,
         autoListenSeconds: await this.#autoListenSeconds(),
+        actionStatus: result.actionResult ?? null,
       });
+      this.store.setCare({ status: "idle" });
     } finally {
       await rm(imagePath, { force: true });
     }

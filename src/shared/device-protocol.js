@@ -54,6 +54,8 @@ export const DEVICE_COMMANDS = Object.freeze([
   "voice.start",
   "voice.stop",
   "camera.capture",
+  "device.brightness.set",
+  "device.volume.set",
   "state.preview",
   "wifi.provision",
 ]);
@@ -335,6 +337,12 @@ function validatePayload(type, payload) {
       !["scheduled", "follow-up", "manual"].includes(payload.reason)
     ) {
       throw new ProtocolError("camera capture reason is invalid");
+    }
+    if (
+      ["device.brightness.set", "device.volume.set"].includes(payload.command) &&
+      (!Number.isInteger(payload.value) || payload.value < 0 || payload.value > 100)
+    ) {
+      throw new ProtocolError("device care value is invalid");
     }
     if (payload.command === "state.preview" && (
       payload.animation !== null &&

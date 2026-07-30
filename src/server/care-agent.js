@@ -175,6 +175,7 @@ export class CareAgent {
     settings,
     memory,
     conversation,
+    actionService = null,
     cwd = process.cwd(),
     now = Date.now,
   } = {}) {
@@ -187,12 +188,20 @@ export class CareAgent {
     this.settings = settings;
     this.memory = memory;
     this.conversation = conversation;
+    this.actionService = actionService;
     this.cwd = path.resolve(cwd);
     this.now = now;
   }
 
   get threadId() {
     return this.#threadId;
+  }
+
+  setActionService(actionService) {
+    if (!actionService || typeof actionService.execute !== "function") {
+      throw new TypeError("关怀动作服务无效");
+    }
+    this.actionService = actionService;
   }
 
   respondToText(text, context = {}) {
@@ -311,12 +320,24 @@ export class CareAgent {
         result = this.#fallback(kind, careSettings);
         responseError = error;
       }
+      let actionMemoryError = null;
+      if (result.action) {
+        const resolved = await this.#resolveAction(result, {
+          turn,
+          context,
+          now,
+        });
+        result = resolved.result;
+        actionMemoryError = resolved.memoryError;
+        responseError ??= resolved.responseError;
+      }
       let memoryError = null;
       try {
         await this.#persist(result, { kind, text, context, now });
       } catch (error) {
         memoryError = error;
       }
+      memoryError ??= actionMemoryError;
       this.#completeStore(result, { kind, now, memoryError, responseError });
       return result;
     } catch (error) {
@@ -361,6 +382,87 @@ export class CareAgent {
       nextObservationMinutes: careSettings.observationMinimumMinutes,
       action: null,
       memory: null,
+    };
+  }
+
+  async #resolveAction(result, {
+    turn,
+    context,
+    now,
+  }) {
+    const proposed = result.action;
+    this.store.setCare({ status: "acting", error: null });
+    let actionResult;
+    try {
+      if (!this.actionService) throw new Error("关怀动作服务不可用");
+      actionResult = await this.actionService.execute(proposed, {
+        idempotencyKey: `${this.#threadId}:${turn.turnId ?? JSON.stringify(proposed)}`,
+        deviceId: typeof context.deviceId === "string" ? context.deviceId : null,
+      });
+    } catch (error) {
+      actionResult = {
+        action: proposed.name,
+        ok: false,
+        message: String(error.message || "动作执行失败").slice(0, 500),
+        executedAt: now,
+      };
+    }
+
+    let memoryError = null;
+    try {
+      await this.memory.appendEvent({
+        type: "action.requested",
+        occurredAt: now,
+        deviceId: typeof context.deviceId === "string" ? context.deviceId : null,
+        conversationId: this.#threadId,
+        summary: proposed.name,
+        data: proposed,
+      });
+      await this.memory.appendEvent({
+        type: "action.completed",
+        occurredAt: this.now(),
+        deviceId: typeof context.deviceId === "string" ? context.deviceId : null,
+        conversationId: this.#threadId,
+        summary: actionResult.message,
+        data: actionResult,
+      });
+    } catch (error) {
+      memoryError = error;
+    }
+
+    let finalResult;
+    let responseError = null;
+    try {
+      const followUp = await this.conversation.runTurn(this.#threadId, [{
+        type: "text",
+        text: [
+          `白名单动作执行结果（可信系统数据）：${JSON.stringify(actionResult)}`,
+          "请根据实际结果继续对话。此轮 action 必须为 null，并严格按约定 JSON 回复。",
+        ].join("\n"),
+        text_elements: [],
+      }]);
+      finalResult = parseCareResponse(followUp.reply, { allowedActions: [] });
+    } catch (error) {
+      responseError = error;
+      finalResult = {
+        ...result,
+        say: result.say || (
+          actionResult.ok ? "已经处理好了。" : "刚才的操作没有完成。"
+        ),
+        action: null,
+      };
+    }
+    if (proposed.name === "schedule_follow_up") {
+      finalResult.nextObservationMinutes = proposed.arguments.minutes;
+    }
+    return {
+      result: {
+        ...finalResult,
+        action: null,
+        actionResult,
+      },
+      memoryError,
+      responseError,
     };
   }
 

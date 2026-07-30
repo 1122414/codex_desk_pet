@@ -83,6 +83,7 @@ test("camera JPEG is authenticated, reassembled, analyzed, and removed", async (
     continueListening: true,
     nextObservationMinutes: 7,
     autoListenSeconds: 20,
+    actionStatus: null,
   }]);
   assert.equal(store.snapshot().vision.status, "completed");
 });

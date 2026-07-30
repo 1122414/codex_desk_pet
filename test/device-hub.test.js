@@ -172,6 +172,70 @@ test("Wi-Fi provisioning is sent only through an authenticated USB session", asy
   }), /Wi-Fi 配置无效/);
 });
 
+test("care device controls are correlated, bounded, and return previous values", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codex-desk-hub-care-"));
+  const credentials = new DeviceCredentialRepository(path.join(root, "devices.json"));
+  const secret = "9".repeat(64);
+  await credentials.pair({ deviceId: "tab5-care-1", secret });
+  const hub = new DeviceHub({
+    store: new DeskStore(),
+    bridge: { decideApproval: async () => null },
+    catalog: new PetCatalog(path.join(root, "pets"), {
+      deviceAssetConverter: passthroughDeviceConverter,
+    }),
+    settings: new SettingsRepository(path.join(root, "settings.json")),
+    credentials,
+  });
+  await hub.start();
+  t.after(() => hub.close());
+
+  const transports = createMemoryTransportPair({ kind: "usb" });
+  const bridgeSession = hub.attachTransport(transports.left);
+  const received = [];
+  const device = new DeviceSession({
+    role: "device",
+    transport: transports.right,
+    deviceId: "tab5-care-1",
+    secret,
+    commandHandler: async (command) => {
+      received.push(command);
+      return {
+        value: command.value,
+        previousValue: command.command === "device.brightness.set" ? 50 : 30,
+      };
+    },
+  });
+  t.after(() => device.close());
+  device.start();
+  await waitFor(() => bridgeSession.ready && device.ready);
+
+  assert.deepEqual(await hub.setDeviceBrightness("tab5-care-1", 25), {
+    deviceId: "tab5-care-1",
+    command: "device.brightness.set",
+    transport: "usb",
+    value: 25,
+    previousValue: 50,
+  });
+  assert.deepEqual(await hub.setDeviceVolume("tab5-care-1", 80), {
+    deviceId: "tab5-care-1",
+    command: "device.volume.set",
+    transport: "usb",
+    value: 80,
+    previousValue: 30,
+  });
+  assert.deepEqual(
+    received.map(({ command, value }) => ({ command, value })),
+    [
+      { command: "device.brightness.set", value: 25 },
+      { command: "device.volume.set", value: 80 },
+    ],
+  );
+  assert.throws(
+    () => hub.setDeviceVolume("tab5-care-1", 101),
+    /控制参数/,
+  );
+});
+
 test("proactive camera capture uses the highest-priority USB/Wi-Fi session and correlates its result", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "codex-desk-hub-camera-"));
   const secret = "c".repeat(64);
