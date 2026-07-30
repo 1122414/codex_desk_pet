@@ -1,5 +1,7 @@
 import { CodexBridge } from "./codex-bridge.js";
+import { CareAgent } from "./care-agent.js";
 import { CareMemoryRepository } from "./care-memory-repository.js";
+import { CodexConversation } from "./codex-conversation.js";
 import { DeviceCredentialRepository } from "./device-credential-repository.js";
 import { DeviceHub } from "./device-hub.js";
 import { DeviceWebSocketServer } from "./device-websocket-server.js";
@@ -53,7 +55,15 @@ try {
 
 const credentials = new DeviceCredentialRepository();
 const hookToken = await new HookTokenRepository().loadOrCreate();
-const petAgent = new PetAgent({ bridge, store });
+const conversation = new CodexConversation({ bridge });
+const petAgent = new PetAgent({ bridge, store, conversation });
+const careAgent = new CareAgent({
+  bridge,
+  store,
+  settings,
+  memory: careMemory,
+  conversation,
+});
 const voiceAgent = new VoiceAgent({ bridge, store, petAgent });
 const visionAgent = new VisionAgent({ store, petAgent });
 const deviceHub = new DeviceHub({
@@ -122,7 +132,9 @@ async function shutdown() {
   hookApprovalBroker.close();
   await voiceAgent.close();
   visionAgent.close();
+  careAgent.close();
   petAgent.close();
+  conversation.close();
   await server.close();
   await deviceServer.close();
   await bleManager.close();

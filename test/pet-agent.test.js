@@ -113,3 +113,28 @@ test("camera observations use one ephemeral read-only multimodal turn", async ()
   });
   agent.close();
 });
+
+test("pet agent can share a conversation lifecycle with other agents", async () => {
+  const store = new DeskStore();
+  const bridge = new FakeBridge();
+  let closed = false;
+  const conversation = {
+    requireConnected() {},
+    startThread: async (options) => {
+      assert.equal(options.serviceName, "codex-desk-pet-chat");
+      return "shared-thread";
+    },
+    runTurn: async () => ({
+      threadId: "shared-thread",
+      turnId: "shared-turn",
+      reply: "共享会话正常。",
+    }),
+    close: () => {
+      closed = true;
+    },
+  };
+  const agent = new PetAgent({ bridge, store, conversation });
+  assert.equal((await agent.chat("测试共享层")).reply, "共享会话正常。");
+  agent.close();
+  assert.equal(closed, false);
+});

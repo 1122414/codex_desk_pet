@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { CodexConversation } from "./codex-conversation.js";
 
 const MAX_PROMPT_LENGTH = 2_000;
-const DEFAULT_TIMEOUT_MS = 120_000;
 const CHAT_INSTRUCTIONS = [
   "你是 Codex Desk Buddy 中的桌面宠物。",
   "使用简洁、自然的中文回复，通常不超过 80 个汉字。",
@@ -43,21 +43,21 @@ function publicInteraction(interaction) {
 export class PetAgent {
   #pendingCommand = null;
   #chatThreadId = null;
-  #turns = new Map();
+  #ownsConversation;
 
   constructor({
     bridge,
     store,
     cwd = process.cwd(),
-    timeoutMs = DEFAULT_TIMEOUT_MS,
+    timeoutMs = 120_000,
+    conversation = null,
   } = {}) {
     if (!bridge || !store) throw new TypeError("PetAgent requires bridge and store");
     this.bridge = bridge;
     this.store = store;
     this.cwd = path.resolve(cwd);
-    this.timeoutMs = timeoutMs;
-    this.onNotification = (method, params) => this.#handleNotification(method, params);
-    this.bridge.on("notification", this.onNotification);
+    this.conversation = conversation ?? new CodexConversation({ bridge, cwd: this.cwd, timeoutMs });
+    this.#ownsConversation = conversation === null;
   }
 
   get pendingCommand() {
@@ -257,16 +257,11 @@ export class PetAgent {
   }
 
   close() {
-    this.bridge.off("notification", this.onNotification);
-    for (const entry of this.#turns.values()) {
-      clearTimeout(entry.timer);
-      entry.reject(new Error("宠物服务已关闭"));
-    }
-    this.#turns.clear();
+    if (this.#ownsConversation) this.conversation.close("宠物服务已关闭");
   }
 
   #requireConnected() {
-    if (!this.bridge.client?.running) throw new Error("Codex App Server 当前未连接");
+    this.conversation.requireConnected();
   }
 
   async #startThread({
@@ -277,102 +272,17 @@ export class PetAgent {
     developerInstructions,
     serviceName,
   }) {
-    const response = await this.bridge.client.request("thread/start", {
+    return this.conversation.startThread({
       cwd,
       approvalPolicy,
       sandbox,
       ephemeral,
-      environments: [],
-      dynamicTools: [],
-      personality: "friendly",
       developerInstructions,
       serviceName,
     });
-    const threadId = response?.thread?.id;
-    if (typeof threadId !== "string" || !threadId) {
-      throw new Error("Codex 没有返回有效会话");
-    }
-    return threadId;
   }
 
   async #runTurn(threadId, input) {
-    const entry = {
-      turnId: null,
-      reply: "",
-      resolve: null,
-      reject: null,
-      timer: null,
-    };
-    const completion = new Promise((resolve, reject) => {
-      entry.resolve = resolve;
-      entry.reject = reject;
-    });
-    entry.timer = setTimeout(() => {
-      this.#turns.delete(threadId);
-      entry.reject(new Error("等待 Codex 回复超时"));
-    }, this.timeoutMs);
-    entry.timer.unref?.();
-    this.#turns.set(threadId, entry);
-    try {
-      const response = await this.bridge.client.request("turn/start", {
-        threadId,
-        input: Array.isArray(input)
-          ? input
-          : [{ type: "text", text: input, text_elements: [] }],
-        effort: "low",
-        summary: "none",
-      });
-      entry.turnId = response?.turn?.id ?? null;
-      return await completion;
-    } catch (error) {
-      if (this.#turns.get(threadId) === entry) this.#turns.delete(threadId);
-      clearTimeout(entry.timer);
-      entry.reject(error);
-      throw error;
-    }
-  }
-
-  #handleNotification(method, params) {
-    const entry = this.#turns.get(params?.threadId);
-    if (!entry) return;
-    if (method === "item/agentMessage/delta") {
-      entry.reply += params.delta ?? "";
-      return;
-    }
-    if (method === "item/completed" && params.item?.type === "agentMessage") {
-      entry.reply = params.item.text ?? entry.reply;
-      return;
-    }
-    if (method === "error" && params.willRetry === false) {
-      this.#finishTurn(params.threadId, new Error(params.error?.message ?? "Codex 回复失败"));
-      return;
-    }
-    if (method !== "turn/completed") return;
-    if (entry.turnId && params.turn?.id && entry.turnId !== params.turn.id) return;
-    if (params.turn?.status !== "completed") {
-      this.#finishTurn(
-        params.threadId,
-        new Error(params.turn?.error?.message ?? `Codex 回合状态：${params.turn?.status ?? "unknown"}`),
-      );
-      return;
-    }
-    const completedReply = [...(params.turn?.items ?? [])]
-      .reverse()
-      .find((item) => item?.type === "agentMessage")?.text;
-    const reply = String(completedReply ?? entry.reply).trim();
-    this.#finishTurn(
-      params.threadId,
-      reply ? null : new Error("Codex 没有返回可显示的回复"),
-      reply,
-    );
-  }
-
-  #finishTurn(threadId, error, reply = "") {
-    const entry = this.#turns.get(threadId);
-    if (!entry) return;
-    this.#turns.delete(threadId);
-    clearTimeout(entry.timer);
-    if (error) entry.reject(error);
-    else entry.resolve({ threadId, turnId: entry.turnId, reply });
+    return this.conversation.runTurn(threadId, input);
   }
 }
