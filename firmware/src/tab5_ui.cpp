@@ -927,18 +927,56 @@ void Tab5Ui::drawStatus(
     const String& connection_detail) {
   canvas_.fillRect(0, 0, kScreenWidth, 72, kPanel);
   canvas_.fillCircle(32, 36, 12, snapshot.bridge_connected ? kGreen : kRed);
-  canvas_.setTextColor(stateColor(snapshot.state), kPanel);
+  const bool chat_listening = voice_recording_ && voice_mode_ == "chat";
+  const bool command_listening = voice_recording_ && voice_mode_ == "command";
+  const bool transcribing = !voice_recording_ && connection_detail == "正在识别";
+  const bool chat_thinking =
+      snapshot.companion.mode == "chat" && snapshot.companion.status == "thinking";
+  const bool chat_completed =
+      snapshot.companion.mode == "chat" && snapshot.companion.status == "completed" &&
+      !snapshot.companion.reply.empty();
+  const bool chat_failed =
+      snapshot.companion.mode == "chat" && snapshot.companion.status == "failed";
+  String status_text = stateLabel(snapshot.state);
+  auto status_color = stateColor(snapshot.state);
+  String detail;
+  if (chat_listening) {
+    status_text = "聆听中";
+    status_color = kGreen;
+    detail = connection_detail;
+  } else if (command_listening) {
+    status_text = "录音中";
+    status_color = kOrange;
+    detail = connection_detail;
+  } else if (transcribing) {
+    status_text = "识别中";
+    status_color = kBlue;
+    detail = connection_detail;
+  } else if (chat_thinking) {
+    status_text = "思考中";
+    status_color = kBlue;
+    detail = "正在整理回答";
+  } else if (chat_completed) {
+    status_text = "已回复";
+    status_color = kGreen;
+    detail = "她：" + String(snapshot.companion.reply.c_str());
+  } else if (chat_failed) {
+    status_text = "对话失败";
+    status_color = kRed;
+    detail = String(snapshot.companion.error.c_str());
+  } else {
+    detail = snapshot.task_title.empty()
+        ? connection_detail
+        : String(snapshot.task_title.c_str());
+  }
+  canvas_.setTextColor(status_color, kPanel);
   canvas_.setTextSize(2);
   canvas_.setTextDatum(middle_left);
-  const String status_text = stateLabel(snapshot.state);
   canvas_.drawString(status_text, 62, 36);
   canvas_.setTextColor(kMuted, kPanel);
   canvas_.setTextSize(1);
   const auto detail_x = static_cast<std::int16_t>(
       62 + canvas_.textWidth(status_text) * 2 + 24);
-  const String detail = snapshot.task_title.empty()
-      ? connection_detail
-      : String(snapshot.task_title.c_str());
   drawTruncated(detail, detail_x, 28, 872 - detail_x);
 
   const auto unix_seconds = currentUnixSeconds(snapshot, now_ms);
