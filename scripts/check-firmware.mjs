@@ -163,9 +163,13 @@ try {
   }
   if (
     !deviceAudio.includes("kRemoteAudioPrebufferTimeoutMs = 180") ||
-    !deviceAudio.includes("bool playback_failed = false")
+    !deviceAudio.includes("bool playback_failed = false") ||
+    !deviceAudio.includes("kAudioTaskStackBytes = 12'288") ||
+    !deviceAudio.includes("remote_playback_buffers_") ||
+    deviceAudio.includes("std::array<RemoteAudioChunk, 3> buffers{}") ||
+    !firmwareApp.includes("remote_speech_samples_")
   ) {
-    throw new Error("Tab5 本机女声音频必须预缓冲并在播放失败时完成清理");
+    throw new Error("Tab5 本机女声音频必须预缓冲、避免任务栈峰值并在播放失败时完成清理");
   }
   const deviceVoice = await readFile(
     path.join(root, "firmware", "src", "device_voice.cpp"),

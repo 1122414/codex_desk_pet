@@ -482,12 +482,18 @@ void FirmwareApp::handleProtocolEvent(
       ui_.setPhoneCallActive(false);
     }
   } else if (event == "voice.audio.chunk") {
-    std::array<std::int16_t, DeviceAudio::kRemoteChunkSamples> samples{};
     std::uint32_t audio_id = 0;
     std::size_t sample_count = 0;
     if (
-        !decodeRemoteSpeechChunk(payload, audio_id, samples, sample_count) ||
-        !audio_.enqueueRemoteSpeech(audio_id, samples.data(), sample_count)) {
+        !decodeRemoteSpeechChunk(
+            payload,
+            audio_id,
+            remote_speech_samples_,
+            sample_count) ||
+        !audio_.enqueueRemoteSpeech(
+            audio_id,
+            remote_speech_samples_.data(),
+            sample_count)) {
       connection_detail_ = "语音数据暂时不完整。";
     }
   } else if (event == "voice.audio.end") {

@@ -19,6 +19,7 @@ constexpr std::uint32_t kVoiceDataCrc32 = 0xbe773ce5;
 constexpr std::uint8_t kRemoteAudioQueueDepth = 8;
 constexpr std::uint32_t kRemoteAudioIdleTimeoutMs = 5'000;
 constexpr std::uint32_t kRemoteAudioPrebufferTimeoutMs = 180;
+constexpr std::uint32_t kAudioTaskStackBytes = 12'288;
 
 }  // namespace
 
@@ -37,7 +38,7 @@ bool DeviceAudio::begin() {
   const auto created = xTaskCreate(
       taskEntry,
       "codex-audio",
-      8'192,
+      kAudioTaskStackBytes,
       this,
       2,
       &task_);
@@ -292,7 +293,6 @@ bool DeviceAudio::playRemoteSpeech(
     const std::uint32_t generation) {
   if (remote_queue_ == nullptr) return false;
   M5.Speaker.stop(kSpeakerChannel);
-  std::array<RemoteAudioChunk, 3> buffers{};
   std::size_t next_buffer = 0;
   bool first_chunk = true;
   bool playback_failed = false;
@@ -312,8 +312,11 @@ bool DeviceAudio::playRemoteSpeech(
       !interrupted() &&
       remote_generation_.load() == generation &&
       remote_audio_id_.load() == audio_id) {
-    RemoteAudioChunk incoming;
-    if (xQueueReceive(remote_queue_, &incoming, pdMS_TO_TICKS(20)) == pdTRUE) {
+    if (
+        xQueueReceive(
+            remote_queue_,
+            &remote_playback_incoming_,
+            pdMS_TO_TICKS(20)) == pdTRUE) {
       last_chunk_at = static_cast<std::uint32_t>(millis());
       while (M5.Speaker.isPlaying(kSpeakerChannel) > 1 && !interrupted()) {
         vTaskDelay(pdMS_TO_TICKS(2));
@@ -323,8 +326,8 @@ bool DeviceAudio::playRemoteSpeech(
           remote_audio_id_.load() != audio_id) {
         break;
       }
-      auto& buffer = buffers[next_buffer];
-      buffer = incoming;
+      auto& buffer = remote_playback_buffers_[next_buffer];
+      buffer = remote_playback_incoming_;
       if (!M5.Speaker.playRaw(
               buffer.samples.data(),
               buffer.sample_count,
@@ -338,7 +341,7 @@ bool DeviceAudio::playRemoteSpeech(
         break;
       }
       first_chunk = false;
-      next_buffer = (next_buffer + 1) % buffers.size();
+      next_buffer = (next_buffer + 1) % remote_playback_buffers_.size();
       continue;
     }
     if (

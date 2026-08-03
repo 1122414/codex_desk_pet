@@ -78,6 +78,10 @@ class DeviceAudio {
   std::atomic<std::uint32_t> remote_audio_id_{0};
   std::atomic<std::uint32_t> remote_generation_{0};
   std::atomic<bool> remote_input_open_{false};
+  // Keep streamed PCM outside the audio FreeRTOS task stack. Three playback
+  // buffers plus one queue receiver are about 8 KiB during a reply.
+  std::array<RemoteAudioChunk, 3> remote_playback_buffers_{};
+  RemoteAudioChunk remote_playback_incoming_{};
 };
 
 }  // namespace codex::firmware

@@ -70,6 +70,8 @@ test("LocalWhisperTranscriber writes a private WAV, invokes whisper-cli, and rem
       "--model", modelPath,
       "--file", calls[0].args[3],
       "--language", "zh",
+      "--prompt", "以下是普通话中文对话，请忠实转写用户原话。",
+      "--suppress-nst",
       "--threads", "4",
       "--no-timestamps",
       "--no-prints",
@@ -114,4 +116,15 @@ test("LocalWhisperTranscriber reports a missing model and aborts child work", as
   controller.abort();
   await assert.rejects(pending, { name: "AbortError" });
   assert.equal(child.killed, true);
+});
+
+test("LocalWhisperTranscriber rejects an empty or oversized Mandarin prompt", () => {
+  assert.throws(
+    () => new LocalWhisperTranscriber({ prompt: "" }),
+    /转写提示/,
+  );
+  assert.throws(
+    () => new LocalWhisperTranscriber({ prompt: "中".repeat(121) }),
+    /转写提示/,
+  );
 });

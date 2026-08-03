@@ -8,6 +8,7 @@ const SAMPLE_RATE = 16_000;
 const BYTES_PER_SAMPLE = 2;
 const DEFAULT_TIMEOUT_MS = 45_000;
 const MAX_TRANSCRIPT_LENGTH = 4_000;
+const DEFAULT_CHINESE_PROMPT = "以下是普通话中文对话，请忠实转写用户原话。";
 
 export const DEFAULT_WHISPER_MODEL_PATH = path.join(
   os.homedir(),
@@ -69,6 +70,7 @@ export class LocalWhisperTranscriber {
     modelPath = process.env.CODEX_DESK_WHISPER_MODEL ?? DEFAULT_WHISPER_MODEL_PATH,
     tempDirectory = os.tmpdir(),
     timeoutMs = DEFAULT_TIMEOUT_MS,
+    prompt = DEFAULT_CHINESE_PROMPT,
     spawnProcess = spawn,
   } = {}) {
     if (typeof command !== "string" || !command.trim()) {
@@ -83,11 +85,19 @@ export class LocalWhisperTranscriber {
     if (!Number.isInteger(timeoutMs) || timeoutMs < 1_000) {
       throw new RangeError("本地转写超时必须至少一秒");
     }
+    if (
+      typeof prompt !== "string" ||
+      !prompt.trim() ||
+      Buffer.byteLength(prompt, "utf8") > 240
+    ) {
+      throw new RangeError("本地中文转写提示必须是 1 到 240 字节的文本");
+    }
     if (typeof spawnProcess !== "function") throw new TypeError("本地转写进程启动器无效");
     this.command = command;
     this.modelPath = path.resolve(modelPath);
     this.tempDirectory = path.resolve(tempDirectory);
     this.timeoutMs = timeoutMs;
+    this.prompt = prompt.trim();
     this.spawnProcess = spawnProcess;
   }
 
@@ -128,6 +138,8 @@ export class LocalWhisperTranscriber {
           "--model", this.modelPath,
           "--file", audioPath,
           "--language", "zh",
+          "--prompt", this.prompt,
+          "--suppress-nst",
           "--threads", "4",
           "--no-timestamps",
           "--no-prints",

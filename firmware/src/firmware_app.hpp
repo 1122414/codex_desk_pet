@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 
+#include <array>
+
 #include "codex_core/model.hpp"
 #include "tab5_ui.hpp"
 #include "device_audio.hpp"
@@ -67,6 +69,7 @@ class FirmwareApp {
   DeviceProtocolClient ble_client_;
   DeskModel model_;
   Telemetry local_telemetry_;
+  std::array<std::int16_t, DeviceAudio::kRemoteChunkSamples> remote_speech_samples_{};
   String pairing_secret_;
   String connection_detail_ = "正在启动";
   String requested_pet_;

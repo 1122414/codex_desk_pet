@@ -5,6 +5,8 @@
 namespace codex::firmware {
 namespace {
 
+constexpr std::uint8_t kMicMagnification = 4;
+
 bool elapsed(
     const std::uint32_t now_ms,
     const std::uint32_t since_ms,
@@ -33,6 +35,11 @@ bool DeviceVoice::start(
 
   M5.Speaker.stop();
   M5.Speaker.end();
+  auto mic_config = M5.Mic.config();
+  // Tab5 defaults to unity digital gain. A modest 6 dB lift gives Whisper a
+  // usable speaking level without pushing normal close-range speech to clip.
+  mic_config.magnification = kMicMagnification;
+  M5.Mic.config(mic_config);
   if (!M5.Mic.begin()) {
     client.sendVoiceStop();
     M5.Speaker.begin();
