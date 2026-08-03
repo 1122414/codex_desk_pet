@@ -16,6 +16,8 @@ namespace {
 constexpr std::size_t kVoiceDataSize = 2'913'777;
 constexpr std::size_t kVoiceReadChunkSize = 4'096;
 constexpr std::uint32_t kVoiceDataCrc32 = 0xbe773ce5;
+constexpr std::uint8_t kRemoteAudioQueueDepth = 8;
+constexpr std::uint32_t kRemoteAudioIdleTimeoutMs = 5'000;
 
 }  // namespace
 
@@ -23,6 +25,12 @@ bool DeviceAudio::begin() {
   if (queue_ != nullptr) return voice_ready_;
   queue_ = xQueueCreate(1, sizeof(AudioRequest));
   if (queue_ == nullptr) return false;
+  remote_queue_ = xQueueCreate(kRemoteAudioQueueDepth, sizeof(RemoteAudioChunk));
+  if (remote_queue_ == nullptr) {
+    vQueueDelete(queue_);
+    queue_ = nullptr;
+    return false;
+  }
 
   voice_ready_ = initializeVoice();
   const auto created = xTaskCreate(
@@ -33,6 +41,8 @@ bool DeviceAudio::begin() {
       2,
       &task_);
   if (created != pdPASS) {
+    vQueueDelete(remote_queue_);
+    remote_queue_ = nullptr;
     vQueueDelete(queue_);
     queue_ = nullptr;
     task_ = nullptr;
@@ -78,9 +88,55 @@ bool DeviceAudio::enqueuePhrase(const String& phrase) {
   return false;
 }
 
+bool DeviceAudio::beginRemoteSpeech(const std::uint32_t audio_id) {
+  if (queue_ == nullptr || remote_queue_ == nullptr || paused_ || audio_id == 0) return false;
+  cancel();
+  const auto generation = remote_generation_.fetch_add(1) + 1;
+  remote_audio_id_.store(audio_id);
+  remote_input_open_.store(true);
+  cancel_requested_.store(false);
+  AudioRequest request;
+  request.id = next_request_id_.fetch_add(1);
+  request.remote_speech = true;
+  request.remote_audio_id = audio_id;
+  request.remote_generation = generation;
+  last_enqueued_request_.store(request.id);
+  if (xQueueOverwrite(queue_, &request) == pdPASS) return true;
+  remote_audio_id_.store(0);
+  remote_input_open_.store(false);
+  last_completed_request_.store(request.id);
+  return false;
+}
+
+bool DeviceAudio::enqueueRemoteSpeech(
+    const std::uint32_t audio_id,
+    const std::int16_t* samples,
+    const std::size_t sample_count) {
+  if (
+      remote_queue_ == nullptr || samples == nullptr || sample_count == 0 ||
+      sample_count > kRemoteChunkSamples ||
+      !remote_input_open_.load() || remote_audio_id_.load() != audio_id) {
+    return false;
+  }
+  RemoteAudioChunk chunk;
+  chunk.sample_count = static_cast<std::uint16_t>(sample_count);
+  std::copy_n(samples, sample_count, chunk.samples.begin());
+  return xQueueSend(remote_queue_, &chunk, 0) == pdPASS;
+}
+
+bool DeviceAudio::finishRemoteSpeech(const std::uint32_t audio_id) {
+  if (audio_id == 0 || remote_audio_id_.load() != audio_id) return false;
+  remote_input_open_.store(false);
+  return true;
+}
+
 void DeviceAudio::cancel() {
   cancel_requested_.store(true);
   if (queue_ != nullptr) xQueueReset(queue_);
+  if (remote_queue_ != nullptr) xQueueReset(remote_queue_);
+  remote_generation_.fetch_add(1);
+  remote_audio_id_.store(0);
+  remote_input_open_.store(false);
   M5.Speaker.stop(kSpeakerChannel);
   last_completed_request_.store(last_enqueued_request_.load());
 }
@@ -92,12 +148,16 @@ void DeviceAudio::taskEntry(void* context) {
 void DeviceAudio::run() {
   AudioRequest request;
   while (xQueueReceive(queue_, &request, portMAX_DELAY) == pdTRUE) {
-    const auto& plan = audioPlan(request.cue);
-    const auto* phrase = request.custom_phrase
-        ? request.phrase.data()
-        : plan.chinese_phrase;
-    if (!voice_ready_ || phrase == nullptr || !speak(phrase)) {
-      playFallback(plan);
+    if (request.remote_speech) {
+      playRemoteSpeech(request.remote_audio_id, request.remote_generation);
+    } else {
+      const auto& plan = audioPlan(request.cue);
+      const auto* phrase = request.custom_phrase
+          ? request.phrase.data()
+          : plan.chinese_phrase;
+      if (!voice_ready_ || phrase == nullptr || !speak(phrase)) {
+        playFallback(plan);
+      }
     }
     last_completed_request_.store(request.id);
   }
@@ -224,6 +284,71 @@ bool DeviceAudio::speak(const char* phrase) {
     esp_tts_stream_reset(tts_);
   }
   return true;
+}
+
+bool DeviceAudio::playRemoteSpeech(
+    const std::uint32_t audio_id,
+    const std::uint32_t generation) {
+  if (remote_queue_ == nullptr) return false;
+  M5.Speaker.stop(kSpeakerChannel);
+  std::array<RemoteAudioChunk, 3> buffers{};
+  std::size_t next_buffer = 0;
+  bool first_chunk = true;
+  auto last_chunk_at = static_cast<std::uint32_t>(millis());
+  while (
+      !interrupted() &&
+      remote_generation_.load() == generation &&
+      remote_audio_id_.load() == audio_id) {
+    RemoteAudioChunk incoming;
+    if (xQueueReceive(remote_queue_, &incoming, pdMS_TO_TICKS(20)) == pdTRUE) {
+      last_chunk_at = static_cast<std::uint32_t>(millis());
+      while (M5.Speaker.isPlaying(kSpeakerChannel) > 1 && !interrupted()) {
+        vTaskDelay(pdMS_TO_TICKS(2));
+      }
+      if (
+          interrupted() || remote_generation_.load() != generation ||
+          remote_audio_id_.load() != audio_id) {
+        break;
+      }
+      auto& buffer = buffers[next_buffer];
+      buffer = incoming;
+      if (!M5.Speaker.playRaw(
+              buffer.samples.data(),
+              buffer.sample_count,
+              kRemoteSampleRate,
+              false,
+              1,
+              kSpeakerChannel,
+              first_chunk)) {
+        M5.Speaker.stop(kSpeakerChannel);
+        return false;
+      }
+      first_chunk = false;
+      next_buffer = (next_buffer + 1) % buffers.size();
+      continue;
+    }
+    if (
+        !remote_input_open_.load() &&
+        uxQueueMessagesWaiting(remote_queue_) == 0) {
+      break;
+    }
+    const auto now = static_cast<std::uint32_t>(millis());
+    if (static_cast<std::uint32_t>(now - last_chunk_at) >= kRemoteAudioIdleTimeoutMs) {
+      break;
+    }
+  }
+  while (M5.Speaker.isPlaying(kSpeakerChannel) && !interrupted()) {
+    vTaskDelay(pdMS_TO_TICKS(2));
+  }
+  const auto completed =
+      !interrupted() && remote_generation_.load() == generation &&
+      remote_audio_id_.load() == audio_id;
+  if (!completed) M5.Speaker.stop(kSpeakerChannel);
+  if (remote_generation_.load() == generation && remote_audio_id_.load() == audio_id) {
+    remote_input_open_.store(false);
+    remote_audio_id_.store(0);
+  }
+  return completed;
 }
 
 void DeviceAudio::playFallback(const AudioPlan& plan) {

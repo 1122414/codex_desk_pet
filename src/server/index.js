@@ -18,6 +18,7 @@ import { MacosCareActions } from "./macos-care-actions.js";
 import { ObservationScheduler } from "./observation-scheduler.js";
 import { UsbDeviceManager } from "./transports/usb-cdc-transport.js";
 import { LocalWhisperTranscriber } from "./local-whisper-transcriber.js";
+import { MacosSpeechSynthesizer } from "./macos-speech-synthesizer.js";
 import { VoiceAgent } from "./voice-agent.js";
 import { VisionAgent } from "./vision-agent.js";
 
@@ -74,6 +75,7 @@ const voiceAgent = new VoiceAgent({
   careAgent,
   settings,
   transcriber: new LocalWhisperTranscriber(),
+  speechSynthesizer: new MacosSpeechSynthesizer(),
 });
 const visionAgent = new VisionAgent({ store, careAgent, settings });
 const deviceHub = new DeviceHub({

@@ -5,6 +5,32 @@ const DEFAULT_AUTO_LISTEN_SECONDS = 20;
 const DEFAULT_CHAT_LISTENING_TIMEOUT_MS = 65_000;
 const DEFAULT_CARE_LISTENING_TIMEOUT_MS = 65_000;
 const LISTENING_TIMEOUT_ERROR = "设备语音会话超时，请再试一次";
+const REMOTE_AUDIO_CHUNK_BYTES = 2_048;
+const REMOTE_AUDIO_PREBUFFER_CHUNKS = 3;
+const REMOTE_AUDIO_PACE_NUMERATOR = 3;
+const REMOTE_AUDIO_PACE_DENOMINATOR = 4;
+const REMOTE_AUDIO_SLOT_TIMEOUT_MS = 5_000;
+
+function voiceAbortError() {
+  const error = new Error("语音回复已取消");
+  error.name = "AbortError";
+  return error;
+}
+
+function delay(milliseconds, signal) {
+  if (signal?.aborted) return Promise.reject(voiceAbortError());
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(voiceAbortError());
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
 
 function validBase64(value) {
   return typeof value === "string" &&
@@ -22,6 +48,7 @@ function validListeningTimeout(value, name) {
 
 export class VoiceAgent {
   #sessions = new Map();
+  #nextRemoteAudioId = 1;
 
   constructor({
     store,
@@ -29,6 +56,7 @@ export class VoiceAgent {
     careAgent = null,
     settings = null,
     transcriber,
+    speechSynthesizer = null,
     chatListeningTimeoutMs = DEFAULT_CHAT_LISTENING_TIMEOUT_MS,
     careListeningTimeoutMs = DEFAULT_CARE_LISTENING_TIMEOUT_MS,
   } = {}) {
@@ -43,6 +71,14 @@ export class VoiceAgent {
     this.careAgent = careAgent;
     this.settings = settings;
     this.transcriber = transcriber;
+    if (
+      speechSynthesizer !== null &&
+      (typeof speechSynthesizer.available !== "function" ||
+       typeof speechSynthesizer.synthesize !== "function")
+    ) {
+      throw new TypeError("VoiceAgent speechSynthesizer must provide available and synthesize");
+    }
+    this.speechSynthesizer = speechSynthesizer;
     this.chatListeningTimeoutMs = validListeningTimeout(
       chatListeningTimeoutMs,
       "chatListeningTimeoutMs",
@@ -273,16 +309,34 @@ export class VoiceAgent {
     const result = await this.petAgent.chat(transcript);
     if (phoneMode && !this.#active(entry)) return;
     this.store.setVoice({ status: "completed" });
-    if (phoneMode) this.#sessions.delete(entry.deviceId);
-    entry.session.sendEvent({
-      event: "voice.reply",
-      ok: true,
-      text: this.#boundedDeviceText(result.reply),
-      ...(phoneMode ? {
-        continueListening: true,
-        autoListenSeconds: await this.#autoListenSeconds(),
-      } : {}),
-    });
+    const reply = this.#boundedDeviceText(result.reply);
+    if (!phoneMode) {
+      entry.session.sendEvent({
+        event: "voice.reply",
+        ok: true,
+        text: reply,
+      });
+      return;
+    }
+
+    try {
+      const canUseLocalVoice = this.speechSynthesizer &&
+        await this.speechSynthesizer.available();
+      if (!this.#active(entry)) return;
+      if (canUseLocalVoice) {
+        const pcm = await this.speechSynthesizer.synthesize(reply, {
+          signal: entry.abortController.signal,
+        });
+        if (!this.#active(entry)) return;
+        await this.#sendPhoneSpeech(entry, reply, pcm);
+      } else {
+        await this.#sendPhoneTextReply(entry, reply);
+      }
+    } catch (error) {
+      if (error?.name === "AbortError" || !this.#active(entry)) return;
+      await this.#sendPhoneTextReply(entry, reply);
+    }
+    if (this.#active(entry)) this.#sessions.delete(entry.deviceId);
   }
 
   #active(entry) {
@@ -345,6 +399,87 @@ export class VoiceAgent {
     } catch {
       return DEFAULT_AUTO_LISTEN_SECONDS;
     }
+  }
+
+  #nextAudioId() {
+    const audioId = this.#nextRemoteAudioId;
+    this.#nextRemoteAudioId = audioId >= 0xffff_ffff ? 1 : audioId + 1;
+    return audioId;
+  }
+
+  async #sendPhoneTextReply(entry, reply) {
+    if (!this.#active(entry)) return;
+    entry.session.sendEvent({
+      event: "voice.reply",
+      ok: true,
+      text: reply,
+      continueListening: true,
+      autoListenSeconds: await this.#autoListenSeconds(),
+    });
+  }
+
+  async #waitForReliableSlot(entry) {
+    const startedAt = Date.now();
+    while (this.#active(entry)) {
+      const pending = entry.session.pendingAcknowledgements;
+      const hasPending = Number.isInteger(pending) && pending > 0;
+      if (!hasPending) return;
+      if (Date.now() - startedAt >= REMOTE_AUDIO_SLOT_TIMEOUT_MS) {
+        throw new Error("设备语音链路确认超时");
+      }
+      await delay(5, entry.abortController.signal);
+    }
+    throw voiceAbortError();
+  }
+
+  async #sendReliablePhoneEvent(entry, event) {
+    if (typeof entry.session.sendEventTracked === "function") {
+      await entry.session.sendEventTracked(event);
+      return;
+    }
+    await this.#waitForReliableSlot(entry);
+    if (!this.#active(entry)) throw voiceAbortError();
+    entry.session.sendEvent(event);
+  }
+
+  async #sendPhoneSpeech(entry, reply, pcm) {
+    if (!Buffer.isBuffer(pcm) || pcm.byteLength === 0 || pcm.byteLength % 2 !== 0) {
+      throw new Error("本机女声输出格式无效");
+    }
+    const audioId = this.#nextAudioId();
+    const autoListenSeconds = await this.#autoListenSeconds();
+    await this.#sendReliablePhoneEvent(entry, {
+      event: "voice.reply",
+      ok: true,
+      text: reply,
+      remoteAudio: true,
+      audioId,
+      continueListening: true,
+      autoListenSeconds,
+    });
+    let sentChunks = 0;
+    for (let offset = 0; offset < pcm.byteLength; offset += REMOTE_AUDIO_CHUNK_BYTES) {
+      const chunk = pcm.subarray(offset, Math.min(offset + REMOTE_AUDIO_CHUNK_BYTES, pcm.byteLength));
+      await this.#sendReliablePhoneEvent(entry, {
+        event: "voice.audio.chunk",
+        audioId,
+        sampleRate: SAMPLE_RATE,
+        samplesPerChannel: chunk.byteLength / 2,
+        data: chunk.toString("base64"),
+      });
+      sentChunks += 1;
+      if (sentChunks >= REMOTE_AUDIO_PREBUFFER_CHUNKS && offset + chunk.byteLength < pcm.byteLength) {
+        const durationMs = (chunk.byteLength / 2 / SAMPLE_RATE) * 1_000;
+        await delay(
+          Math.round(durationMs * REMOTE_AUDIO_PACE_NUMERATOR / REMOTE_AUDIO_PACE_DENOMINATOR),
+          entry.abortController.signal,
+        );
+      }
+    }
+    await this.#sendReliablePhoneEvent(entry, {
+      event: "voice.audio.end",
+      audioId,
+    });
   }
 
   #armListeningTimeout(entry) {

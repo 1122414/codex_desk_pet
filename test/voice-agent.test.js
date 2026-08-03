@@ -6,6 +6,7 @@ import { VoiceAgent } from "../src/server/voice-agent.js";
 function createFixture({
   available = true,
   transcribe = null,
+  speechSynthesizer = null,
   voiceAgentOptions = {},
 } = {}) {
   const transcriptions = [];
@@ -67,6 +68,7 @@ function createFixture({
     careAgent,
     settings,
     transcriber,
+    speechSynthesizer,
     ...voiceAgentOptions,
   });
   return {
@@ -148,6 +150,47 @@ test("phone mode prewarms the companion and continues listening after each reply
     continueListening: true,
     autoListenSeconds: 20,
   }]);
+});
+
+test("phone mode streams the local female voice to Tab5 before listening again", async (t) => {
+  const generated = [];
+  const fixture = createFixture({
+    speechSynthesizer: {
+      available: async () => true,
+      synthesize: async (text) => {
+        generated.push(text);
+        return Buffer.from([0x01, 0x00, 0x02, 0x00]);
+      },
+    },
+  });
+  t.after(() => fixture.agent.close());
+
+  await fixture.agent.start(fixture.session, { mode: "phone" });
+  await finishTurn(fixture, "今天有点累");
+
+  assert.deepEqual(generated, ["收到：今天有点累"]);
+  assert.deepEqual(fixture.events, [
+    {
+      event: "voice.reply",
+      ok: true,
+      text: "收到：今天有点累",
+      remoteAudio: true,
+      audioId: 1,
+      continueListening: true,
+      autoListenSeconds: 20,
+    },
+    {
+      event: "voice.audio.chunk",
+      audioId: 1,
+      sampleRate: 16_000,
+      samplesPerChannel: 2,
+      data: Buffer.from([0x01, 0x00, 0x02, 0x00]).toString("base64"),
+    },
+    {
+      event: "voice.audio.end",
+      audioId: 1,
+    },
+  ]);
 });
 
 test("voice command is queued for explicit confirmation instead of executing", async (t) => {
@@ -295,6 +338,29 @@ test("phone cancellation suppresses a pending reply after hangup", async (t) => 
   assert.deepEqual(await fixture.agent.cancel(fixture.session.deviceId), { accepted: true });
   releaseTranscription("这条话不该被回复");
   await settle();
+  assert.equal(fixture.store.snapshot().voice.status, "idle");
+  assert.deepEqual(fixture.events, []);
+});
+
+test("phone hangup cancels a pending local female voice stream", async (t) => {
+  let releaseSpeech;
+  const fixture = createFixture({
+    speechSynthesizer: {
+      available: async () => true,
+      synthesize: () => new Promise((resolve) => {
+        releaseSpeech = resolve;
+      }),
+    },
+  });
+  t.after(() => fixture.agent.close());
+  await fixture.agent.start(fixture.session, { mode: "phone" });
+  await finishTurn(fixture, "请等一下");
+  assert.equal(typeof releaseSpeech, "function");
+
+  assert.deepEqual(await fixture.agent.cancel(fixture.session.deviceId), { accepted: true });
+  releaseSpeech(Buffer.from([0x01, 0x00]));
+  await settle();
+
   assert.equal(fixture.store.snapshot().voice.status, "idle");
   assert.deepEqual(fixture.events, []);
 });

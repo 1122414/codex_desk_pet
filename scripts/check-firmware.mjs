@@ -138,6 +138,21 @@ try {
   ) {
     throw new Error("Tab5 必须提供一来一回的连续通话与明确的挂断状态");
   }
+  const deviceAudio = await readFile(
+    path.join(root, "firmware", "src", "device_audio.cpp"),
+    "utf8",
+  );
+  if (
+    !deviceAudio.includes("bool DeviceAudio::beginRemoteSpeech(") ||
+    !deviceAudio.includes("bool DeviceAudio::enqueueRemoteSpeech(") ||
+    !deviceAudio.includes("bool DeviceAudio::finishRemoteSpeech(") ||
+    !deviceAudio.includes("constexpr std::uint32_t kRemoteAudioIdleTimeoutMs = 5'000;") ||
+    !firmwareApp.includes('event == "voice.audio.chunk"') ||
+    !firmwareApp.includes('event == "voice.audio.end"') ||
+    !firmwareApp.includes("payload[\"sampleRate\"] != DeviceAudio::kRemoteSampleRate")
+  ) {
+    throw new Error("Tab5 必须只接收校验后的本机女声音频流，并在中断时自行收尾");
+  }
   const deviceVoice = await readFile(
     path.join(root, "firmware", "src", "device_voice.cpp"),
     "utf8",

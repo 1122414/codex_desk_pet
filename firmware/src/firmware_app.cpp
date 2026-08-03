@@ -3,8 +3,10 @@
 #include <M5Unified.h>
 #include <esp32-hal-ledc.h>
 #include <esp_log.h>
+#include <mbedtls/base64.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdarg>
 #include <cstring>
 #include <ctime>
@@ -40,6 +42,44 @@ void restartWirelessCoprocessor() {
   power.digitalWrite(0, true);
   delay(1'000);
 #endif
+}
+
+bool decodeRemoteSpeechChunk(
+    const JsonObjectConst payload,
+    std::uint32_t& audio_id,
+    std::array<std::int16_t, DeviceAudio::kRemoteChunkSamples>& samples,
+    std::size_t& sample_count) {
+  if (
+      !payload["audioId"].is<std::uint32_t>() ||
+      payload["sampleRate"] != DeviceAudio::kRemoteSampleRate ||
+      !payload["samplesPerChannel"].is<int>() ||
+      !payload["data"].is<const char*>()) {
+    return false;
+  }
+  const auto requested_samples = payload["samplesPerChannel"].as<int>();
+  if (
+      requested_samples < 1 ||
+      requested_samples > static_cast<int>(DeviceAudio::kRemoteChunkSamples)) {
+    return false;
+  }
+  const String encoded = payload["data"].as<const char*>();
+  const auto maximum_encoded_length =
+      4U * ((DeviceAudio::kRemoteChunkSamples * sizeof(std::int16_t) + 2U) / 3U);
+  if (encoded.isEmpty() || encoded.length() > maximum_encoded_length) return false;
+  std::size_t decoded_bytes = 0;
+  if (
+      mbedtls_base64_decode(
+          reinterpret_cast<std::uint8_t*>(samples.data()),
+          samples.size() * sizeof(samples[0]),
+          &decoded_bytes,
+          reinterpret_cast<const std::uint8_t*>(encoded.c_str()),
+          encoded.length()) != 0 ||
+      decoded_bytes != static_cast<std::size_t>(requested_samples) * sizeof(samples[0])) {
+    return false;
+  }
+  audio_id = payload["audioId"].as<std::uint32_t>();
+  sample_count = static_cast<std::size_t>(requested_samples);
+  return audio_id != 0;
 }
 
 }  // namespace
@@ -420,7 +460,14 @@ void FirmwareApp::handleProtocolEvent(
     const auto continue_listening = payload["continueListening"] | false;
     const auto requested_seconds = payload["autoListenSeconds"] | 20;
     connection_detail_ = reply;
-    if (ok && !reply.isEmpty()) audio_.enqueuePhrase(reply);
+    const auto remote_audio = payload["remoteAudio"] | false;
+    const auto audio_id = payload["audioId"] | 0;
+    const auto speaking = ok && remote_audio && audio_id > 0
+        ? audio_.beginRemoteSpeech(static_cast<std::uint32_t>(audio_id))
+        : ok && !reply.isEmpty() && audio_.enqueuePhrase(reply);
+    if (ok && remote_audio && !speaking && !reply.isEmpty()) {
+      audio_.enqueuePhrase(reply);
+    }
     if (phone_call_active_ && continue_listening && ok) {
       pending_phone_listen_ = true;
       pending_phone_client_ = &client;
@@ -431,6 +478,20 @@ void FirmwareApp::handleProtocolEvent(
       pending_phone_client_ = nullptr;
       phone_call_active_ = false;
       ui_.setPhoneCallActive(false);
+    }
+  } else if (event == "voice.audio.chunk") {
+    std::array<std::int16_t, DeviceAudio::kRemoteChunkSamples> samples{};
+    std::uint32_t audio_id = 0;
+    std::size_t sample_count = 0;
+    if (
+        !decodeRemoteSpeechChunk(payload, audio_id, samples, sample_count) ||
+        !audio_.enqueueRemoteSpeech(audio_id, samples.data(), sample_count)) {
+      connection_detail_ = "语音数据暂时不完整。";
+    }
+  } else if (event == "voice.audio.end") {
+    if (!payload["audioId"].is<std::uint32_t>() ||
+        !audio_.finishRemoteSpeech(payload["audioId"].as<std::uint32_t>())) {
+      connection_detail_ = "语音播放已结束。";
     }
   } else if (event == "voice.command.queued") {
     connection_detail_ = "收到一条需要确认的请求。";

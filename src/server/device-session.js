@@ -48,6 +48,7 @@ export class DeviceSession extends EventEmitter {
   #reliableQueue = [];
   #resourceTransfers = [];
   #resourcePumpActive = false;
+  #deliveryWaiters = new Map();
 
   constructor({
     role,
@@ -234,6 +235,17 @@ export class DeviceSession extends EventEmitter {
     return this.#send("event", event);
   }
 
+  sendEventTracked(event) {
+    if (!this.ready) return Promise.reject(new Error("Session is not authenticated"));
+    return new Promise((resolve, reject) => {
+      try {
+        this.#send("event", event, true, { resolve, reject });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
   sendCommand(command, args = {}, commandId) {
     if (!this.ready) throw new Error("Session is not authenticated");
     return this.#send("command", { command, commandId, ...args });
@@ -280,6 +292,7 @@ export class DeviceSession extends EventEmitter {
     this.#started = false;
     if (this.#timer) clearInterval(this.#timer);
     this.#timer = null;
+    this.#rejectDeliveryWaiters(new Error("Session closed before device confirmation"));
     this.#outbox.clear();
     this.#reliableQueue = [];
     this.#resourceTransfers = [];
@@ -297,7 +310,7 @@ export class DeviceSession extends EventEmitter {
     if (closeError) this.emit("sessionError", closeError);
   }
 
-  #send(type, payload, reliable = RELIABLE_MESSAGE_TYPES.includes(type)) {
+  #send(type, payload, reliable = RELIABLE_MESSAGE_TYPES.includes(type), delivery = null) {
     if (reliable && this.#outbox.size >= this.maxReliableInFlight) {
       if (type === "snapshot") {
         const queuedSnapshot = this.#reliableQueue.find((entry) => entry.type === "snapshot");
@@ -309,7 +322,7 @@ export class DeviceSession extends EventEmitter {
       if (this.#reliableQueue.length >= this.maxQueuedReliable) {
         throw new Error("Reliable send queue exceeded its limit");
       }
-      const entry = { type, payload };
+      const entry = { type, payload, delivery };
       if (type.startsWith("resource.")) {
         this.#reliableQueue.push(entry);
       } else {
@@ -319,10 +332,10 @@ export class DeviceSession extends EventEmitter {
       }
       return null;
     }
-    return this.#transmit(type, payload, reliable);
+    return this.#transmit(type, payload, reliable, delivery);
   }
 
-  #transmit(type, payload, reliable) {
+  #transmit(type, payload, reliable, delivery = null) {
     const sequence = reliable ? this.#nextSequence++ : this.#nextSequence;
     const plaintextEnvelope = createEnvelope({
       sequence,
@@ -341,7 +354,10 @@ export class DeviceSession extends EventEmitter {
       throw error;
     }
     this.lastSentAt = this.now();
-    if (reliable) this.#outbox.track(envelope, this.lastSentAt);
+    if (reliable) {
+      this.#outbox.track(envelope, this.lastSentAt);
+      if (delivery) this.#deliveryWaiters.set(envelope.id, delivery);
+    }
     return envelope;
   }
 
@@ -352,7 +368,7 @@ export class DeviceSession extends EventEmitter {
       this.#started
     ) {
       const next = this.#reliableQueue.shift();
-      this.#transmit(next.type, next.payload, true);
+      this.#transmit(next.type, next.payload, true, next.delivery);
     }
     this.#pumpResourceTransfers();
   }
@@ -422,7 +438,12 @@ export class DeviceSession extends EventEmitter {
     }
 
     if (envelope.type === "ack") {
-      if (this.#outbox.acknowledge(envelope)) this.#flushReliableQueue();
+      if (this.#outbox.acknowledge(envelope)) {
+        const delivery = this.#deliveryWaiters.get(envelope.payload.acknowledgedId);
+        this.#deliveryWaiters.delete(envelope.payload.acknowledgedId);
+        delivery?.resolve();
+        this.#flushReliableQueue();
+      }
       return;
     }
     const reliable = RELIABLE_MESSAGE_TYPES.includes(envelope.type);
@@ -544,6 +565,7 @@ export class DeviceSession extends EventEmitter {
       this.state = "handshaking";
       this.sessionId = null;
       this.#handshakeStartedAt = this.now();
+      this.#rejectDeliveryWaiters(new Error("Session restarted before device confirmation"));
       this.#outbox.clear();
       this.#reliableQueue = [];
       this.deviceId = payload.deviceId;
@@ -664,6 +686,7 @@ export class DeviceSession extends EventEmitter {
     this.#started = false;
     if (this.#timer) clearInterval(this.#timer);
     this.#timer = null;
+    this.#rejectDeliveryWaiters(new Error("Session closed before device confirmation"));
     this.#outbox.clear();
     this.#reliableQueue = [];
     this.transport.off("message", this.onTransportMessage);
@@ -677,6 +700,12 @@ export class DeviceSession extends EventEmitter {
     if (!this.#started) return;
     this.emit("sessionError", error);
     this.close();
+  }
+
+  #rejectDeliveryWaiters(error) {
+    for (const delivery of this.#deliveryWaiters.values()) delivery.reject(error);
+    this.#deliveryWaiters.clear();
+    for (const queued of this.#reliableQueue) queued.delivery?.reject(error);
   }
 
   #sendHello() {

@@ -356,6 +356,32 @@ test("snapshots remain responsive while a large resource waits in the reliable q
   assert.deepEqual(order, ["snapshot", "resource"]);
 });
 
+test("tracked events wait for the device ACK and run before queued resource chunks", async (t) => {
+  const { bridge, device, transports } = createSessions({ transportKind: "usb" });
+  t.after(() => {
+    bridge.close();
+    device.close();
+  });
+  const received = [];
+  device.on("event", (event) => received.push(event));
+  bridge.start({ autoTick: false });
+  device.start({ autoTick: false });
+  await waitFor(() => bridge.ready && device.ready && bridge.pendingAcknowledgements === 0);
+
+  const resourceStarted = new Promise((resolve) => device.once("resourceStarted", resolve));
+  transports.right.holdNext();
+  bridge.sendResource(
+    { id: "tracked-pet", displayName: "Tracked Pet", spriteVersionNumber: 2 },
+    Buffer.alloc(32_000, 0x5b),
+  );
+  await resourceStarted;
+  const delivered = bridge.sendEventTracked({ event: "voice.audio.chunk", audioId: 1 });
+  transports.right.flushHeld();
+  await delivered;
+
+  assert.deepEqual(received, [{ event: "voice.audio.chunk", audioId: 1 }]);
+});
+
 test("heartbeat timeout closes an authenticated session so its transport can reconnect", async (t) => {
   const { bridge, device, clock } = createSessions();
   t.after(() => {
