@@ -265,6 +265,18 @@ void testResources() {
   expect(
       !restored.restore("desk-fox", 1'000, {{0, 500}, {400, 100}}),
       "overlapping persisted ranges are rejected");
+
+  codex::ResourceTransferTracker v2_transfer;
+  constexpr auto v2_bytes = 88U * codex::kPetFrameBytes;
+  expect(v2_transfer.begin("v2-pet", v2_bytes), "V2 resource transfer starts");
+  bool v2_chunks_accepted = true;
+  for (std::uint32_t offset = 0; offset < v2_bytes; offset += 3U * 1024U) {
+    const auto length = std::min<std::uint32_t>(3U * 1024U, v2_bytes - offset);
+    v2_chunks_accepted = v2_chunks_accepted && v2_transfer.accept(offset, length);
+  }
+  expect(
+      v2_chunks_accepted && v2_transfer.complete(),
+      "V2 resource transfer accepts sequential USB chunks without re-sorting every range");
 }
 
 std::uint32_t nextRandom(std::uint32_t& state) {

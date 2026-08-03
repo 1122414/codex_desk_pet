@@ -277,14 +277,6 @@ bool PetStore::commitTransfer(const JsonObjectConst payload, String& error) {
     return false;
   }
   if (!publishActivePointer(pet_id, sha256, error)) return false;
-  const auto verified_key = pet_id + ":" + sha256;
-  if (std::find(
-          verified_assets_.begin(),
-          verified_assets_.end(),
-          verified_key) == verified_assets_.end()) {
-    if (verified_assets_.size() >= 64) verified_assets_.erase(verified_assets_.begin());
-    verified_assets_.push_back(verified_key);
-  }
   SD_MMC.remove(resumePath(pet_id));
   tracker_.reset();
   transfer_ = {};
@@ -362,22 +354,9 @@ bool PetStore::loadManifestBySha(
   String error;
   if (!validateManifest(document.as<JsonObjectConst>(), manifest, error) ||
       manifest.pet_id != pet_id || manifest.sha256 != sha256) return false;
-  const auto verified_key = pet_id + ":" + sha256;
-  if (std::find(
-          verified_assets_.begin(),
-          verified_assets_.end(),
-          verified_key) != verified_assets_.end()) {
-    return true;
-  }
-  if (!verifyFile(
-          assetPath(pet_id, sha256),
-          manifest.bytes,
-          manifest.sha256)) {
-    return false;
-  }
-  if (verified_assets_.size() >= 64) verified_assets_.erase(verified_assets_.begin());
-  verified_assets_.push_back(verified_key);
-  return true;
+  // The complete digest is verified before the immutable asset is published.
+  // Re-hashing a 28 MiB V2 asset here runs from the render/protocol loop.
+  return assetFileHasExpectedSize(assetPath(pet_id, sha256), manifest.bytes);
 }
 
 bool PetStore::readActivePointer(
@@ -585,6 +564,15 @@ bool PetStore::writeManifest(const ActiveManifest& value, const String& path) {
   return true;
 }
 
+bool PetStore::assetFileHasExpectedSize(
+    const String& path,
+    const std::uint32_t bytes) const {
+  auto file = SD_MMC.open(path, FILE_READ);
+  const auto valid = file && !file.isDirectory() && file.size() == bytes;
+  file.close();
+  return valid;
+}
+
 bool PetStore::verifyFile(
     const String& path,
     const std::uint32_t bytes,
@@ -602,12 +590,21 @@ bool PetStore::verifyFile(
     return false;
   }
   std::array<std::uint8_t, 4'096> buffer{};
-  while (file.available()) {
-    const auto read = file.read(buffer.data(), buffer.size());
+  std::uint32_t verified_bytes = 0;
+  std::uint32_t bytes_since_yield = 0;
+  while (verified_bytes < bytes) {
+    const auto expected = std::min<std::size_t>(buffer.size(), bytes - verified_bytes);
+    const auto read = file.read(buffer.data(), expected);
     if (read == 0 || mbedtls_sha256_update(&context, buffer.data(), read) != 0) {
       file.close();
       mbedtls_sha256_free(&context);
       return false;
+    }
+    verified_bytes += read;
+    bytes_since_yield += read;
+    if (bytes_since_yield >= 64U * 1024U) {
+      delay(1);
+      bytes_since_yield = 0;
     }
   }
   file.close();

@@ -1,6 +1,7 @@
 #include "codex_core/resource.hpp"
 
 #include <algorithm>
+#include <iterator>
 #include <utility>
 
 namespace codex {
@@ -78,38 +79,39 @@ bool ResourceTransferTracker::accept(
     return false;
   }
   const ByteRange incoming{offset, length};
-  for (const auto& range : received_) {
-    const auto same =
-        range.offset == incoming.offset && range.length == incoming.length;
-    const auto overlaps =
-        incoming.offset < range.offset + range.length &&
-        range.offset < incoming.offset + incoming.length;
-    if (same) {
-      return true;
-    }
-    if (overlaps) {
-      return false;
-    }
-  }
-  received_.push_back(incoming);
-  std::sort(
+  const auto position = std::lower_bound(
       received_.begin(),
       received_.end(),
-      [](const ByteRange& left, const ByteRange& right) {
-        return left.offset < right.offset;
+      incoming.offset,
+      [](const ByteRange& range, const std::uint32_t value) {
+        return range.offset < value;
       });
+  if (position != received_.end()) {
+    if (position->offset == incoming.offset && position->length == incoming.length) {
+      return true;
+    }
+    if (incoming.offset + incoming.length > position->offset) return false;
+  }
+  if (position != received_.begin()) {
+    const auto previous = std::prev(position);
+    if (previous->offset + previous->length > incoming.offset) return false;
+  }
+  received_.insert(position, incoming);
   return true;
 }
 
 bool ResourceTransferTracker::contains(
     const std::uint32_t offset,
     const std::uint32_t length) const {
-  return std::any_of(
+  const auto position = std::lower_bound(
       received_.begin(),
       received_.end(),
-      [offset, length](const ByteRange& range) {
-        return range.offset == offset && range.length == length;
+      offset,
+      [](const ByteRange& range, const std::uint32_t value) {
+        return range.offset < value;
       });
+  return position != received_.end() &&
+      position->offset == offset && position->length == length;
 }
 
 std::vector<ByteRange> ResourceTransferTracker::missingRanges() const {

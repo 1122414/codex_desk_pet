@@ -89,6 +89,7 @@ class PetStore {
   bool loadResume(const String& pet_id, const String& expected_sha = "");
   bool saveResume();
   bool writeManifest(const ActiveManifest& manifest, const String& path);
+  bool assetFileHasExpectedSize(const String& path, std::uint32_t bytes) const;
   bool verifyFile(const String& path, std::uint32_t bytes, const String& sha256);
   bool safePetId(const String& pet_id) const;
   String partPath(const String& pet_id) const;
@@ -103,7 +104,6 @@ class PetStore {
   ActiveManifest transfer_;
   ResourceTransferTracker tracker_;
   std::uint16_t uncheckpointed_chunks_ = 0;
-  std::vector<String> verified_assets_;
 };
 
 }  // namespace codex::firmware
