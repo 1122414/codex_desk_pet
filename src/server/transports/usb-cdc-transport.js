@@ -6,6 +6,7 @@ import { JsonLineTransport } from "./json-line-transport.js";
 
 const execFileAsync = promisify(execFile);
 const USB_DEVICE_NAME = /^(?:cu\.usbmodem[a-zA-Z0-9._-]*|ttyACM[0-9]+|ttyUSB[0-9]+)$/;
+const USB_STARTUP_DRAIN_MS = 850;
 
 export async function listUsbCdcPorts() {
   const entries = await readdir("/dev", { withFileTypes: true });
@@ -53,12 +54,19 @@ export class UsbCdcTransport extends JsonLineTransport {
     const readable = handle.createReadStream({ autoClose: false });
     const writable = handle.createWriteStream({ autoClose: false });
     const transport = new UsbCdcTransport({ handle, readable, writable, devicePath });
+    const ignoreStartupTransportError = () => {};
+    transport.on("error", ignoreStartupTransportError);
     try {
+      // A device can still be finishing a frame from the previous host session.
+      // Drain it before the wake byte asks firmware to restart its handshake.
+      await new Promise((resolve) => setTimeout(resolve, USB_STARTUP_DRAIN_MS));
       await handle.write("\n");
       return transport;
     } catch (error) {
       transport.close();
       throw error;
+    } finally {
+      transport.off("error", ignoreStartupTransportError);
     }
   }
 
