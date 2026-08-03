@@ -218,6 +218,8 @@ void FirmwareApp::loop() {
   }
   startPendingCareListening();
   startPendingPhoneListening();
+  ui_.setSpeechPlaybackActive(
+      phone_call_active_ && !voice_.recording() && audio_.busy());
   if (
       care_animation_override_ &&
       care_animation_ == Animation::Waving &&
@@ -633,6 +635,7 @@ void FirmwareApp::endPhoneCall() {
   }
   audio_.cancel();
   audio_.setPaused(false);
+  ui_.setSpeechPlaybackActive(false);
   ui_.setVoiceRecording(false);
   phone_call_active_ = false;
   ui_.setPhoneCallActive(false);

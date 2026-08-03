@@ -88,6 +88,14 @@ try {
   ) {
     throw new Error("Tab5 通话按钮必须能发起连续对话，并明确提供挂断操作");
   }
+  if (
+    !tab5Ui.includes("if (phone_call_active_) {") ||
+    !tab5Ui.includes("drawQuota(snapshot);") ||
+    !tab5Ui.includes("setSpeechPlaybackActive") ||
+    !tab5Ui.includes("speech_playback_active_ && normal_screen_rendered_")
+  ) {
+    throw new Error("Tab5 待机时必须保留状态面板，播放远程语音时必须保护已完成画面");
+  }
   const bundledPetDirectory = path.join(
     root,
     "firmware",
@@ -152,6 +160,12 @@ try {
     !firmwareApp.includes("payload[\"sampleRate\"] != DeviceAudio::kRemoteSampleRate")
   ) {
     throw new Error("Tab5 必须只接收校验后的本机女声音频流，并在中断时自行收尾");
+  }
+  if (
+    !deviceAudio.includes("kRemoteAudioPrebufferTimeoutMs = 180") ||
+    !deviceAudio.includes("bool playback_failed = false")
+  ) {
+    throw new Error("Tab5 本机女声音频必须预缓冲并在播放失败时完成清理");
   }
   const deviceVoice = await readFile(
     path.join(root, "firmware", "src", "device_voice.cpp"),

@@ -43,6 +43,7 @@ class Tab5Ui {
   bool approvalCanAccept(const Approval& approval) const;
   void setVoiceRecording(bool recording, const String& mode = "");
   void setPhoneCallActive(bool active);
+  void setSpeechPlaybackActive(bool active);
   void setCameraBusy(bool busy);
   void suspendBundledStorageForCamera();
   bool resumeBundledStorageAfterCamera();
@@ -129,6 +130,7 @@ class Tab5Ui {
   bool voice_recording_ = false;
   String voice_mode_;
   bool phone_call_active_ = false;
+  bool speech_playback_active_ = false;
   bool camera_busy_ = false;
   std::int16_t task_touch_start_y_ = 0;
   std::int16_t task_scroll_start_pixels_ = 0;

@@ -267,6 +267,10 @@ void Tab5Ui::render(
       return;
     }
   } else {
+    // The Tab5 display and streamed speaker output share a tight hardware
+    // budget. Preserve the last complete frame while Skadi is speaking, then
+    // redraw it atomically when playback finishes.
+    if (speech_playback_active_ && normal_screen_rendered_) return;
     const auto minute_bucket = currentUnixSeconds(snapshot, now_ms) / 60;
     const auto fingerprint = renderFingerprint(
         snapshot,
@@ -333,6 +337,14 @@ void Tab5Ui::setPhoneCallActive(const bool active) {
   if (phone_call_active_ == active) return;
   phone_call_active_ = active;
   normal_screen_rendered_ = false;
+}
+
+void Tab5Ui::setSpeechPlaybackActive(const bool active) {
+  if (speech_playback_active_ == active) return;
+  speech_playback_active_ = active;
+  // Playback may have obscured a partial display transfer. Always restore a
+  // complete frame after the speaker becomes idle.
+  if (!active) normal_screen_rendered_ = false;
 }
 
 void Tab5Ui::setCameraBusy(const bool busy) {
@@ -542,7 +554,13 @@ void Tab5Ui::drawNormal(
 
   canvas_.fillRoundRect(kPetArea.x, kPetArea.y, kPetArea.width, kPetArea.height, 20, kPanel);
   drawPet(snapshot, now_ms);
-  drawConversation(snapshot, connection_detail);
+  if (phone_call_active_) {
+    drawConversation(snapshot, connection_detail);
+  } else {
+    drawQuota(snapshot);
+    drawTokenSummary(snapshot);
+    drawTaskList(snapshot, now_ms);
+  }
 
   canvas_.fillRoundRect(
       kPreviousPetButton.x, kPreviousPetButton.y,
@@ -609,16 +627,34 @@ void Tab5Ui::drawConversation(
 
   canvas_.fillRoundRect(500, 224, 716, 232, 16, kPanelLight);
   String message = connection_detail;
+  const auto has_heard_text =
+      snapshot.companion.mode == "chat" && !snapshot.companion.prompt.empty();
+  const auto has_reply =
+      snapshot.companion.mode == "chat" && !snapshot.companion.reply.empty();
   if (phone_call_active_ && voice_recording_ && voice_mode_ == "phone") {
     message = "我在听，你慢慢说。";
   } else if (phone_call_active_ && message == "正在识别") {
     message = "听到了，让我想一想。";
+  } else if (has_reply) {
+    message = String(snapshot.companion.reply.c_str());
   } else if (!phone_call_active_ && message.isEmpty()) {
     message = snapshot.bridge_connected ? "斯卡蒂在这里。" : "正在等连接恢复。";
   }
-  canvas_.setTextColor(kText, kPanelLight);
-  canvas_.setTextSize(2);
-  drawWrapped(message, 536, 270, 644, 4, 42);
+  if (has_heard_text) {
+    canvas_.setTextColor(kMuted, kPanelLight);
+    canvas_.setTextSize(1);
+    canvas_.drawString("你说：", 536, 250);
+    drawTruncated(String(snapshot.companion.prompt.c_str()), 596, 248, 584);
+    canvas_.setTextColor(kGreen, kPanelLight);
+    canvas_.drawString("斯卡蒂：", 536, 298);
+    canvas_.setTextColor(kText, kPanelLight);
+    canvas_.setTextSize(2);
+    drawWrapped(message, 536, 334, 644, 3, 38);
+  } else {
+    canvas_.setTextColor(kText, kPanelLight);
+    canvas_.setTextSize(2);
+    drawWrapped(message, 536, 270, 644, 4, 42);
+  }
 
   canvas_.setTextSize(1);
   canvas_.setTextColor(phone_call_active_ ? kGreen : kMuted, kPanel);
@@ -934,6 +970,7 @@ void Tab5Ui::drawStatus(
   canvas_.fillRect(0, 0, kScreenWidth, 72, kPanel);
   canvas_.fillCircle(32, 36, 12, snapshot.bridge_connected ? kGreen : kRed);
   const bool phone_listening = voice_recording_ && voice_mode_ == "phone";
+  const bool phone_speaking = phone_call_active_ && speech_playback_active_;
   const bool transcribing = !voice_recording_ && connection_detail == "正在识别";
   const bool chat_thinking = phone_call_active_ &&
       snapshot.companion.mode == "chat" && snapshot.companion.status == "thinking";
@@ -947,7 +984,11 @@ void Tab5Ui::drawStatus(
   String detail = snapshot.bridge_connected
       ? "想说什么都可以。"
       : "请检查数据线或电脑上的 Bridge。";
-  if (phone_listening) {
+  if (phone_speaking) {
+    status_text = "斯卡蒂在说";
+    status_color = kGreen;
+    detail = "先听她说完，随后会继续听你说。";
+  } else if (phone_listening) {
     status_text = "我在听";
     status_color = kGreen;
     detail = "慢慢说，不用按住。";
@@ -960,7 +1001,7 @@ void Tab5Ui::drawStatus(
     status_color = kBlue;
     detail = "正在整理回答。";
   } else if (chat_completed) {
-    status_text = "她说";
+    status_text = "她回答了";
     status_color = kGreen;
     detail = "她：" + String(snapshot.companion.reply.c_str());
   } else if (chat_failed) {

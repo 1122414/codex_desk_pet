@@ -18,6 +18,7 @@ constexpr std::size_t kVoiceReadChunkSize = 4'096;
 constexpr std::uint32_t kVoiceDataCrc32 = 0xbe773ce5;
 constexpr std::uint8_t kRemoteAudioQueueDepth = 8;
 constexpr std::uint32_t kRemoteAudioIdleTimeoutMs = 5'000;
+constexpr std::uint32_t kRemoteAudioPrebufferTimeoutMs = 180;
 
 }  // namespace
 
@@ -294,7 +295,19 @@ bool DeviceAudio::playRemoteSpeech(
   std::array<RemoteAudioChunk, 3> buffers{};
   std::size_t next_buffer = 0;
   bool first_chunk = true;
+  bool playback_failed = false;
   auto last_chunk_at = static_cast<std::uint32_t>(millis());
+  const auto prebuffer_started_at = last_chunk_at;
+  while (
+      !interrupted() &&
+      remote_generation_.load() == generation &&
+      remote_audio_id_.load() == audio_id &&
+      remote_input_open_.load() &&
+      uxQueueMessagesWaiting(remote_queue_) < 2 &&
+      static_cast<std::uint32_t>(millis() - prebuffer_started_at) <
+          kRemoteAudioPrebufferTimeoutMs) {
+    vTaskDelay(pdMS_TO_TICKS(5));
+  }
   while (
       !interrupted() &&
       remote_generation_.load() == generation &&
@@ -321,7 +334,8 @@ bool DeviceAudio::playRemoteSpeech(
               kSpeakerChannel,
               first_chunk)) {
         M5.Speaker.stop(kSpeakerChannel);
-        return false;
+        playback_failed = true;
+        break;
       }
       first_chunk = false;
       next_buffer = (next_buffer + 1) % buffers.size();
@@ -341,7 +355,7 @@ bool DeviceAudio::playRemoteSpeech(
     vTaskDelay(pdMS_TO_TICKS(2));
   }
   const auto completed =
-      !interrupted() && remote_generation_.load() == generation &&
+      !playback_failed && !interrupted() && remote_generation_.load() == generation &&
       remote_audio_id_.load() == audio_id;
   if (!completed) M5.Speaker.stop(kSpeakerChannel);
   if (remote_generation_.load() == generation && remote_audio_id_.load() == audio_id) {
