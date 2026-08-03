@@ -460,8 +460,7 @@ bool DeviceProtocolClient::sendVoiceAudio(
         payload["sampleRate"] = 16'000;
         payload["numChannels"] = 1;
         payload["samplesPerChannel"] = samples_per_channel;
-      },
-      false);
+      });
 }
 
 bool DeviceProtocolClient::sendVoiceStop() {

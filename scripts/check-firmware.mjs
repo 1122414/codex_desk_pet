@@ -126,10 +126,10 @@ try {
     "utf8",
   );
   if (
-    !firmwareApp.includes("voice_.start(*client, action.value, true)") ||
+    !firmwareApp.includes("voice_.start(*client, action.value, false, 60)") ||
     !firmwareApp.includes("ui_.setVoiceRecording(true, action.value)")
   ) {
-    throw new Error("Tab5 手动语音必须启用自动收音结束，不能要求用户长按");
+    throw new Error("Tab5 手动语音必须点按开始、再次点按结束，并保留时长上限");
   }
   const deviceVoice = await readFile(
     path.join(root, "firmware", "src", "device_voice.cpp"),
@@ -148,6 +148,25 @@ try {
     deviceVoice.includes("kChunkTimeoutMs")
   ) {
     throw new Error("Tab5 语音必须在麦克风分块未完成时仍执行总时长兜底，且不能短超时误结束");
+  }
+  const deviceProtocol = await readFile(
+    path.join(root, "firmware", "src", "device_protocol.cpp"),
+    "utf8",
+  );
+  const voiceAudioStart = deviceProtocol.indexOf(
+    "bool DeviceProtocolClient::sendVoiceAudio(",
+  );
+  const voiceStopStart = deviceProtocol.indexOf(
+    "bool DeviceProtocolClient::sendVoiceStop()",
+  );
+  const voiceAudio = deviceProtocol.slice(voiceAudioStart, voiceStopStart);
+  if (
+    voiceAudioStart === -1 ||
+    voiceStopStart === -1 ||
+    !voiceAudio.includes('sendEnvelope(\n      "event",') ||
+    voiceAudio.includes("false)")
+  ) {
+    throw new Error("Tab5 语音音频事件必须使用递增的可靠序号，不能让后续音频或停止消息被判重");
   }
   const ledcClockSourceIndex = firmwareApp.indexOf(
     "ledcSetClockSource(LEDC_USE_PLL_DIV_CLK);",
@@ -175,10 +194,6 @@ try {
   ) {
     throw new Error("Tab5 必须在确认快照后延迟主题请求，避免 ACK 与资源请求争用 USB CDC");
   }
-  const deviceProtocol = await readFile(
-    path.join(root, "firmware", "src", "device_protocol.cpp"),
-    "utf8",
-  );
   if (
     deviceProtocol.includes(
       "wake_requested &&\n      connected &&\n      state_ != State::Ready",

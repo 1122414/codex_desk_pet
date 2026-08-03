@@ -551,7 +551,7 @@ void FirmwareApp::handleUiAction(const UiAction& action) {
         connection_detail_ = "语音需要 USB 或 Wi-Fi";
       } else {
         audio_.setPaused(true);
-        if (voice_.start(*client, action.value, true)) {
+        if (voice_.start(*client, action.value, false, 60)) {
           ui_.setVoiceRecording(true, action.value);
           connection_detail_ =
               action.value == "command" ? "正在听取命令" : "正在听";

@@ -61,10 +61,8 @@ bool DeviceVoice::start(
 void DeviceVoice::poll() {
   if (!recording_) return;
   const auto now_ms = static_cast<std::uint32_t>(millis());
-  if (
-      automatic_stop_ &&
-      elapsed(now_ms, recording_started_at_ms_, maximum_duration_ms_)) {
-    stop(activity_.heardSpeech()
+  if (elapsed(now_ms, recording_started_at_ms_, maximum_duration_ms_)) {
+    stop(automatic_stop_ && activity_.heardSpeech()
         ? VoiceStopReason::SpeechComplete
         : VoiceStopReason::NoSpeechTimeout);
     return;
