@@ -27,6 +27,7 @@ class DeviceVoice {
       std::uint8_t maximum_duration_seconds = 20);
   void poll();
   bool stop(VoiceStopReason reason = VoiceStopReason::Manual);
+  bool cancel();
   bool recording() const { return recording_; }
   VoiceStopReason lastStopReason() const { return last_stop_reason_; }
   const String& mode() const { return mode_; }
@@ -37,6 +38,7 @@ class DeviceVoice {
 
   bool beginChunk();
   bool sendCompletedChunk();
+  bool stop(VoiceStopReason reason, bool cancel_host);
 
   DeviceProtocolClient* client_ = nullptr;
   String mode_;

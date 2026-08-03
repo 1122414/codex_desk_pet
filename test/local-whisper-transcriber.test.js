@@ -71,7 +71,6 @@ test("LocalWhisperTranscriber writes a private WAV, invokes whisper-cli, and rem
       "--file", calls[0].args[3],
       "--language", "zh",
       "--threads", "4",
-      "--no-gpu",
       "--no-timestamps",
       "--no-prints",
     ],

@@ -63,10 +63,10 @@ try {
     throw new Error("Tab5 必须使用 PSRAM 双缓冲整帧提交，避免可见闪烁");
   }
   if (
-    !tab5Ui.includes("constexpr std::uint8_t kDefaultSpeakerVolume = 204;") ||
+    !tab5Ui.includes("constexpr std::uint8_t kDefaultSpeakerVolume = 179;") ||
     !tab5Ui.includes("M5.Speaker.setVolume(kDefaultSpeakerVolume);")
   ) {
-    throw new Error("Tab5 默认扬声器音量必须使用一致的 80% 原始值");
+    throw new Error("Tab5 默认扬声器音量必须使用一致的 70% 原始值");
   }
   if (
     !tab5Ui.includes(
@@ -82,12 +82,11 @@ try {
     throw new Error("Tab5 动画帧必须局部提交，不能被静态界面缓存跳过");
   }
   if (
-    !tab5Ui.includes("voice_touch_mode_") ||
-    !tab5Ui.includes("UiAction{UiActionType::VoiceStart, mode}") ||
-    !tab5Ui.includes('chat_recording ? "停止" : "对话"') ||
-    !tab5Ui.includes('command_recording ? "停止" : "命令"')
+    !tab5Ui.includes("UiAction{UiActionType::VoiceStart, \"phone\"}") ||
+    !tab5Ui.includes("UiAction{UiActionType::VoiceEndCall, {}}") ||
+    !tab5Ui.includes('phone_call_active_ ? "挂断" : "呼叫"')
   ) {
-    throw new Error("Tab5 语音按钮必须点按开始，并清楚标出当前可停止的模式");
+    throw new Error("Tab5 通话按钮必须能发起连续对话，并明确提供挂断操作");
   }
   const bundledPetDirectory = path.join(
     root,
@@ -132,10 +131,12 @@ try {
     "utf8",
   );
   if (
-    !firmwareApp.includes("voice_.start(*client, action.value, false, 60)") ||
-    !firmwareApp.includes("ui_.setVoiceRecording(true, action.value)")
+    !firmwareApp.includes("action.value == \"phone\"") ||
+    !firmwareApp.includes("voice_.start(") ||
+    !firmwareApp.includes("ui_.setPhoneCallActive(phone_call_active_)") ||
+    !firmwareApp.includes("startPendingPhoneListening()")
   ) {
-    throw new Error("Tab5 手动语音必须点按开始、再次点按结束，并保留时长上限");
+    throw new Error("Tab5 必须提供一来一回的连续通话与明确的挂断状态");
   }
   const deviceVoice = await readFile(
     path.join(root, "firmware", "src", "device_voice.cpp"),
@@ -163,7 +164,7 @@ try {
     "bool DeviceProtocolClient::sendVoiceAudio(",
   );
   const voiceStopStart = deviceProtocol.indexOf(
-    "bool DeviceProtocolClient::sendVoiceStop()",
+    "bool DeviceProtocolClient::sendVoiceStop(",
   );
   const voiceAudio = deviceProtocol.slice(voiceAudioStart, voiceStopStart);
   if (

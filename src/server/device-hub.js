@@ -493,7 +493,9 @@ export class DeviceHub extends EventEmitter {
         return this.voiceAgent.start(session, { mode: payload.mode });
       case "voice.stop":
         if (!this.voiceAgent) throw new Error("语音服务不可用");
-        return this.voiceAgent.stop(session.deviceId);
+        return payload.cancel === true
+          ? this.voiceAgent.cancel(session.deviceId)
+          : this.voiceAgent.stop(session.deviceId);
       case "state.preview":
         this.store.setPreviewAnimation(payload.animation ?? null);
         return { animation: payload.animation ?? null };

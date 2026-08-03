@@ -129,7 +129,6 @@ export class LocalWhisperTranscriber {
           "--file", audioPath,
           "--language", "zh",
           "--threads", "4",
-          "--no-gpu",
           "--no-timestamps",
           "--no-prints",
         ], {

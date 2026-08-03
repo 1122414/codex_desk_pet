@@ -335,9 +335,16 @@ function validatePayload(type, payload) {
     }
     if (
       payload.command === "voice.start" &&
-      !["chat", "command", "care"].includes(payload.mode)
+      !["chat", "command", "care", "phone"].includes(payload.mode)
     ) {
       throw new ProtocolError("voice mode is invalid");
+    }
+    if (
+      payload.command === "voice.stop" &&
+      payload.cancel !== undefined &&
+      typeof payload.cancel !== "boolean"
+    ) {
+      throw new ProtocolError("voice cancellation is invalid");
     }
     if (
       payload.command === "camera.capture" &&

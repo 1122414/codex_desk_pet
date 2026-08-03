@@ -11,6 +11,7 @@ function createFixture({
   const transcriptions = [];
   const transcribedAudio = [];
   const chatCalls = [];
+  const warmCalls = [];
   const commandCalls = [];
   const careCalls = [];
   const careReplies = [];
@@ -24,6 +25,10 @@ function createFixture({
     },
   };
   const petAgent = {
+    warmChat: async () => {
+      warmCalls.push(true);
+      return "warm-thread";
+    },
     chat: async (text) => {
       chatCalls.push(text);
       return { reply: `收到：${text}` };
@@ -75,6 +80,7 @@ function createFixture({
     store,
     transcribedAudio,
     transcriptions,
+    warmCalls,
   };
 }
 
@@ -120,6 +126,28 @@ test("voice chat buffers PCM for local transcription and returns a bounded reply
     text: "收到：今天进展怎么样",
   }]);
   assert.equal(fixture.store.snapshot().voice.status, "completed");
+});
+
+test("phone mode prewarms the companion and continues listening after each reply", async (t) => {
+  const fixture = createFixture();
+  t.after(() => fixture.agent.close());
+
+  assert.deepEqual(
+    await fixture.agent.start(fixture.session, { mode: "phone" }),
+    { accepted: true, mode: "phone" },
+  );
+  await Promise.resolve();
+  assert.deepEqual(fixture.warmCalls, [true]);
+  await finishTurn(fixture, "今天有点累");
+
+  assert.deepEqual(fixture.chatCalls, ["今天有点累"]);
+  assert.deepEqual(fixture.events, [{
+    event: "voice.reply",
+    ok: true,
+    text: "收到：今天有点累",
+    continueListening: true,
+    autoListenSeconds: 20,
+  }]);
 });
 
 test("voice command is queued for explicit confirmation instead of executing", async (t) => {
@@ -247,6 +275,27 @@ test("care voice cancellation aborts local transcription without producing a rep
   await settle();
   assert.equal(fixture.store.snapshot().voice.status, "idle");
   assert.equal(fixture.store.snapshot().care.status, "idle");
+  assert.deepEqual(fixture.events, []);
+});
+
+test("phone cancellation suppresses a pending reply after hangup", async (t) => {
+  let releaseTranscription;
+  const fixture = createFixture({
+    transcribe: () => new Promise((resolve) => {
+      releaseTranscription = resolve;
+    }),
+  });
+  t.after(() => fixture.agent.close());
+  await fixture.agent.start(fixture.session, { mode: "phone" });
+  assert.equal(sendAudio(fixture), true);
+  await fixture.agent.stop(fixture.session.deviceId);
+  await Promise.resolve();
+  assert.equal(typeof releaseTranscription, "function");
+
+  assert.deepEqual(await fixture.agent.cancel(fixture.session.deviceId), { accepted: true });
+  releaseTranscription("这条话不该被回复");
+  await settle();
+  assert.equal(fixture.store.snapshot().voice.status, "idle");
   assert.deepEqual(fixture.events, []);
 });
 

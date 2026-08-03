@@ -33,7 +33,7 @@ constexpr std::int16_t kRegionBufferWidth = 808;
 constexpr std::uint64_t kTaskScrollFrameIntervalMs = 33;
 constexpr std::uint16_t kBundledPetWidth = 192;
 constexpr std::uint16_t kBundledPetHeight = 208;
-constexpr std::uint8_t kDefaultSpeakerVolume = 204;
+constexpr std::uint8_t kDefaultSpeakerVolume = 179;
 constexpr std::size_t kBundledPetPixels =
     static_cast<std::size_t>(kBundledPetWidth) * kBundledPetHeight;
 
@@ -130,6 +130,7 @@ std::uint64_t renderFingerprint(
     const std::uint8_t transfer_progress,
     const bool voice_recording,
     const String& voice_mode,
+    const bool phone_call_active,
     const bool camera_busy,
     const std::uint64_t minute_bucket) {
   std::uint64_t hash = 1469598103934665603ULL;
@@ -190,6 +191,7 @@ std::uint64_t renderFingerprint(
   hashString(hash, connection_detail);
   hashValue(hash, transfer_progress);
   hashValue(hash, voice_recording);
+  hashValue(hash, phone_call_active);
   hashValue(hash, camera_busy);
   hashValue(hash, minute_bucket);
   return hash;
@@ -272,6 +274,7 @@ void Tab5Ui::render(
         transfer_progress,
         voice_recording_,
         voice_mode_,
+        phone_call_active_,
         camera_busy_,
         minute_bucket);
     if (normal_screen_rendered_ && fingerprint == rendered_fingerprint_) {
@@ -290,19 +293,6 @@ void Tab5Ui::render(
           pushCanvasRegion(kPetSpriteArea);
           rendered_pet_frame_index_ = frame_index;
         }
-      }
-      if (
-          !snapshot.approval.present &&
-          !snapshot.companion.awaitingConfirmation() &&
-          task_scroll_pixels_ != rendered_task_scroll_pixels_ &&
-          (
-              !task_touch_active_ ||
-              now_ms - last_task_scroll_render_at_ms_ >=
-                  kTaskScrollFrameIntervalMs)) {
-        drawTaskList(snapshot, now_ms);
-        pushCanvasRegion({464, 288, 780, 390});
-        rendered_task_scroll_pixels_ = task_scroll_pixels_;
-        last_task_scroll_render_at_ms_ = now_ms;
       }
       return;
     }
@@ -336,6 +326,12 @@ void Tab5Ui::setVoiceRecording(const bool recording, const String& mode) {
   if (voice_recording_ == recording && voice_mode_ == next_mode) return;
   voice_recording_ = recording;
   voice_mode_ = next_mode;
+  normal_screen_rendered_ = false;
+}
+
+void Tab5Ui::setPhoneCallActive(const bool active) {
+  if (phone_call_active_ == active) return;
+  phone_call_active_ = active;
   normal_screen_rendered_ = false;
 }
 
@@ -396,45 +392,20 @@ UiAction Tab5Ui::pollTouch(
         }
         return {};
       }
-      if (pressed &&
-          (kVoiceChatButton.contains(point) ||
-           kVoiceCommandButton.contains(point))) {
+      if (pressed && kPhoneCallButton.contains(point)) {
         input_.cancel();
         voice_touch_active_ = true;
-        voice_touch_mode_ =
-            kVoiceCommandButton.contains(point) ? "command" : "chat";
+        voice_touch_mode_ = "phone";
         return {};
       }
       if (voice_touch_active_) {
         if (released) {
           voice_touch_active_ = false;
-          const auto mode = voice_touch_mode_;
           voice_touch_mode_ = "";
-          return voice_recording_
-              ? UiAction{UiActionType::VoiceStop, {}}
-              : UiAction{UiActionType::VoiceStart, mode};
+          return phone_call_active_
+              ? UiAction{UiActionType::VoiceEndCall, {}}
+              : UiAction{UiActionType::VoiceStart, "phone"};
         }
-        return {};
-      }
-      const auto maximum_scroll = std::max<std::int32_t>(
-          0,
-          static_cast<std::int32_t>(snapshot.tasks.size()) * kTaskRowHeight -
-              kTaskListArea.height);
-      if (pressed && kTaskListArea.contains(point)) {
-        input_.cancel();
-        task_touch_active_ = true;
-        task_touch_start_y_ = point.y;
-        task_scroll_start_pixels_ = static_cast<std::int16_t>(
-            std::min<std::int32_t>(task_scroll_pixels_, maximum_scroll));
-        return {};
-      }
-      if (task_touch_active_) {
-        const auto delta = task_touch_start_y_ - point.y;
-        task_scroll_pixels_ = static_cast<std::int16_t>(std::clamp<int>(
-            static_cast<int>(task_scroll_start_pixels_) + delta,
-            0,
-            static_cast<int>(maximum_scroll)));
-        if (released) task_touch_active_ = false;
         return {};
       }
     }
@@ -465,11 +436,10 @@ UiAction Tab5Ui::pollTouch(
   }
   if (voice_touch_active_) {
     voice_touch_active_ = false;
-    const auto mode = voice_touch_mode_;
     voice_touch_mode_ = "";
-    return voice_recording_
-        ? UiAction{UiActionType::VoiceStop, {}}
-        : UiAction{UiActionType::VoiceStart, mode};
+    return phone_call_active_
+        ? UiAction{UiActionType::VoiceEndCall, {}}
+        : UiAction{UiActionType::VoiceStart, "phone"};
   }
   if (camera_touch_active_) {
     camera_touch_active_ = false;
@@ -572,9 +542,7 @@ void Tab5Ui::drawNormal(
 
   canvas_.fillRoundRect(kPetArea.x, kPetArea.y, kPetArea.width, kPetArea.height, 20, kPanel);
   drawPet(snapshot, now_ms);
-  drawQuota(snapshot);
-  drawTokenSummary(snapshot);
-  drawTaskList(snapshot, now_ms);
+  drawConversation(snapshot, connection_detail);
 
   canvas_.fillRoundRect(
       kPreviousPetButton.x, kPreviousPetButton.y,
@@ -586,31 +554,20 @@ void Tab5Ui::drawNormal(
   canvas_.setTextColor(kText, kPanelLight);
   drawChevron(kPreviousPetButton, false);
   drawChevron(kNextPetButton, true);
-  const auto chat_recording = voice_recording_ && voice_mode_ == "chat";
-  const auto command_recording = voice_recording_ && voice_mode_ == "command";
   canvas_.fillRoundRect(
-      kVoiceChatButton.x, kVoiceChatButton.y,
-      kVoiceChatButton.width, kVoiceChatButton.height, 14,
-      chat_recording ? kRed : kPanelLight);
-  canvas_.fillRoundRect(
-      kVoiceCommandButton.x, kVoiceCommandButton.y,
-      kVoiceCommandButton.width, kVoiceCommandButton.height, 14,
-      command_recording ? kRed : kPanelLight);
+      kPhoneCallButton.x, kPhoneCallButton.y,
+      kPhoneCallButton.width, kPhoneCallButton.height, 14,
+      phone_call_active_ ? kRed : kGreen);
   canvas_.fillRoundRect(
       kCameraButton.x, kCameraButton.y,
       kCameraButton.width, kCameraButton.height, 14,
       camera_busy_ ? kOrange : kPanelLight);
   canvas_.setTextSize(1);
-  canvas_.setTextColor(kText, chat_recording ? kRed : kPanelLight);
+  canvas_.setTextColor(kText, phone_call_active_ ? kRed : kGreen);
   canvas_.drawString(
-      chat_recording ? "停止" : "对话",
-      kVoiceChatButton.x + kVoiceChatButton.width / 2,
-      kVoiceChatButton.y + kVoiceChatButton.height / 2);
-  canvas_.setTextColor(kText, command_recording ? kRed : kPanelLight);
-  canvas_.drawString(
-      command_recording ? "停止" : "命令",
-      kVoiceCommandButton.x + kVoiceCommandButton.width / 2,
-      kVoiceCommandButton.y + kVoiceCommandButton.height / 2);
+      phone_call_active_ ? "挂断" : "呼叫",
+      kPhoneCallButton.x + kPhoneCallButton.width / 2,
+      kPhoneCallButton.y + kPhoneCallButton.height / 2);
   canvas_.setTextColor(kText, camera_busy_ ? kOrange : kPanelLight);
   canvas_.drawString(
       camera_busy_ ? "发送中" : "拍照",
@@ -627,11 +584,56 @@ void Tab5Ui::drawNormal(
   canvas_.setTextDatum(top_left);
 }
 
+void Tab5Ui::drawConversation(
+    const Snapshot& snapshot,
+    const String& connection_detail) {
+  canvas_.fillRoundRect(
+      kConversationArea.x,
+      kConversationArea.y,
+      kConversationArea.width,
+      kConversationArea.height,
+      20,
+      kPanel);
+  canvas_.setTextDatum(top_left);
+  canvas_.setTextColor(kText, kPanel);
+  canvas_.setTextSize(2);
+  canvas_.drawString(phone_call_active_ ? "正在通话" : "和斯卡蒂聊聊", 500, 126);
+  canvas_.setTextSize(1);
+  canvas_.setTextColor(kMuted, kPanel);
+  canvas_.drawString(
+      phone_call_active_
+          ? "你说完后，她会自动回答并继续听。"
+          : "点“呼叫”，就像打电话一样慢慢聊。",
+      502,
+      176);
+
+  canvas_.fillRoundRect(500, 224, 716, 232, 16, kPanelLight);
+  String message = connection_detail;
+  if (phone_call_active_ && voice_recording_ && voice_mode_ == "phone") {
+    message = "我在听，你慢慢说。";
+  } else if (phone_call_active_ && message == "正在识别") {
+    message = "听到了，让我想一想。";
+  } else if (!phone_call_active_ && message.isEmpty()) {
+    message = snapshot.bridge_connected ? "斯卡蒂在这里。" : "正在等连接恢复。";
+  }
+  canvas_.setTextColor(kText, kPanelLight);
+  canvas_.setTextSize(2);
+  drawWrapped(message, 536, 270, 644, 4, 42);
+
+  canvas_.setTextSize(1);
+  canvas_.setTextColor(phone_call_active_ ? kGreen : kMuted, kPanel);
+  canvas_.drawString(
+      phone_call_active_ ? "● 一来一回，不用每句都点按钮" : "● 随时可以开始一通新的电话",
+      502,
+      514);
+  canvas_.setTextDatum(top_left);
+}
+
 void Tab5Ui::drawPairing(const String& connection_detail) {
   canvas_.setTextDatum(top_center);
   canvas_.setTextColor(kText, kBackground);
   canvas_.setTextSize(3);
-  canvas_.drawString("Codex Desk 配对", kScreenWidth / 2, 52);
+  canvas_.drawString("斯卡蒂配对", kScreenWidth / 2, 52);
   canvas_.setTextSize(1);
   canvas_.setTextColor(kMuted, kBackground);
   canvas_.drawString("先用 USB-C 数据线连接电脑，在电脑端生成 6 位配对码", kScreenWidth / 2, 118);
@@ -674,9 +676,12 @@ void Tab5Ui::drawPet(const Snapshot& snapshot, const std::uint64_t now_ms) {
   canvas_.setTextSize(1);
   canvas_.setTextDatum(top_left);
   drawTruncated(pet_name, 62, 546, 332);
-  canvas_.setTextColor(stateColor(snapshot.state), kPanel);
+  canvas_.setTextColor(phone_call_active_ ? kGreen : kMuted, kPanel);
   canvas_.setTextDatum(middle_center);
-  canvas_.drawString(stateLabel(snapshot.state), 228, 590);
+  canvas_.drawString(
+      phone_call_active_ ? "通话进行中" : "陪着你",
+      228,
+      590);
   canvas_.setTextDatum(top_left);
 }
 
@@ -849,7 +854,7 @@ void Tab5Ui::drawFallbackPet(const Animation animation, const std::uint8_t frame
       stateColor(animation == Animation::Failed ? PresentationState::Blocked : PresentationState::Ready),
       kPanelLight);
   canvas_.setTextSize(2);
-  canvas_.drawString("CODEX", cx, cy + 143);
+  canvas_.drawString("斯卡蒂", cx, cy + 143);
   canvas_.setTextSize(1);
   canvas_.setTextDatum(top_left);
 }
@@ -899,7 +904,7 @@ void Tab5Ui::drawCompanionCommand(const Companion& companion) {
       4,
       42);
   canvas_.setTextColor(kMuted, kPanel);
-  canvas_.drawString("确认后才会创建 Codex 任务；敏感操作仍需再次审批", 88, 410);
+  canvas_.drawString("确认后才会执行这项请求；敏感操作仍需再次确认", 88, 410);
   canvas_.fillRoundRect(
       kDeclineButton.x, kDeclineButton.y,
       kDeclineButton.width, kDeclineButton.height, 14, kPanelLight);
@@ -928,47 +933,42 @@ void Tab5Ui::drawStatus(
     const String& connection_detail) {
   canvas_.fillRect(0, 0, kScreenWidth, 72, kPanel);
   canvas_.fillCircle(32, 36, 12, snapshot.bridge_connected ? kGreen : kRed);
-  const bool chat_listening = voice_recording_ && voice_mode_ == "chat";
-  const bool command_listening = voice_recording_ && voice_mode_ == "command";
+  const bool phone_listening = voice_recording_ && voice_mode_ == "phone";
   const bool transcribing = !voice_recording_ && connection_detail == "正在识别";
-  const bool chat_thinking =
+  const bool chat_thinking = phone_call_active_ &&
       snapshot.companion.mode == "chat" && snapshot.companion.status == "thinking";
-  const bool chat_completed =
+  const bool chat_completed = phone_call_active_ &&
       snapshot.companion.mode == "chat" && snapshot.companion.status == "completed" &&
       !snapshot.companion.reply.empty();
-  const bool chat_failed =
+  const bool chat_failed = phone_call_active_ &&
       snapshot.companion.mode == "chat" && snapshot.companion.status == "failed";
-  String status_text = stateLabel(snapshot.state);
-  auto status_color = stateColor(snapshot.state);
-  String detail;
-  if (chat_listening) {
-    status_text = "聆听中";
+  String status_text = snapshot.bridge_connected ? "斯卡蒂在线" : "暂时离线";
+  auto status_color = snapshot.bridge_connected ? kGreen : kRed;
+  String detail = snapshot.bridge_connected
+      ? "想说什么都可以。"
+      : "请检查数据线或电脑上的 Bridge。";
+  if (phone_listening) {
+    status_text = "我在听";
     status_color = kGreen;
-    detail = connection_detail;
-  } else if (command_listening) {
-    status_text = "录音中";
-    status_color = kOrange;
-    detail = connection_detail;
+    detail = "慢慢说，不用按住。";
   } else if (transcribing) {
-    status_text = "识别中";
+    status_text = "听到了";
     status_color = kBlue;
-    detail = connection_detail;
+    detail = "让我想一想。";
   } else if (chat_thinking) {
-    status_text = "思考中";
+    status_text = "想一想";
     status_color = kBlue;
-    detail = "正在整理回答";
+    detail = "正在整理回答。";
   } else if (chat_completed) {
-    status_text = "已回复";
+    status_text = "她说";
     status_color = kGreen;
     detail = "她：" + String(snapshot.companion.reply.c_str());
   } else if (chat_failed) {
-    status_text = "对话失败";
+    status_text = "再试一次";
     status_color = kRed;
-    detail = String(snapshot.companion.error.c_str());
-  } else {
-    detail = snapshot.task_title.empty()
-        ? connection_detail
-        : String(snapshot.task_title.c_str());
+    detail = "这次没听清，我们重新说。";
+  } else if (phone_call_active_) {
+    detail = connection_detail.isEmpty() ? "电话还在，随时可以说。" : connection_detail;
   }
   canvas_.setTextColor(status_color, kPanel);
   canvas_.setTextSize(2);

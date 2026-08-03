@@ -21,7 +21,8 @@ bool DeviceVoice::start(
     const std::uint8_t maximum_duration_seconds) {
   if (
       recording_ ||
-      (mode != "chat" && mode != "command" && mode != "care")) {
+      (mode != "chat" && mode != "command" && mode != "care" &&
+       mode != "phone")) {
     return false;
   }
   if (strcmp(client.transportKind(), "usb") != 0 &&
@@ -88,11 +89,19 @@ void DeviceVoice::poll() {
 }
 
 bool DeviceVoice::stop(const VoiceStopReason reason) {
+  return stop(reason, false);
+}
+
+bool DeviceVoice::cancel() {
+  return stop(VoiceStopReason::Manual, true);
+}
+
+bool DeviceVoice::stop(const VoiceStopReason reason, const bool cancel_host) {
   if (!recording_) return false;
   if (chunk_pending_ && M5.Mic.isRecording() == 0) sendCompletedChunk();
   M5.Mic.end();
   M5.Speaker.begin();
-  const auto sent = client_ != nullptr && client_->sendVoiceStop();
+  const auto sent = client_ != nullptr && client_->sendVoiceStop(cancel_host);
   client_ = nullptr;
   recording_ = false;
   chunk_pending_ = false;

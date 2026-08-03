@@ -5,7 +5,8 @@ import { CodexConversation } from "./codex-conversation.js";
 const MAX_PROMPT_LENGTH = 2_000;
 const CHAT_INSTRUCTIONS = [
   "你是住在 Tab5 里的陪伴伙伴，和用户进行自然、平等的中文对话。",
-  "先理解并直接回答用户此刻说的话；回答简短、温和，通常不超过 60 个汉字。",
+  "每一轮只回应用户刚刚说的这句话：先理解，再直接回答，不要把上一轮的主题、命令或系统信息硬接进来。",
+  "回答用自然、温和的口语，通常不超过 36 个汉字；不要复述问题、不要写说明书式的开场。",
   "除非用户主动问到 Codex、项目、代码、设备状态或命令，不要主动提及它们，也不要把聊天变成能力清单、工作状态或操作说明。",
   "当用户问你能做什么时，优先回答你能如何陪伴、倾听和一起想办法；只有被问到时才介绍技术能力。",
   "合适时可以用一个简短的追问把话题接下去；不要连续追问，也不要假装具有人类经历或感受。",
@@ -45,6 +46,7 @@ function publicInteraction(interaction) {
 export class PetAgent {
   #pendingCommand = null;
   #chatThreadId = null;
+  #chatThreadPromise = null;
   #ownsConversation;
 
   constructor({
@@ -90,20 +92,14 @@ export class PetAgent {
       error: null,
     });
     try {
-      this.#chatThreadId ??= await this.#startThread({
-        ephemeral: true,
-        approvalPolicy: "never",
-        sandbox: "read-only",
-        developerInstructions: CHAT_INSTRUCTIONS,
-        serviceName: "codex-desk-pet-chat",
-      });
-      const result = await this.#runTurn(this.#chatThreadId, prompt);
+      const threadId = await this.#ensureChatThread();
+      const result = await this.#runTurn(threadId, prompt);
       this.store.setCompanion({
         status: "completed",
         mode: "chat",
         prompt,
         reply: result.reply,
-        threadId: this.#chatThreadId,
+        threadId,
         turnId: result.turnId,
         error: null,
       });
@@ -117,6 +113,12 @@ export class PetAgent {
       });
       throw error;
     }
+  }
+
+  async warmChat() {
+    if (this.bridge.isMock) return null;
+    this.#requireConnected();
+    return this.#ensureChatThread();
   }
 
   async observeImage(imagePath, text = "请简洁说说你看到了什么。") {
@@ -264,6 +266,27 @@ export class PetAgent {
 
   #requireConnected() {
     this.conversation.requireConnected();
+  }
+
+  async #ensureChatThread() {
+    if (this.#chatThreadId) return this.#chatThreadId;
+    if (!this.#chatThreadPromise) {
+      const pending = this.#startThread({
+        ephemeral: true,
+        approvalPolicy: "never",
+        sandbox: "read-only",
+        developerInstructions: CHAT_INSTRUCTIONS,
+        serviceName: "codex-desk-pet-chat",
+      }).then((threadId) => {
+        this.#chatThreadId = threadId;
+        return threadId;
+      });
+      this.#chatThreadPromise = pending;
+      void pending.catch(() => {
+        if (this.#chatThreadPromise === pending) this.#chatThreadPromise = null;
+      });
+    }
+    return this.#chatThreadPromise;
   }
 
   async #startThread({

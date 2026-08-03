@@ -420,7 +420,9 @@ bool DeviceProtocolClient::sendCompanionDecision(
 }
 
 bool DeviceProtocolClient::sendVoiceStart(const String& mode) {
-  if (mode != "chat" && mode != "command" && mode != "care") return false;
+  if (
+      mode != "chat" && mode != "command" && mode != "care" &&
+      mode != "phone") return false;
   return sendCommand(
       "voice.start",
       [&mode](JsonObject payload) { payload["mode"] = mode; });
@@ -463,8 +465,12 @@ bool DeviceProtocolClient::sendVoiceAudio(
       });
 }
 
-bool DeviceProtocolClient::sendVoiceStop() {
-  return sendCommand("voice.stop", [](JsonObject) {});
+bool DeviceProtocolClient::sendVoiceStop(const bool cancel) {
+  return sendCommand(
+      "voice.stop",
+      [cancel](JsonObject payload) {
+        if (cancel) payload["cancel"] = true;
+      });
 }
 
 bool DeviceProtocolClient::sendVisionBegin(

@@ -68,7 +68,7 @@ class DeviceProtocolClient {
       const std::uint8_t* pcm,
       std::size_t byte_count,
       std::uint16_t samples_per_channel);
-  bool sendVoiceStop();
+  bool sendVoiceStop(bool cancel = false);
   bool sendVisionBegin(
       const String& capture_id,
       std::size_t total_bytes,

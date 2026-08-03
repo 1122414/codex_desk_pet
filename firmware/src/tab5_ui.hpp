@@ -20,6 +20,7 @@ enum class UiActionType : std::uint8_t {
   DeclineApproval,
   VoiceStart,
   VoiceStop,
+  VoiceEndCall,
   CameraCapture,
   SubmitPairingCode,
 };
@@ -41,6 +42,7 @@ class Tab5Ui {
       std::uint8_t transfer_progress);
   bool approvalCanAccept(const Approval& approval) const;
   void setVoiceRecording(bool recording, const String& mode = "");
+  void setPhoneCallActive(bool active);
   void setCameraBusy(bool busy);
   void suspendBundledStorageForCamera();
   bool resumeBundledStorageAfterCamera();
@@ -62,6 +64,9 @@ class Tab5Ui {
   void drawFallbackPet(Animation animation, std::uint8_t frame);
   void drawApproval(const Approval& approval);
   void drawCompanionCommand(const Companion& companion);
+  void drawConversation(
+      const Snapshot& snapshot,
+      const String& connection_detail);
   void drawStatus(
       const Snapshot& snapshot,
       std::uint64_t now_ms,
@@ -90,9 +95,9 @@ class Tab5Ui {
   static constexpr Rect kPetSpriteArea{36, 108, 384, 416};
   static constexpr Rect kPreviousPetButton{44, 636, 64, 44};
   static constexpr Rect kNextPetButton{348, 636, 64, 44};
-  static constexpr Rect kVoiceChatButton{116, 626, 72, 56};
-  static constexpr Rect kVoiceCommandButton{194, 626, 72, 56};
-  static constexpr Rect kCameraButton{272, 626, 72, 56};
+  static constexpr Rect kPhoneCallButton{112, 626, 132, 56};
+  static constexpr Rect kCameraButton{254, 626, 96, 56};
+  static constexpr Rect kConversationArea{464, 88, 792, 594};
   static constexpr Rect kTaskListArea{464, 288, 758, 390};
   static constexpr Rect kDeclineButton{540, 554, 292, 104};
   static constexpr Rect kAcceptButton{864, 554, 356, 104};
@@ -123,6 +128,7 @@ class Tab5Ui {
   bool camera_touch_active_ = false;
   bool voice_recording_ = false;
   String voice_mode_;
+  bool phone_call_active_ = false;
   bool camera_busy_ = false;
   std::int16_t task_touch_start_y_ = 0;
   std::int16_t task_scroll_start_pixels_ = 0;

@@ -118,8 +118,26 @@ test("protocol rejects malformed command payloads before they reach the Bridge",
       mode: "care",
     },
   }));
-  assert.throws(() => createEnvelope({
+  assert.doesNotThrow(() => createEnvelope({
     sequence: 7,
+    type: "command",
+    payload: {
+      command: "voice.start",
+      commandId: "command-voice-phone-0004",
+      mode: "phone",
+    },
+  }));
+  assert.doesNotThrow(() => createEnvelope({
+    sequence: 8,
+    type: "command",
+    payload: {
+      command: "voice.stop",
+      commandId: "command-voice-cancel-0005",
+      cancel: true,
+    },
+  }));
+  assert.throws(() => createEnvelope({
+    sequence: 9,
     type: "command",
     payload: {
       command: "camera.capture",
@@ -128,7 +146,7 @@ test("protocol rejects malformed command payloads before they reach the Bridge",
     },
   }), /camera capture reason/);
   assert.doesNotThrow(() => createEnvelope({
-    sequence: 8,
+    sequence: 10,
     type: "command",
     payload: {
       command: "camera.capture",
@@ -137,7 +155,7 @@ test("protocol rejects malformed command payloads before they reach the Bridge",
     },
   }));
   assert.doesNotThrow(() => createEnvelope({
-    sequence: 9,
+    sequence: 11,
     type: "command",
     payload: {
       command: "device.brightness.set",
@@ -146,7 +164,7 @@ test("protocol rejects malformed command payloads before they reach the Bridge",
     },
   }));
   assert.throws(() => createEnvelope({
-    sequence: 10,
+    sequence: 12,
     type: "command",
     payload: {
       command: "device.volume.set",

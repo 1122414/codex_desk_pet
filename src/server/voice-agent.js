@@ -60,7 +60,7 @@ export class VoiceAgent {
     if (!["usb", "wifi"].includes(session.transport?.kind)) {
       throw new Error("语音对话首版需要 USB 或 Wi-Fi 链路");
     }
-    if (!["chat", "command", "care"].includes(mode)) throw new Error("语音模式无效");
+    if (!["chat", "command", "care", "phone"].includes(mode)) throw new Error("语音模式无效");
     if (mode === "care" && !this.careAgent) throw new Error("主动关怀语音服务不可用");
     if (!await this.transcriber.available()) throw new Error("本地中文转写模型未准备好");
     this.#cancel(this.#sessions.get(session.deviceId));
@@ -86,6 +86,9 @@ export class VoiceAgent {
     });
     if (mode === "care") this.store.setCare({ status: "listening", error: null });
     this.#armListeningTimeout(entry);
+    if (mode === "phone" && typeof this.petAgent.warmChat === "function") {
+      void this.petAgent.warmChat().catch(() => {});
+    }
     return { accepted: true, mode };
   }
 
@@ -132,6 +135,21 @@ export class VoiceAgent {
     this.#sessions.clear();
   }
 
+  async cancel(deviceId) {
+    const entry = this.#sessions.get(deviceId);
+    if (!entry) return { accepted: false };
+    this.#cancel(entry);
+    this.store.setVoice({
+      status: "idle",
+      mode: null,
+      transcript: null,
+      error: null,
+      deviceId: null,
+    });
+    if (entry.mode === "care") this.store.setCare({ status: "idle", error: null });
+    return { accepted: true };
+  }
+
   async stopCareConversation() {
     const entries = [...this.#sessions.values()]
       .filter((entry) => entry.mode === "care");
@@ -173,7 +191,8 @@ export class VoiceAgent {
       ? String(await this.transcriber.transcribe(audio, { signal: entry.abortController.signal })).trim()
       : "";
     if (!this.#active(entry)) return;
-    this.#sessions.delete(entry.deviceId);
+    const phoneMode = entry.mode === "phone";
+    if (!phoneMode) this.#sessions.delete(entry.deviceId);
     if (!transcript) {
       if (entry.mode === "care") {
         this.store.setVoice({
@@ -191,6 +210,22 @@ export class VoiceAgent {
           autoListenSeconds: await this.#autoListenSeconds(),
         });
         this.store.setCare({ status: "idle", error: null });
+        return;
+      }
+      if (phoneMode) {
+        this.#sessions.delete(entry.deviceId);
+        this.store.setVoice({
+          status: "completed",
+          transcript: null,
+          error: null,
+        });
+        entry.session.sendEvent({
+          event: "voice.reply",
+          ok: true,
+          text: "这次没听清，我们下次再聊。",
+          continueListening: false,
+          autoListenSeconds: await this.#autoListenSeconds(),
+        });
         return;
       }
       this.store.setVoice({
@@ -236,11 +271,17 @@ export class VoiceAgent {
       return;
     }
     const result = await this.petAgent.chat(transcript);
+    if (phoneMode && !this.#active(entry)) return;
     this.store.setVoice({ status: "completed" });
+    if (phoneMode) this.#sessions.delete(entry.deviceId);
     entry.session.sendEvent({
       event: "voice.reply",
       ok: true,
       text: this.#boundedDeviceText(result.reply),
+      ...(phoneMode ? {
+        continueListening: true,
+        autoListenSeconds: await this.#autoListenSeconds(),
+      } : {}),
     });
   }
 
@@ -283,6 +324,10 @@ export class VoiceAgent {
           event: "voice.reply",
           ok: false,
           text: this.#boundedDeviceText(error.message),
+          ...(entry.mode === "phone" ? {
+            continueListening: false,
+            autoListenSeconds: DEFAULT_AUTO_LISTEN_SECONDS,
+          } : {}),
         });
       }
     } catch {

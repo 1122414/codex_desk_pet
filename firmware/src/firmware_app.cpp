@@ -111,7 +111,7 @@ void FirmwareApp::setup() {
   configureProtocol(usb_client_);
   configureProtocol(wifi_client_);
   configureProtocol(ble_client_);
-  connection_detail_ = paired() ? "等待电脑 Bridge" : "请通过USB连接电脑并输入配对码";
+  connection_detail_ = paired() ? "斯卡蒂在这里" : "请通过 USB 连接电脑并输入配对码";
 }
 
 bool FirmwareApp::captureWithReleasedStorage(
@@ -152,6 +152,7 @@ void FirmwareApp::loop() {
   ble_client_.poll(now_ms);
   const auto voice_was_recording = voice_.recording();
   const auto voice_was_care = voice_.mode() == "care";
+  const auto voice_was_phone = voice_.mode() == "phone";
   voice_.poll();
   if (voice_was_recording && !voice_.recording()) {
     audio_.setPaused(false);
@@ -159,10 +160,10 @@ void FirmwareApp::loop() {
     switch (voice_.lastStopReason()) {
       case VoiceStopReason::SpeechComplete:
       case VoiceStopReason::Manual:
-        connection_detail_ = "正在识别";
+        connection_detail_ = voice_was_phone ? "听到了，让我想一想。" : "正在识别";
         break;
       case VoiceStopReason::NoSpeechTimeout:
-        connection_detail_ = "已结束聆听";
+        connection_detail_ = voice_was_phone ? "没有听清，再说一次。" : "已结束聆听";
         break;
       case VoiceStopReason::LinkError:
         connection_detail_ = "语音链路中断";
@@ -176,6 +177,7 @@ void FirmwareApp::loop() {
     }
   }
   startPendingCareListening();
+  startPendingPhoneListening();
   if (
       care_animation_override_ &&
       care_animation_ == Animation::Waving &&
@@ -226,8 +228,10 @@ void FirmwareApp::configureProtocol(DeviceProtocolClient& client) {
         handleProtocolEvent(client, type, payload);
       });
   client.setStateHandler(
-      [this](const bool connected, const String& detail) {
-        if (connected || primaryClient() == nullptr) connection_detail_ = detail;
+      [this](const bool connected, const String&) {
+        if (connected || primaryClient() == nullptr) {
+          connection_detail_ = connected ? "斯卡蒂在这里" : "正在尝试连接。";
+        }
       });
   client.setCommandHandler(
       [this, &client](
@@ -380,11 +384,6 @@ void FirmwareApp::handleSnapshot(const Snapshot& snapshot) {
   if (!model_.applySnapshot(display_snapshot)) return;
   requested_pet_ = "";
   pet_request_not_before_ = millis() + kPetRequestSettlingMs;
-  if (!have_cued_state_ || snapshot.state != last_cued_state_) {
-    last_cued_state_ = snapshot.state;
-    have_cued_state_ = true;
-    audio_.enqueue(audioCueForState(snapshot.state));
-  }
 }
 
 void FirmwareApp::handleProtocolEvent(
@@ -417,10 +416,24 @@ void FirmwareApp::handleProtocolEvent(
     connection_detail_ = String("Pet同步失败: ") + (payload["error"] | "unknown");
   } else if (event == "voice.reply") {
     const String reply = payload["text"] | "没有听清，请再说一次";
+    const auto ok = payload["ok"] | false;
+    const auto continue_listening = payload["continueListening"] | false;
+    const auto requested_seconds = payload["autoListenSeconds"] | 20;
     connection_detail_ = reply;
-    if (payload["ok"] | false) audio_.enqueuePhrase(reply);
+    if (ok && !reply.isEmpty()) audio_.enqueuePhrase(reply);
+    if (phone_call_active_ && continue_listening && ok) {
+      pending_phone_listen_ = true;
+      pending_phone_client_ = &client;
+      pending_phone_listen_seconds_ = static_cast<std::uint8_t>(
+          std::clamp(requested_seconds, 5, 60));
+    } else if (phone_call_active_ && (!ok || !continue_listening)) {
+      pending_phone_listen_ = false;
+      pending_phone_client_ = nullptr;
+      phone_call_active_ = false;
+      ui_.setPhoneCallActive(false);
+    }
   } else if (event == "voice.command.queued") {
-    connection_detail_ = "语音命令等待确认";
+    connection_detail_ = "收到一条需要确认的请求。";
   } else if (event == "care.reply") {
     pending_care_listen_ = false;
     pending_care_client_ = nullptr;
@@ -475,6 +488,7 @@ void FirmwareApp::handleProtocolEvent(
 void FirmwareApp::startPendingCareListening() {
   if (
       !pending_care_listen_ ||
+      phone_call_active_ ||
       audio_.busy() ||
       voice_.recording() ||
       camera_.uploading() ||
@@ -506,6 +520,63 @@ void FirmwareApp::startPendingCareListening() {
   }
   audio_.setPaused(false);
   connection_detail_ = "麦克风启动失败";
+}
+
+void FirmwareApp::startPendingPhoneListening() {
+  if (
+      !phone_call_active_ ||
+      !pending_phone_listen_ ||
+      audio_.busy() ||
+      voice_.recording() ||
+      camera_.uploading() ||
+      pet_store_.transferActive()) {
+    return;
+  }
+  auto* client = pending_phone_client_;
+  pending_phone_listen_ = false;
+  pending_phone_client_ = nullptr;
+  if (
+      client == nullptr ||
+      !client->ready() ||
+      (strcmp(client->transportKind(), "usb") != 0 &&
+       strcmp(client->transportKind(), "wifi") != 0)) {
+    phone_call_active_ = false;
+    ui_.setPhoneCallActive(false);
+    connection_detail_ = "通话连接已断开。";
+    return;
+  }
+  audio_.setPaused(true);
+  if (voice_.start(
+          *client,
+          "phone",
+          true,
+          pending_phone_listen_seconds_)) {
+    ui_.setVoiceRecording(true, "phone");
+    connection_detail_ = "我在听，你慢慢说。";
+    return;
+  }
+  audio_.setPaused(false);
+  phone_call_active_ = false;
+  ui_.setPhoneCallActive(false);
+  connection_detail_ = "麦克风启动失败。";
+}
+
+void FirmwareApp::endPhoneCall() {
+  pending_phone_listen_ = false;
+  pending_phone_client_ = nullptr;
+  if (voice_.recording() && voice_.mode() == "phone") {
+    voice_.cancel();
+  } else {
+    auto* client = primaryClient();
+    if (client != nullptr) client->sendVoiceStop(true);
+  }
+  audio_.cancel();
+  audio_.setPaused(false);
+  ui_.setVoiceRecording(false);
+  phone_call_active_ = false;
+  ui_.setPhoneCallActive(false);
+  care_animation_override_ = false;
+  connection_detail_ = "通话已结束。";
 }
 
 void FirmwareApp::handleUiAction(const UiAction& action) {
@@ -542,6 +613,8 @@ void FirmwareApp::handleUiAction(const UiAction& action) {
     case UiActionType::VoiceStart:
       pending_care_listen_ = false;
       pending_care_client_ = nullptr;
+      pending_phone_listen_ = false;
+      pending_phone_client_ = nullptr;
       if (client == nullptr) {
         connection_detail_ = "语音需要连接电脑";
       } else if (camera_.uploading()) {
@@ -551,28 +624,43 @@ void FirmwareApp::handleUiAction(const UiAction& action) {
         connection_detail_ = "语音需要 USB 或 Wi-Fi";
       } else {
         audio_.setPaused(true);
-        if (voice_.start(*client, action.value, false, 60)) {
+        const auto phone_mode = action.value == "phone";
+        if (voice_.start(
+                *client,
+                action.value,
+                phone_mode,
+                phone_mode ? 20 : 60)) {
           ui_.setVoiceRecording(true, action.value);
-          connection_detail_ =
-              action.value == "command" ? "正在听取命令" : "正在听";
+          phone_call_active_ = phone_mode;
+          ui_.setPhoneCallActive(phone_call_active_);
+          connection_detail_ = phone_mode ? "我在听，你慢慢说。" : "正在听";
         } else {
           audio_.setPaused(false);
+          phone_call_active_ = false;
+          ui_.setPhoneCallActive(false);
           connection_detail_ = "麦克风启动失败";
         }
       }
       break;
     case UiActionType::VoiceStop:
+      if (voice_.mode() == "phone") {
+        endPhoneCall();
+        break;
+      }
       if (voice_.stop()) {
         connection_detail_ = "正在识别";
       }
       audio_.setPaused(false);
       ui_.setVoiceRecording(false);
       break;
+    case UiActionType::VoiceEndCall:
+      endPhoneCall();
+      break;
     case UiActionType::CameraCapture:
       if (client == nullptr) {
         connection_detail_ = "拍照需要连接电脑";
-      } else if (voice_.recording()) {
-        connection_detail_ = "请先结束语音";
+      } else if (voice_.recording() || phone_call_active_) {
+        connection_detail_ = "请先挂断通话。";
       } else if (camera_.uploading()) {
         connection_detail_ = "照片仍在发送";
       } else {
@@ -691,7 +779,10 @@ void FirmwareApp::applyPairingSecret(
 }
 
 void FirmwareApp::updateConnectionState() {
-  if (primaryClient() == nullptr) model_.markOffline();
+  if (primaryClient() == nullptr) {
+    model_.markOffline();
+    if (phone_call_active_) endPhoneCall();
+  }
 }
 
 DeviceProtocolClient* FirmwareApp::primaryClient() {
