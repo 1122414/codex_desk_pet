@@ -1,6 +1,18 @@
 #include "device_voice.hpp"
 
+#include <algorithm>
+
 namespace codex::firmware {
+namespace {
+
+bool elapsed(
+    const std::uint32_t now_ms,
+    const std::uint32_t since_ms,
+    const std::uint32_t duration_ms) {
+  return static_cast<std::uint32_t>(now_ms - since_ms) >= duration_ms;
+}
+
+}  // namespace
 
 bool DeviceVoice::start(
     DeviceProtocolClient& client,
@@ -31,9 +43,14 @@ bool DeviceVoice::start(
   chunk_pending_ = false;
   automatic_stop_ = automatic_stop;
   last_stop_reason_ = VoiceStopReason::None;
+  recording_started_at_ms_ = static_cast<std::uint32_t>(millis());
+  maximum_duration_ms_ = std::clamp<std::uint32_t>(
+      static_cast<std::uint32_t>(maximum_duration_seconds) * 1'000U,
+      5'000,
+      60'000);
   activity_.begin(
-      millis(),
-      static_cast<std::uint32_t>(maximum_duration_seconds) * 1'000U);
+      recording_started_at_ms_,
+      maximum_duration_ms_);
   if (!beginChunk()) {
     stop(VoiceStopReason::LinkError);
     return false;
@@ -42,9 +59,25 @@ bool DeviceVoice::start(
 }
 
 void DeviceVoice::poll() {
-  if (!recording_ || !chunk_pending_ || M5.Mic.isRecording() != 0) return;
+  if (!recording_) return;
+  const auto now_ms = static_cast<std::uint32_t>(millis());
+  if (
+      automatic_stop_ &&
+      elapsed(now_ms, recording_started_at_ms_, maximum_duration_ms_)) {
+    stop(activity_.heardSpeech()
+        ? VoiceStopReason::SpeechComplete
+        : VoiceStopReason::NoSpeechTimeout);
+    return;
+  }
+  if (!chunk_pending_) return;
+  if (M5.Mic.isRecording() != 0) {
+    if (elapsed(now_ms, chunk_started_at_ms_, kChunkTimeoutMs)) {
+      stop(VoiceStopReason::LinkError);
+    }
+    return;
+  }
   const auto activity_result = automatic_stop_
-      ? activity_.observe(samples_.data(), samples_.size(), millis())
+      ? activity_.observe(samples_.data(), samples_.size(), now_ms)
       : VoiceActivityResult::Listening;
   if (!sendCompletedChunk()) {
     stop(VoiceStopReason::LinkError);
@@ -69,6 +102,8 @@ bool DeviceVoice::stop(const VoiceStopReason reason) {
   recording_ = false;
   chunk_pending_ = false;
   automatic_stop_ = false;
+  recording_started_at_ms_ = 0;
+  chunk_started_at_ms_ = 0;
   last_stop_reason_ = reason;
   return sent;
 }
@@ -79,6 +114,7 @@ bool DeviceVoice::beginChunk() {
       samples_.size(),
       kSampleRate,
       false);
+  if (chunk_pending_) chunk_started_at_ms_ = static_cast<std::uint32_t>(millis());
   return chunk_pending_;
 }
 

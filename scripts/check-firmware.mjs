@@ -131,6 +131,17 @@ try {
   ) {
     throw new Error("Tab5 手动语音必须启用自动收音结束，不能要求用户长按");
   }
+  const deviceVoice = await readFile(
+    path.join(root, "firmware", "src", "device_voice.cpp"),
+    "utf8",
+  );
+  if (
+    !deviceVoice.includes("kChunkTimeoutMs") ||
+    !deviceVoice.includes("elapsed(now_ms, recording_started_at_ms_, maximum_duration_ms_)") ||
+    !deviceVoice.includes("elapsed(now_ms, chunk_started_at_ms_, kChunkTimeoutMs)")
+  ) {
+    throw new Error("Tab5 语音必须在录音分块卡住时自行结束，不能无限保持聆听状态");
+  }
   const ledcClockSourceIndex = firmwareApp.indexOf(
     "ledcSetClockSource(LEDC_USE_PLL_DIV_CLK);",
   );
