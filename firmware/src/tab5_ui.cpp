@@ -33,6 +33,7 @@ constexpr std::int16_t kRegionBufferWidth = 808;
 constexpr std::uint64_t kTaskScrollFrameIntervalMs = 33;
 constexpr std::uint16_t kBundledPetWidth = 192;
 constexpr std::uint16_t kBundledPetHeight = 208;
+constexpr std::uint8_t kDefaultSpeakerVolume = 204;
 constexpr std::size_t kBundledPetPixels =
     static_cast<std::size_t>(kBundledPetWidth) * kBundledPetHeight;
 
@@ -221,7 +222,7 @@ bool Tab5Ui::begin(
     region_pixels_ = static_cast<std::uint16_t*>(malloc(region_bytes));
   }
   M5.Display.setBrightness(128);
-  M5.Speaker.setVolume(48);
+  M5.Speaker.setVolume(kDefaultSpeakerVolume);
   bundled_pet_ready_ = SPIFFS.begin(false);
   return frame_pixels_ != nullptr && region_pixels_ != nullptr;
 }
