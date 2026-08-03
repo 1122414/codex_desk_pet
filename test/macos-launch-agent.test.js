@@ -25,6 +25,17 @@ test("macOS LaunchAgent pins absolute executables and device transports", () => 
   assert.match(plist, /<key>KeepAlive<\/key>\n    <true\/>/);
 });
 
+test("macOS LaunchAgent can run a USB-only bridge", () => {
+  const plist = buildMacosLaunchAgent({
+    nodePath: "/opt/node/bin/node",
+    codexPath: "/opt/codex/bin/codex",
+    projectDirectory: "/Users/test/Codex Desk",
+    logDirectory: "/Users/test/Library/Logs/CodexDeskBuddy",
+    bleEnabled: "0",
+  });
+  assert.match(plist, /<key>CODEX_DESK_BLE<\/key>\n    <string>0<\/string>/);
+});
+
 test("macOS LaunchAgent installation is atomic and idempotently reloads the service", async () => {
   const homeDirectory = await mkdtemp(join(tmpdir(), "codex-desk-launch-agent-"));
   const calls = [];

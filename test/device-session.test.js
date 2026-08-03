@@ -229,6 +229,33 @@ test("a transport error closes the session so its host can reconnect", async (t)
   assert.equal(transports.left.open, false);
 });
 
+test("a failed heartbeat write closes the session without throwing from tick", async (t) => {
+  const { bridge, device, transports, clock } = createSessions();
+  t.after(() => {
+    bridge.close();
+    device.close();
+  });
+  let sessionError = null;
+  bridge.on("sessionError", (error) => { sessionError = error; });
+  bridge.start({ autoTick: false });
+  device.start({ autoTick: false });
+  await waitFor(() =>
+    bridge.ready &&
+    device.ready &&
+    bridge.pendingAcknowledgements === 0 &&
+    device.pendingAcknowledgements === 0,
+  );
+
+  transports.left.send = () => {
+    throw new Error("BLE helper unavailable");
+  };
+  clock.value += 6_000;
+
+  assert.doesNotThrow(() => bridge.tick(clock.value));
+  await waitFor(() => bridge.state === "closed" && device.state === "closed");
+  assert.match(sessionError.message, /BLE helper unavailable/);
+});
+
 test("pet resources transfer in chunks and install on the device cache", async (t) => {
   const { bridge, device } = createSessions();
   t.after(() => {

@@ -118,6 +118,7 @@ export class DeviceSession extends EventEmitter {
     this.#commandDeduplicator = new CommandDeduplicator(512);
     this.onTransportMessage = (message) => {
       this.#receive(message).catch((error) => {
+        if (!this.#started) return;
         this.emit("sessionError", error);
         if (["DECRYPTION_FAILED", "ENCRYPTION_REQUIRED"].includes(error?.code)) {
           this.emit("authenticationFailed", {
@@ -129,10 +130,7 @@ export class DeviceSession extends EventEmitter {
       });
     };
     this.onTransportClose = () => this.#handleClose();
-    this.onTransportError = (error) => {
-      this.emit("sessionError", error);
-      this.close();
-    };
+    this.onTransportError = (error) => this.#handleTransportFailure(error);
   }
 
   get ready() {
@@ -184,7 +182,12 @@ export class DeviceSession extends EventEmitter {
     if (!this.#started || ["closed", "rejected"].includes(this.state)) return;
     const { retry, failed } = this.#outbox.poll(now);
     for (const envelope of retry) {
-      this.transport.send(envelope);
+      try {
+        this.transport.send(envelope);
+      } catch (error) {
+        this.#handleTransportFailure(error);
+        return;
+      }
       this.lastSentAt = now;
       this.emit("retry", envelope);
     }
@@ -212,7 +215,11 @@ export class DeviceSession extends EventEmitter {
       return;
     }
     if (this.ready && now - this.lastSentAt >= this.heartbeatIntervalMs) {
-      this.#send("heartbeat", { lastReceivedSequence: this.#receiveWindow.lastAccepted }, false);
+      try {
+        this.#send("heartbeat", { lastReceivedSequence: this.#receiveWindow.lastAccepted }, false);
+      } catch (error) {
+        this.#handleTransportFailure(error);
+      }
     }
   }
 
@@ -279,9 +286,15 @@ export class DeviceSession extends EventEmitter {
     this.transport.off("message", this.onTransportMessage);
     this.transport.off("close", this.onTransportClose);
     this.transport.off("error", this.onTransportError);
-    this.transport.close?.();
+    let closeError = null;
+    try {
+      this.transport.close?.();
+    } catch (error) {
+      closeError = error;
+    }
     this.state = "closed";
     this.emit("closed");
+    if (closeError) this.emit("sessionError", closeError);
   }
 
   #send(type, payload, reliable = RELIABLE_MESSAGE_TYPES.includes(type)) {
@@ -321,7 +334,12 @@ export class DeviceSession extends EventEmitter {
     const envelope = this.ready && !HANDSHAKE_TYPES.has(type)
       ? encryptEnvelopePayload(plaintextEnvelope, this.#encryptionContext("outgoing"))
       : plaintextEnvelope;
-    this.transport.send(envelope);
+    try {
+      this.transport.send(envelope);
+    } catch (error) {
+      this.#handleTransportFailure(error);
+      throw error;
+    }
     this.lastSentAt = this.now();
     if (reliable) this.#outbox.track(envelope, this.lastSentAt);
     return envelope;
@@ -653,6 +671,12 @@ export class DeviceSession extends EventEmitter {
     this.transport.off("error", this.onTransportError);
     this.state = "closed";
     this.emit("closed");
+  }
+
+  #handleTransportFailure(error) {
+    if (!this.#started) return;
+    this.emit("sessionError", error);
+    this.close();
   }
 
   #sendHello() {

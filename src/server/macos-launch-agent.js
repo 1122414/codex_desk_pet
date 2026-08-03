@@ -51,6 +51,7 @@ export function buildMacosLaunchAgent({
   logDirectory,
   homeDirectory = homedir(),
   path = servicePath(nodePath, codexPath),
+  bleEnabled = "1",
   label = MACOS_LAUNCH_AGENT_LABEL,
 } = {}) {
   for (const [name, value] of Object.entries({
@@ -62,6 +63,9 @@ export function buildMacosLaunchAgent({
     if (typeof value !== "string" || !value.startsWith("/")) {
       throw new TypeError(`${name} must be an absolute path`);
     }
+  }
+  if (!["0", "1"].includes(bleEnabled)) {
+    throw new TypeError("bleEnabled must be 0 or 1");
   }
   const bridgeEntry = resolve(projectDirectory, "src/server/index.js");
   const stdoutPath = join(logDirectory, "bridge.log");
@@ -82,7 +86,7 @@ export function buildMacosLaunchAgent({
     "    <dict>",
     stringEntry("CODEX_DESK_CODEX_COMMAND", codexPath),
     stringEntry("CODEX_DESK_USB_AUTO", "1"),
-    stringEntry("CODEX_DESK_BLE", "1"),
+    stringEntry("CODEX_DESK_BLE", bleEnabled),
     stringEntry("CODEX_DESK_DEVICE_HOST", "0.0.0.0"),
     stringEntry("HOME", homeDirectory),
     stringEntry("NODE_ENV", "production"),
@@ -221,6 +225,7 @@ export async function installMacosLaunchAgent({
   launchctl = spawnSync,
   start = true,
   copyApplicationRuntime = true,
+  bleEnabled = process.env.CODEX_DESK_BLE ?? "1",
   platform = process.platform,
 } = {}) {
   if (platform !== "darwin") {
@@ -253,6 +258,7 @@ export async function installMacosLaunchAgent({
     logDirectory,
     homeDirectory,
     path: path ?? servicePath(resolve(nodePath), resolvedCodex),
+    bleEnabled,
   });
   await writePrivateFile(plistPath, plist);
   if (start) {
