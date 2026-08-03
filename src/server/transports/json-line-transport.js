@@ -19,7 +19,10 @@ export class JsonLineTransport extends EventEmitter {
     this.maxBufferBytes = TRANSPORT_PROFILES[kind].maxEnvelopeBytes * 2;
     this.onData = (chunk) => this.#onData(chunk);
     this.onEnd = () => this.close();
-    this.onStreamError = (error) => this.emit("error", error);
+    this.onStreamError = (error) => this.#fail(error);
+    // A USB device can emit stale boot or partial-frame bytes before a session
+    // attaches its own error listener. Keep those bytes from terminating Node.
+    this.on("error", () => {});
     readable.on("data", this.onData);
     readable.on("end", this.onEnd);
     readable.on("close", this.onEnd);
@@ -58,7 +61,7 @@ export class JsonLineTransport extends EventEmitter {
     this.#buffer += this.#decoder.write(Buffer.from(chunk));
     if (Buffer.byteLength(this.#buffer) > this.maxBufferBytes) {
       this.#buffer = "";
-      this.emit("error", new Error(`${this.kind} transport receive buffer exceeded its limit`));
+      this.#fail(new Error(`${this.kind} transport receive buffer exceeded its limit`));
       return;
     }
     const lines = this.#buffer.split("\n");
@@ -71,8 +74,16 @@ export class JsonLineTransport extends EventEmitter {
         const bytes = Buffer.from(line, "utf8");
         error.message +=
           ` (${bytes.length} bytes, prefix ${bytes.subarray(0, 24).toString("hex")})`;
-        this.emit("error", error);
+        this.#fail(error);
+        return;
       }
     }
+  }
+
+  #fail(error) {
+    if (this.#closed) return;
+    this.emit("diagnostic", error.message);
+    this.emit("error", error);
+    this.close();
   }
 }

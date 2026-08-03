@@ -61,6 +61,7 @@ export class UsbCdcTransport extends JsonLineTransport {
       // Drain it before the wake byte asks firmware to restart its handshake.
       await new Promise((resolve) => setTimeout(resolve, USB_STARTUP_DRAIN_MS));
       await handle.write("\n");
+      if (!transport.open) throw new Error("USB CDC transport closed during startup");
       return transport;
     } catch (error) {
       transport.close();

@@ -210,6 +210,25 @@ test("a remote sequence gap closes the bridge transport for a clean reconnect", 
   assert.equal(transports.right.open, false);
 });
 
+test("a transport error closes the session so its host can reconnect", async (t) => {
+  const { bridge, device, transports } = createSessions();
+  t.after(() => {
+    bridge.close();
+    device.close();
+  });
+  let sessionError = null;
+  bridge.on("sessionError", (error) => { sessionError = error; });
+  bridge.start({ autoTick: false });
+  device.start({ autoTick: false });
+  await waitFor(() => bridge.ready && device.ready);
+
+  transports.left.emit("error", new Error("corrupt USB frame"));
+
+  await waitFor(() => bridge.state === "closed" && device.state === "closed");
+  assert.match(sessionError.message, /corrupt USB frame/);
+  assert.equal(transports.left.open, false);
+});
+
 test("pet resources transfer in chunks and install on the device cache", async (t) => {
   const { bridge, device } = createSessions();
   t.after(() => {

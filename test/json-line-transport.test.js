@@ -53,3 +53,22 @@ test("JSON-line transport preserves Chinese text split inside a UTF-8 character"
   readable.write(data.subarray(splitAt));
   assert.deepEqual(await received, message);
 });
+
+test("JSON-line transport closes safely on a malformed USB line before a session attaches", async (t) => {
+  const readable = new PassThrough();
+  const writable = new PassThrough();
+  const transport = new JsonLineTransport({ readable, writable, kind: "usb" });
+  const diagnostics = [];
+  transport.on("diagnostic", (message) => diagnostics.push(message));
+  t.after(() => {
+    transport.close();
+    readable.destroy();
+    writable.destroy();
+  });
+
+  readable.write("not-json\n");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(transport.open, false);
+  assert.match(diagnostics.at(-1), /Serialized message is not valid JSON/);
+});

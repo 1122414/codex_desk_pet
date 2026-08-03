@@ -129,7 +129,10 @@ export class DeviceSession extends EventEmitter {
       });
     };
     this.onTransportClose = () => this.#handleClose();
-    this.onTransportError = (error) => this.emit("sessionError", error);
+    this.onTransportError = (error) => {
+      this.emit("sessionError", error);
+      this.close();
+    };
   }
 
   get ready() {

@@ -88,3 +88,22 @@ test("JSON-RPC client consumes App Server stdin errors", async () => {
   assert.match(diagnostics.at(-1), /Codex App Server input failed: broken pipe/);
   await client.stop();
 });
+
+test("JSON-RPC client consumes stdin errors emitted before spawn settles", async () => {
+  let child;
+  const client = new JsonRpcClient({
+    spawnProcess: () => {
+      child = new FakeChild();
+      queueMicrotask(() => {
+        child.stdin.emit("error", Object.assign(new Error("early broken pipe"), { code: "EPIPE" }));
+      });
+      return child;
+    },
+  });
+  const diagnostics = [];
+  client.on("diagnostic", (message) => diagnostics.push(message));
+
+  await client.start();
+  assert.match(diagnostics.at(-1), /Codex App Server input failed: early broken pipe/);
+  await client.stop();
+});

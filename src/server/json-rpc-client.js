@@ -59,6 +59,11 @@ export class JsonRpcClient extends EventEmitter {
       env: process.env,
     });
     this.#child = child;
+    child.stdin?.on?.("error", (error) => {
+      if (this.#child === child && !this.#intentionallyStopped.has(child)) {
+        this.emit("diagnostic", `Codex App Server input failed: ${error.message}`);
+      }
+    });
 
     await new Promise((resolve, reject) => {
       const onSpawn = () => {
@@ -78,11 +83,6 @@ export class JsonRpcClient extends EventEmitter {
       for (const line of this.#decoder.push(chunk)) this.#handleLine(line);
     });
     child.stderr.on("data", (chunk) => this.emit("diagnostic", chunk.toString("utf8").trim()));
-    child.stdin?.on?.("error", (error) => {
-      if (this.#child === child && !this.#intentionallyStopped.has(child)) {
-        this.emit("diagnostic", `Codex App Server input failed: ${error.message}`);
-      }
-    });
     child.on("error", (error) => this.emit("error", error));
     child.on("exit", (code, signal) => {
       const error = new Error(`Codex App Server exited (${code ?? signal ?? "unknown"})`);
