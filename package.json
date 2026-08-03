@@ -22,6 +22,7 @@
     "acceptance:hardware": "node scripts/run-hardware-care-acceptance.mjs",
     "test:firmware": "node scripts/check-firmware.mjs",
     "setup:firmware-tts": "node scripts/setup-esp-tts.mjs",
+    "setup:voice-transcription": "node scripts/setup-local-whisper.mjs",
     "build:bundled-pet": "node scripts/build-bundled-pet.mjs",
     "build:firmware": "node scripts/run-platformio.mjs run -d firmware",
     "release:firmware": "node scripts/build-firmware-release.mjs",

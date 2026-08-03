@@ -124,22 +124,12 @@ export async function verifyVirtualCare() {
   const clock = new ControlledClock(1_800_000_000_000);
   const conversation = new ScriptedConversation();
   const bridge = new EventEmitter();
-  const realtimeRequests = [];
-  let realtimeSequence = 0;
-  let activeRealtimeThread = null;
+  const transcripts = [];
   bridge.isMock = false;
   bridge.decideApproval = async () => null;
   bridge.client = {
     running: true,
-    request: async (method, params) => {
-      realtimeRequests.push({ method, params });
-      if (method === "thread/start") {
-        realtimeSequence += 1;
-        return { thread: { id: `virtual-voice-thread-${realtimeSequence}` } };
-      }
-      if (method === "thread/realtime/start") activeRealtimeThread = params.threadId;
-      return {};
-    },
+    request: async () => ({}),
   };
 
   await settings.save({
@@ -169,7 +159,6 @@ export async function verifyVirtualCare() {
     now: clock.now,
   });
   const voiceAgent = new VoiceAgent({
-    bridge,
     store,
     petAgent: {
       chat: async () => ({ reply: "unused" }),
@@ -177,9 +166,10 @@ export async function verifyVirtualCare() {
     },
     careAgent,
     settings,
-    cwd: root,
-    transcriptSettleMs: 1,
-    closedSettleMs: 1,
+    transcriber: {
+      available: async () => true,
+      transcribe: async () => transcripts.shift() ?? "",
+    },
   });
   const visionAgent = new VisionAgent({
     store,
@@ -312,17 +302,12 @@ export async function verifyVirtualCare() {
   const speakAfterTts = async (device, text) => {
     ttsCompletions += 1;
     const eventCount = careEvents.length;
-    const previousStarts = realtimeRequests
-      .filter(({ method }) => method === "thread/realtime/start").length;
-    device.sendCommand("voice.start", { mode: "care" }, randomUUID());
+    transcripts.push(text);
+    await device.sendCommand("voice.start", { mode: "care" }, randomUUID());
     await waitFor(
-      () =>
-        store.snapshot().voice.status === "listening" &&
-        realtimeRequests.filter(({ method }) => method === "thread/realtime/start").length >
-          previousStarts,
+      () => store.snapshot().voice.status === "listening",
       "虚拟 Tab5 未在 TTS 后自动进入关怀聆听",
     );
-    const threadId = activeRealtimeThread;
     device.sendEvent({
       event: "voice.audio",
       data: AUDIO,
@@ -330,18 +315,7 @@ export async function verifyVirtualCare() {
       numChannels: 1,
       samplesPerChannel: 640,
     });
-    bridge.emit("notification", "thread/realtime/transcript/done", {
-      threadId,
-      role: "user",
-      text,
-    });
-    device.sendCommand("voice.stop", {}, randomUUID());
-    await waitFor(
-      () => realtimeRequests.some(({ method, params }) =>
-        method === "thread/realtime/stop" && params.threadId === threadId),
-      "虚拟 Tab5 未结束关怀录音",
-    );
-    bridge.emit("notification", "thread/realtime/closed", { threadId });
+    await device.sendCommand("voice.stop", {}, randomUUID());
     await waitFor(
       () => careEvents.length > eventCount,
       "虚拟 Tab5 未收到下一轮关怀回复",

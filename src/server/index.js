@@ -17,6 +17,7 @@ import { MacBleDeviceManager } from "./transports/macos-ble-device-manager.js";
 import { MacosCareActions } from "./macos-care-actions.js";
 import { ObservationScheduler } from "./observation-scheduler.js";
 import { UsbDeviceManager } from "./transports/usb-cdc-transport.js";
+import { LocalWhisperTranscriber } from "./local-whisper-transcriber.js";
 import { VoiceAgent } from "./voice-agent.js";
 import { VisionAgent } from "./vision-agent.js";
 
@@ -68,11 +69,11 @@ const careAgent = new CareAgent({
   conversation,
 });
 const voiceAgent = new VoiceAgent({
-  bridge,
   store,
   petAgent,
   careAgent,
   settings,
+  transcriber: new LocalWhisperTranscriber(),
 });
 const visionAgent = new VisionAgent({ store, careAgent, settings });
 const deviceHub = new DeviceHub({

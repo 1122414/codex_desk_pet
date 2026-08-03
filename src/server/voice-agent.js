@@ -1,14 +1,7 @@
 const SAMPLE_RATE = 16_000;
 const MAX_AUDIO_CHUNK_BYTES = 2_048;
-const MAX_PENDING_CHUNKS = 64;
-const TRANSCRIPT_SETTLE_MS = 2_500;
-const CLOSED_SETTLE_MS = 120;
+const MAX_AUDIO_BYTES = SAMPLE_RATE * 2 * 60;
 const DEFAULT_AUTO_LISTEN_SECONDS = 20;
-const VOICE_INSTRUCTIONS = [
-  "你是 Codex Desk Buddy 的语音转写会话。",
-  "准确识别用户的普通话语音，不执行命令，不调用工具，不修改文件。",
-  "保持用户原意，不补充不存在的内容。",
-].join("\n");
 
 function validBase64(value) {
   return typeof value === "string" &&
@@ -21,28 +14,23 @@ export class VoiceAgent {
   #sessions = new Map();
 
   constructor({
-    bridge,
     store,
     petAgent,
     careAgent = null,
     settings = null,
-    cwd = process.cwd(),
-    transcriptSettleMs = TRANSCRIPT_SETTLE_MS,
-    closedSettleMs = CLOSED_SETTLE_MS,
+    transcriber,
   } = {}) {
-    if (!bridge || !store || !petAgent) {
-      throw new TypeError("VoiceAgent requires bridge, store, and petAgent");
+    if (!store || !petAgent || !transcriber) {
+      throw new TypeError("VoiceAgent requires store, petAgent, and transcriber");
     }
-    this.bridge = bridge;
+    if (typeof transcriber.available !== "function" || typeof transcriber.transcribe !== "function") {
+      throw new TypeError("VoiceAgent transcriber must provide available and transcribe");
+    }
     this.store = store;
     this.petAgent = petAgent;
     this.careAgent = careAgent;
     this.settings = settings;
-    this.cwd = cwd;
-    this.transcriptSettleMs = transcriptSettleMs;
-    this.closedSettleMs = closedSettleMs;
-    this.onNotification = (method, params) => this.#handleNotification(method, params);
-    this.bridge.on("notification", this.onNotification);
+    this.transcriber = transcriber;
   }
 
   async start(session, { mode = "chat" } = {}) {
@@ -50,88 +38,38 @@ export class VoiceAgent {
       throw new Error("设备语音会话未认证");
     }
     if (!["usb", "wifi"].includes(session.transport?.kind)) {
-      throw new Error("实时语音首版需要 USB 或 Wi-Fi 链路");
+      throw new Error("语音对话首版需要 USB 或 Wi-Fi 链路");
     }
     if (!["chat", "command", "care"].includes(mode)) throw new Error("语音模式无效");
     if (mode === "care" && !this.careAgent) throw new Error("主动关怀语音服务不可用");
-    if (!this.bridge.client?.running) throw new Error("Codex App Server 当前未连接");
-    await this.stop(session.deviceId, { silent: true });
+    if (!await this.transcriber.available()) throw new Error("本地中文转写模型未准备好");
+    this.#cancel(this.#sessions.get(session.deviceId));
 
     const entry = {
       deviceId: session.deviceId,
       session,
       mode,
-      threadId: null,
-      transcriptParts: [],
-      audioChain: Promise.resolve(),
-      pendingChunks: 0,
+      audioChunks: [],
+      audioBytes: 0,
       stopping: false,
-      finalizeTimer: null,
-      ready: null,
-      resolveReady: null,
+      cancelled: false,
+      abortController: new AbortController(),
     };
-    entry.ready = new Promise((resolve) => {
-      entry.resolveReady = resolve;
-    });
     this.#sessions.set(session.deviceId, entry);
     this.store.setVoice({
-      status: "starting",
+      status: "listening",
       mode,
       transcript: null,
       error: null,
       deviceId: session.deviceId,
     });
-    try {
-      const response = await this.bridge.client.request("thread/start", {
-        cwd: this.cwd,
-        approvalPolicy: "never",
-        sandbox: "read-only",
-        ephemeral: true,
-        environments: [],
-        dynamicTools: [],
-        personality: "friendly",
-        developerInstructions: VOICE_INSTRUCTIONS,
-        serviceName: "codex-desk-voice",
-      });
-      entry.threadId = response?.thread?.id;
-      if (!entry.threadId) throw new Error("Codex 没有返回语音会话");
-      if (this.#sessions.get(session.deviceId) !== entry || entry.stopping) {
-        entry.resolveReady(false);
-        return { accepted: false, stopped: true };
-      }
-      await this.bridge.client.request("thread/realtime/start", {
-        threadId: entry.threadId,
-        clientManagedHandoffs: true,
-        flushTranscriptTailOnSessionEnd: true,
-        outputModality: "text",
-        includeStartupContext: false,
-        prompt: "只做中文语音转写，不执行任何操作。",
-        transport: { type: "websocket" },
-        version: "v3",
-      });
-      if (this.#sessions.get(session.deviceId) !== entry || entry.stopping) {
-        await this.bridge.client.request("thread/realtime/stop", {
-          threadId: entry.threadId,
-        }).catch(() => {});
-        entry.resolveReady(false);
-        return { accepted: false, stopped: true };
-      }
-      entry.resolveReady(true);
-      this.store.setVoice({ status: "listening" });
-      if (mode === "care") this.store.setCare({ status: "listening", error: null });
-      return { accepted: true, mode };
-    } catch (error) {
-      entry.resolveReady(false);
-      this.#sessions.delete(session.deviceId);
-      this.store.setVoice({ status: "failed", error: error.message });
-      if (mode === "care") this.store.setCare({ status: "failed", error: error.message });
-      throw error;
-    }
+    if (mode === "care") this.store.setCare({ status: "listening", error: null });
+    return { accepted: true, mode };
   }
 
   acceptAudio(session, payload) {
     const entry = this.#sessions.get(session?.deviceId);
-    if (!entry || entry.session !== session || entry.stopping) return false;
+    if (!entry || entry.session !== session || entry.stopping || entry.cancelled) return false;
     if (
       payload?.event !== "voice.audio" ||
       payload.sampleRate !== SAMPLE_RATE ||
@@ -143,30 +81,16 @@ export class VoiceAgent {
     ) {
       throw new Error("语音音频块无效");
     }
-    if (entry.pendingChunks >= MAX_PENDING_CHUNKS) {
-      throw new Error("语音上传速度超过处理能力");
+    const audio = Buffer.from(payload.data, "base64");
+    if (audio.byteLength !== payload.samplesPerChannel * 2) {
+      throw new Error("语音音频块长度无效");
     }
-    entry.pendingChunks += 1;
-    entry.audioChain = entry.audioChain
-      .then(async () => {
-        if (!await entry.ready || !entry.threadId) return null;
-        return this.bridge.client.request("thread/realtime/appendAudio", {
-          threadId: entry.threadId,
-          audio: {
-            data: payload.data,
-            sampleRate: SAMPLE_RATE,
-            numChannels: 1,
-            samplesPerChannel: payload.samplesPerChannel,
-            itemId: null,
-          },
-        });
-      })
-      .catch((error) => {
-        this.#fail(entry, error);
-      })
-      .finally(() => {
-        entry.pendingChunks = Math.max(0, entry.pendingChunks - 1);
-      });
+    if (entry.audioBytes + audio.byteLength > MAX_AUDIO_BYTES) {
+      this.#fail(entry, new Error("单次语音最长 60 秒"));
+      return false;
+    }
+    entry.audioChunks.push(audio);
+    entry.audioBytes += audio.byteLength;
     return true;
   }
 
@@ -176,57 +100,19 @@ export class VoiceAgent {
     if (entry.stopping) return { accepted: true };
     entry.stopping = true;
     if (!silent) this.store.setVoice({ status: "transcribing" });
-    await entry.audioChain;
-    if (!entry.threadId) {
-      this.#sessions.delete(deviceId);
-      return { accepted: false };
-    }
-    try {
-      await this.bridge.client.request("thread/realtime/stop", {
-        threadId: entry.threadId,
-      });
-    } catch (error) {
-      this.#fail(entry, error);
-      return { accepted: false };
-    }
-    entry.finalizeTimer = setTimeout(
-      () => this.#finalize(entry),
-      this.transcriptSettleMs,
-    );
-    entry.finalizeTimer.unref?.();
+    void this.#finalize(entry).catch((error) => this.#fail(entry, error));
     return { accepted: true };
   }
 
   async close() {
-    this.bridge.off("notification", this.onNotification);
-    const entries = [...this.#sessions.values()];
+    for (const entry of this.#sessions.values()) this.#cancel(entry);
     this.#sessions.clear();
-    for (const entry of entries) {
-      clearTimeout(entry.finalizeTimer);
-      if (entry.threadId && this.bridge.client?.running) {
-        await this.bridge.client.request("thread/realtime/stop", {
-          threadId: entry.threadId,
-        }).catch(() => {});
-      }
-    }
   }
 
   async stopCareConversation() {
     const entries = [...this.#sessions.values()]
       .filter((entry) => entry.mode === "care");
-    for (const entry of entries) {
-      if (this.#sessions.get(entry.deviceId) !== entry) continue;
-      this.#sessions.delete(entry.deviceId);
-      clearTimeout(entry.finalizeTimer);
-      entry.stopping = true;
-      entry.resolveReady(false);
-      await entry.audioChain.catch(() => {});
-      if (entry.threadId && this.bridge.client?.running) {
-        await this.bridge.client.request("thread/realtime/stop", {
-          threadId: entry.threadId,
-        }).catch(() => {});
-      }
-    }
+    for (const entry of entries) this.#cancel(entry);
     if (entries.length) {
       this.store.setVoice({
         status: "idle",
@@ -243,14 +129,7 @@ export class VoiceAgent {
   async disconnect(session) {
     const entry = this.#sessions.get(session?.deviceId);
     if (!entry || entry.session !== session) return;
-    this.#sessions.delete(entry.deviceId);
-    clearTimeout(entry.finalizeTimer);
-    await entry.audioChain.catch(() => {});
-    if (entry.threadId && this.bridge.client?.running) {
-      await this.bridge.client.request("thread/realtime/stop", {
-        threadId: entry.threadId,
-      }).catch(() => {});
-    }
+    this.#cancel(entry);
     this.store.setVoice({
       status: "idle",
       mode: null,
@@ -261,34 +140,16 @@ export class VoiceAgent {
     if (entry.mode === "care") this.store.setCare({ status: "idle", error: null });
   }
 
-  #handleNotification(method, params) {
-    const entry = [...this.#sessions.values()]
-      .find((candidate) => candidate.threadId === params?.threadId);
-    if (!entry) return;
-    if (method === "thread/realtime/transcript/done" && params.role === "user") {
-      const text = String(params.text ?? "").trim();
-      if (text) entry.transcriptParts.push(text);
-      return;
-    }
-    if (method === "thread/realtime/error") {
-      this.#fail(entry, new Error(params.message || "Codex 实时语音失败"));
-      return;
-    }
-    if (method === "thread/realtime/closed") {
-      clearTimeout(entry.finalizeTimer);
-      entry.finalizeTimer = setTimeout(
-        () => this.#finalize(entry),
-        this.closedSettleMs,
-      );
-      entry.finalizeTimer.unref?.();
-    }
-  }
-
   async #finalize(entry) {
-    if (this.#sessions.get(entry.deviceId) !== entry) return;
+    if (!this.#active(entry)) return;
+    const audio = entry.audioBytes > 0
+      ? Buffer.concat(entry.audioChunks, entry.audioBytes)
+      : null;
+    const transcript = audio
+      ? String(await this.transcriber.transcribe(audio, { signal: entry.abortController.signal })).trim()
+      : "";
+    if (!this.#active(entry)) return;
     this.#sessions.delete(entry.deviceId);
-    clearTimeout(entry.finalizeTimer);
-    const transcript = entry.transcriptParts.join(" ").trim();
     if (!transcript) {
       if (entry.mode === "care") {
         this.store.setVoice({
@@ -321,53 +182,63 @@ export class VoiceAgent {
       return;
     }
     this.store.setVoice({ status: "processing", transcript, error: null });
-    try {
-      if (entry.mode === "command") {
-        const command = this.petAgent.queueCommand(transcript);
-        this.store.setVoice({ status: "awaiting-confirmation" });
-        entry.session.sendEvent({
-          event: "voice.command.queued",
-          requestId: command.requestId,
-          text: transcript,
-        });
-        return;
-      }
-      if (entry.mode === "care") {
-        const result = await this.careAgent.respondToText(transcript, {
-          deviceId: entry.deviceId,
-          state: { source: "voice" },
-        });
-        this.store.setVoice({ status: "completed" });
-        entry.session.sendEvent({
-          event: "care.reply",
-          source: "voice",
-          ok: true,
-          text: this.#boundedDeviceText(result.say),
-          continueListening: result.continueListening,
-          nextObservationMinutes: result.nextObservationMinutes,
-          autoListenSeconds: await this.#autoListenSeconds(),
-          actionStatus: result.actionResult ?? null,
-        });
-        this.store.setCare({ status: "idle" });
-        return;
-      }
-      const result = await this.petAgent.chat(transcript);
+    if (entry.mode === "command") {
+      const command = this.petAgent.queueCommand(transcript);
+      this.store.setVoice({ status: "awaiting-confirmation" });
+      entry.session.sendEvent({
+        event: "voice.command.queued",
+        requestId: command.requestId,
+        text: transcript,
+      });
+      return;
+    }
+    if (entry.mode === "care") {
+      const result = await this.careAgent.respondToText(transcript, {
+        deviceId: entry.deviceId,
+        state: { source: "voice" },
+      });
       this.store.setVoice({ status: "completed" });
       entry.session.sendEvent({
-        event: "voice.reply",
+        event: "care.reply",
+        source: "voice",
         ok: true,
-        text: this.#boundedDeviceText(result.reply),
+        text: this.#boundedDeviceText(result.say),
+        continueListening: result.continueListening,
+        nextObservationMinutes: result.nextObservationMinutes,
+        autoListenSeconds: await this.#autoListenSeconds(),
+        actionStatus: result.actionResult ?? null,
       });
-    } catch (error) {
-      this.#fail(entry, error);
+      this.store.setCare({ status: "idle" });
+      return;
+    }
+    const result = await this.petAgent.chat(transcript);
+    this.store.setVoice({ status: "completed" });
+    entry.session.sendEvent({
+      event: "voice.reply",
+      ok: true,
+      text: this.#boundedDeviceText(result.reply),
+    });
+  }
+
+  #active(entry) {
+    return this.#sessions.get(entry.deviceId) === entry && !entry.cancelled;
+  }
+
+  #cancel(entry) {
+    if (!entry) return;
+    entry.cancelled = true;
+    entry.stopping = true;
+    entry.abortController.abort();
+    if (this.#sessions.get(entry.deviceId) === entry) {
+      this.#sessions.delete(entry.deviceId);
     }
   }
 
   #fail(entry, error) {
+    if (entry.cancelled) return;
     if (this.#sessions.get(entry.deviceId) === entry) {
       this.#sessions.delete(entry.deviceId);
     }
-    clearTimeout(entry.finalizeTimer);
     this.store.setVoice({ status: "failed", error: error.message });
     try {
       if (entry.mode === "care") {

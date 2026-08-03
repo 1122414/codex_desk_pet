@@ -9,7 +9,16 @@
 3. 安装 Codex，并确认终端可以执行 `codex --version`。
 4. 在项目目录运行 `npm install`。
 
-使用 Codex Desktop 或 `codex login` 完成账户登录即可。项目通过本机 Codex App Server 复用这个登录态，不需要、也不会读取 OpenAI API Key；不要为本项目额外创建 `OPENAI_API_KEY`。AI 对话、语音识别和视觉理解期间，Codex App Server 与 Bridge 都必须保持运行。
+使用 Codex Desktop 或 `codex login` 完成账户登录即可。项目通过本机 Codex App Server 复用这个登录态，不需要、也不会读取 OpenAI API Key；不要为本项目额外创建 `OPENAI_API_KEY`。AI 对话和视觉理解期间，Codex App Server 与 Bridge 都必须保持运行；语音识别由电脑本地 Whisper 完成。
+
+在 macOS 上安装并准备本地中文转写模型：
+
+```bash
+brew install whisper-cpp
+npm run setup:voice-transcription
+```
+
+脚本把官方转换的多语言 `base` 模型放到 `~/.cache/codex-desk/whisper/ggml-base.bin`，下载后校验上游公布的 SHA-1；模型不进入 Git，也不需要 OpenAI API Key。
 
 准备完成后运行：
 

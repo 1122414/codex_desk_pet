@@ -15,7 +15,7 @@ Codex Desk Buddy 是面向 M5Stack Tab5 Kit（SKU `K145`，ESP32-P4 + ESP32-C6�
 - 触摸/滑动、屏幕左右键、电脑下拉框、键盘方向键切换 Pet，所有界面共享 Bridge 选择状态。
 - 浏览器和设备端中文语音提示、非阻塞提示音、时钟、电池、当前线程 Token 和等级进度。
 - 真机每 30 秒上报电量、充电状态、Wi‑Fi RSSI 和 ESP32-P4 芯片温度；Bridge 诊断同时提供 RSS/堆内存，供 24 小时验收记录器分析趋势。
-- Pet 对话通过临时只读 Codex 会话完成；语音对话使用 Codex App Server Realtime，语音命令先转写并在设备上明确确认后才创建可执行任务。
+- Pet 对话通过临时只读 Codex 会话完成；Tab5 PCM 语音先在电脑用本地 `whisper-cli` 多语言模型转写，再进入对话；语音命令仍须在设备上明确确认后才创建可执行任务。
 - Tab5 自带 2MP MIPI 摄像头可手动拍照，ESP32-P4 硬件编码 JPEG，经已认证的 USB/Wi‑Fi 加密分块传输后交给临时只读多模态会话观察；图片分析后立即删除。
 - 主动关怀默认在 10～30 分钟内随机选择下一次观察；AI 可以保持安静、主动开口或建议更早复查。没有 6 小时冷却，只有默认 90 秒的技术性重复拍照保护。
 - 摄像头观察、用户回答、动作结果和后续对话使用同一个 Care 会话；会话失效时用本地摘要和近期事件恢复上下文。
@@ -35,7 +35,14 @@ Codex Desk Buddy 是面向 M5Stack Tab5 Kit（SKU `K145`，ESP32-P4 + ESP32-C6�
 
 ## 快速启动
 
-需要 Node.js 22 或更高版本。本机还需要已登录的 Codex Desktop/CLI 和可用的 `codex` 命令。项目复用 Codex App Server 的账户登录，不读取 `OPENAI_API_KEY`，也不要求单独申请 OpenAI API Key；Codex App Server 和 Bridge 必须在电脑上保持运行，AI 对话、语音识别和视觉理解才可用。
+需要 Node.js 22 或更高版本、本机已登录的 Codex Desktop/CLI、可用的 `codex` 命令，以及 `whisper-cli`。项目复用 Codex App Server 的账户登录，不读取 `OPENAI_API_KEY`，也不要求单独申请 OpenAI API Key；Codex App Server 和 Bridge 必须在电脑上保持运行，AI 对话和视觉理解才可用，语音识别由电脑本地 Whisper 完成。
+
+macOS 可先安装并准备本地中文转写：
+
+```bash
+brew install whisper-cpp
+npm run setup:voice-transcription
+```
 
 先检查电脑环境、Codex App Server Schema、PlatformIO 和固件发布包：
 
@@ -199,7 +206,7 @@ npm run acceptance:hardware -- --device-id <已配对设备 ID>
 - 当前等级根据“正在展示的线程”的累计 Token 计算，每 50,000 Token 一级；它不是 Codex 官方等级。
 - v0.3.0 Tab5 固件已经通过真实 ESP32-P4 工具链编译；旧版真机已完成整机烧录、USB 枚举、真实账户配对、加密 USB 状态同步、触摸键盘和 BLE 拔线状态同步。v0.3.0 的主动摄像头、自动多轮语音、C6 Wi‑Fi、microSD 自定义 Pet、扬声器、音量/亮度动作和电量曲线仍需连接开发板后物理验收。
 - 设备固件已链接 Espressif ESP-SR v1.2.0 离线中文 TTS；六种状态、Pet 安装/切换和配对都在独立音频任务中播报，缺失或损坏的 `voice_data` 会安全降级为不同音型。真机语音分区已完成烧录、映射和 CRC 完整性校验，音质与音量仍需真机试听。
-- BLE 只承担状态、Pet 选择和审批等小消息，不传 Pet 素材、PCM 语音或 JPEG 图片。语音识别、LLM 回复和视觉理解都依赖已登录且仍在运行的电脑 Codex App Server；电脑关机或退出登录时设备保留本地动画、时间和最近缓存状态，但不会伪造新的 Codex 信息。
+- BLE 只承担状态、Pet 选择和审批等小消息，不传 Pet 素材、PCM 语音或 JPEG 图片。语音识别使用电脑本地 Whisper；LLM 回复和视觉理解依赖已登录且仍在运行的 Codex App Server。电脑关机或退出登录时设备保留本地动画、时间和最近缓存状态，但不会伪造新的 Codex 信息。
 - 控制面板固定监听 `127.0.0.1`；真机只连接独立的 `4318` 设备端口。设备 payload 已做应用层加密，但公网部署仍需额外的防火墙、WSS/反向代理和产品运维方案。
 
 详细链路约束见 [设备协议](docs/device-protocol.md)，跨客户端状态见 [Codex Hooks](docs/codex-hooks.md)，音频实现与许可边界见 [固件音频](docs/firmware-audio.md)，故障注入边界见 [稳定性验证](docs/stability.md)，首次使用见 [安装与恢复](docs/install-and-recovery.md)，逐项结论见 [验收矩阵](docs/acceptance.md)，主动关怀完整路线见 [2026-07-30_001.md](2026-07-30_001.md)。

@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { constants } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +13,7 @@ import {
   DEVICE_PROTOCOL_VERSION,
 } from "../src/shared/device-protocol.js";
 import { resolvePlatformioCommand } from "./platformio-command.mjs";
+import { DEFAULT_WHISPER_MODEL_PATH } from "../src/server/local-whisper-transcriber.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const requiredMethods = [
@@ -78,6 +80,13 @@ const report = {
   platformio: {
     version: null,
     available: false,
+    error: null,
+  },
+  localWhisper: {
+    command: process.env.CODEX_DESK_WHISPER_COMMAND ?? "whisper-cli",
+    modelPath: process.env.CODEX_DESK_WHISPER_MODEL ?? DEFAULT_WHISPER_MODEL_PATH,
+    executable: false,
+    modelReady: false,
     error: null,
   },
   firmwareRelease: {
@@ -150,6 +159,15 @@ try {
 }
 
 try {
+  run(report.localWhisper.command, ["--version"]);
+  report.localWhisper.executable = true;
+  await access(report.localWhisper.modelPath, constants.R_OK);
+  report.localWhisper.modelReady = true;
+} catch (error) {
+  report.localWhisper.error = error.message;
+}
+
+try {
   const directory = path.join(root, report.firmwareRelease.directory);
   const manifest = await verifyFirmwareRelease(directory);
   report.firmwareRelease.verified = true;
@@ -169,6 +187,8 @@ report.ok = Boolean(
   report.codex.threadListReadable &&
   requiredMethods.every((method) => report.codex.schemaMethods[method]) &&
   report.platformio.available &&
+  report.localWhisper.executable &&
+  report.localWhisper.modelReady &&
   report.firmwareRelease.verified
 );
 

@@ -135,7 +135,7 @@ export class PetAgent {
     });
     const result = await this.#runTurn(threadId, [
       { type: "text", text: prompt, text_elements: [] },
-      { type: "localImage", path: imagePath, detail: "low" },
+      { type: "localImage", path: imagePath },
     ]);
     return { reply: result.reply };
   }

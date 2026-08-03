@@ -325,7 +325,7 @@ export class CareAgent {
               ].join("\n"),
               text_elements: [],
             },
-            { type: "localImage", path: imagePath, detail: "low" },
+            { type: "localImage", path: imagePath },
           ]
         : [{
             type: "text",

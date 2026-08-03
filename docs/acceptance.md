@@ -16,7 +16,7 @@
 | 3 | 没有 6 小时冷却 | 设置默认仅有每设备 90 秒 `duplicateGuardSeconds`，AI 可安排 1～120 分钟动态复查 | “without a six-hour cooldown” 调度测试和虚拟重复拍照抑制通过 | 已完成 |
 | 4 | AI 可安静，也可主动开口 | `src/server/care-agent.js` 接受严格 JSON；空 `say` 保持安静，非空话术通过 `care.reply` 朗读 | `test/care-agent.test.js` 覆盖安静观察、有效开场和无效 JSON 安全降级 | 已完成 |
 | 5 | 摄像头、对话和动作共享上下文 | CareAgent 在同一个只读、禁止工具的 Codex 线程中发送图片、用户转写和动作结果；`src/server/care-memory-repository.js` 持久化摘要、偏好、常用应用和近期事件 | CareAgent 上下文测试、重建续接测试和虚拟 `sharedCareThread=true` | 已完成 |
-| 6 | 可持续多轮对话，而非单向输出 | `src/server/voice-agent.js` 将自动语音转写送回同一个 CareAgent；`firmware/src/firmware_app.cpp` 在 TTS 完成后才自动录音，保持半双工 | 语音单测与虚拟 Tab5 连续完成 3 轮 TTS → 自动聆听 → 转写 → 回复 | 软件完成，待真机五轮 |
+| 6 | 可持续多轮对话，而非单向输出 | `src/server/local-whisper-transcriber.js` 在电脑本地转写，`src/server/voice-agent.js` 将文字送回同一个 CareAgent；`firmware/src/firmware_app.cpp` 在 TTS 完成后才自动录音，保持半双工 | 本地转写、语音单测与虚拟 Tab5 连续完成 3 轮 TTS → 自动聆听 → 转写 → 回复 | 软件完成，待真机五轮 |
 | 7 | 可执行有边界的关怀动作 | `src/server/care-action-service.js` 只接受 7 种动作；应用 Bundle ID 和媒体 URL 必须来自 `src/server/settings-repository.js` 校验的预设，模型不能提交 shell | 动作结构/范围/禁用/超时/恢复/幂等测试；虚拟设备只打开一次预设并只设置一次亮度 | 软件完成，待真机 |
 | 8 | 可配置、可查看、可停止 | `src/server/http-server.js` 提供设置、记录、立即观察和停止 API；Web 面板显示状态、下次观察和历史；`care.stop` 会取消关怀音频与自动聆听但保留总开关 | HTTP、设置、VoiceAgent、DeviceHub 与固件核心测试通过；桌面和 760 px 浏览器检查无横向溢出、控制台 0 错误 | 已完成 |
 | 9 | 失败后恢复且不重复执行 | 图片中断进入失败状态并重新调度；Codex 线程失效后用记忆新建线程；动作以幂等键缓存，跨 USB/Wi-Fi 命令全局去重 | 虚拟闭环覆盖图片中断、无效 AI JSON、Codex 断开/恢复、USB→Wi-Fi、重复拍照/动作、设备中途掉线；稳定性测试覆盖 500 次链路切换 | 已完成 |
@@ -32,7 +32,7 @@
 | 内置与自定义 Pet | `src/server/pet-catalog.js` 校验 v1/v2；`src/server/device-pet-asset.js` 转换设备帧；`firmware/src/pet_store.cpp` 缓存和回退；浏览器、触摸、滑动和屏幕按钮均可切换 | 已完成 |
 | 按键、电脑与设备切换同步 | 触摸和屏幕按钮向 Bridge 发 `pet.select`，控制面板写同一选择状态并广播所有设备 | 项目内同步已完成；Codex 官方客户端没有公开 Pet 选择事件 |
 | 显示最近运行任务 | Bridge 调用 `thread/list`，Hooks 补充其他 Codex 客户端的实时生命周期；状态模型按审批、活动和最近完成任务的明确优先级展示 | 已完成 |
-| 中文语音、时钟、电量、Token、等级 | 固件独立任务播放 ESP-SR 离线中文 TTS；Realtime 负责语音转写；UI 读取 RTC、电池和真实线程 Token | 真机部分完成；v0.3.0 自动聆听、音量、电量曲线和温升待实测 |
+| 中文语音、时钟、电量、Token、等级 | 固件独立任务播放 ESP-SR 离线中文 TTS；电脑本地 Whisper 负责语音转写；UI 读取 RTC、电池和真实线程 Token | 真机部分完成；v0.3.0 自动聆听、音量、电量曲线和温升待实测 |
 | USB 常联和稳定无线 | v0.3.0 真机完成协议 v5 配对、双向认证、AES-256-GCM USB 状态同步和遥测；虚拟设备完成 USB/Wi-Fi 高带宽热备、500 次切换和故障恢复 | 真机部分完成；真实 Wi-Fi、弱信号、睡眠与路由器恢复待实测 |
 | Pet 接入 LLM 对话 | 文本和语音进入只读、禁止工具的 Codex 会话；命令只排队，设备明确确认后才创建可执行任务；主动关怀另使用可续接 Care 会话 | 软件完成，待 v0.3.0 真机语音 |
 | 摄像头与视觉 | Tab5 官方 MIPI CSI 驱动采集 2MP RGB565，P4 硬件 JPEG；Bridge 校验身份、链路、顺序、大小和 SHA-256，分析后删除；既支持手动拍照，也支持随机主动观察 | 软件完成，待真机方向、曝光、色彩与传输时间 |
@@ -50,7 +50,7 @@ npm run release:firmware
 git diff --check
 ```
 
-- `check` 检查全部 JavaScript 语法，运行 174 项领域、协议、HTTP、语音、视觉、虚拟设备、真机验收和工具链选择测试，并用 C++17 重新编译固件核心测试。
+- `check` 检查全部 JavaScript 语法，运行 180 项领域、协议、HTTP、语音、视觉、虚拟设备、真机验收和工具链选择测试，并用 C++17 重新编译固件核心测试。
 - `test:virtual-tab5` 在临时目录完成一次性 USB 配对、AES 加密、双链路、最大规格 V2 Pet、审批，以及主动观察、三轮自动对话、动作和故障恢复。
 - `test:stability` 打印 501 个认证会话、500 次链路切换、250 次资源恢复和各类故障的实际计数。
 - `doctor` 检查 Node、Codex 登录/App Server Schema、Hooks、PlatformIO 和 v0.3.0 发布包；不读取线程标题或凭据。

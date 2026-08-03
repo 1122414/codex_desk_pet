@@ -102,7 +102,6 @@ test("CareAgent keeps camera and text turns in one read-only conversation", asyn
   assert.deepEqual(conversation.turns[0].input[1], {
     type: "localImage",
     path: imagePath,
-    detail: "low",
   });
   assert.match(conversation.turns[1].input[0].text, /还没解决/);
   assert.match(conversation.turns[1].input[0].text, /用户正在桌前工作/);

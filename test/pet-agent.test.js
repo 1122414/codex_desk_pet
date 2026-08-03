@@ -109,7 +109,6 @@ test("camera observations use one ephemeral read-only multimodal turn", async ()
   assert.deepEqual(bridge.calls[1].params.input[1], {
     type: "localImage",
     path: imagePath,
-    detail: "low",
   });
   agent.close();
 });
