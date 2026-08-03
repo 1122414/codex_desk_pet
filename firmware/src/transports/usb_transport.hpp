@@ -6,6 +6,7 @@ namespace codex::firmware {
 
 class UsbTransport final : public TextTransport {
  public:
+  static void prepareSerialBuffers();
   void begin();
   const char* kind() const override;
   bool connected() const override;

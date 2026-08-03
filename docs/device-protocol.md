@@ -142,7 +142,7 @@
 
 ## 语音、视觉与主动关怀
 
-- 设备按住“对话”或“命令”后发送 `voice.start`，随后通过加密 `event` 发送 16 kHz、单声道 PCM 分块，松开时发送 `voice.stop`。
+- 设备点一下“对话”或“命令”后发送 `voice.start`，随后通过加密 `event` 发送 16 kHz、单声道 PCM 分块；说话结束或再次点按时发送 `voice.stop`。
 - Bridge 把 PCM 汇成临时 WAV，使用本机 `whisper-cli` 多语言模型得到文字并立即删除临时音频；对话交给临时只读 Pet 会话，命令只进入设备确认队列，未确认时绝不创建可执行任务。
 - 手动拍照或 Bridge 的主动观察调度都会发送 `camera.capture`。P4 把相机 RGB565 帧硬件编码为不超过 512 KiB 的 JPEG，依次发送 `vision.capture.begin/chunk/end`。
 - Bridge 强制校验设备身份、USB/Wi‑Fi 链路、分块顺序、总大小与 SHA‑256；临时文件权限为 `0600`，多模态回合结束后立即删除。

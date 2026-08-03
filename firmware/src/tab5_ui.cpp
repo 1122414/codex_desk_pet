@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 
@@ -127,6 +128,7 @@ std::uint64_t renderFingerprint(
     const String& connection_detail,
     const std::uint8_t transfer_progress,
     const bool voice_recording,
+    const String& voice_mode,
     const bool camera_busy,
     const std::uint64_t minute_bucket) {
   std::uint64_t hash = 1469598103934665603ULL;
@@ -159,6 +161,7 @@ std::uint64_t renderFingerprint(
   hashString(hash, snapshot.companion.prompt);
   hashString(hash, snapshot.companion.reply);
   hashString(hash, snapshot.companion.error);
+  hashString(hash, voice_mode);
   hashValue(hash, snapshot.telemetry.battery_percent);
   hashValue(hash, snapshot.telemetry.charging);
   hashValue(hash, snapshot.telemetry.wifi_rssi);
@@ -223,6 +226,21 @@ bool Tab5Ui::begin(
   return frame_pixels_ != nullptr && region_pixels_ != nullptr;
 }
 
+void Tab5Ui::suspendBundledStorageForCamera() {
+  if (!bundled_pet_ready_ || bundled_storage_suspended_for_camera_) return;
+  SPIFFS.end();
+  bundled_pet_ready_ = false;
+  bundled_storage_suspended_for_camera_ = true;
+}
+
+bool Tab5Ui::resumeBundledStorageAfterCamera() {
+  if (!bundled_storage_suspended_for_camera_) return true;
+  bundled_pet_ready_ = SPIFFS.begin(false);
+  if (!bundled_pet_ready_) return false;
+  bundled_storage_suspended_for_camera_ = false;
+  return true;
+}
+
 UiAction Tab5Ui::poll(
     const Snapshot& snapshot,
     const std::uint64_t now_ms,
@@ -252,6 +270,7 @@ void Tab5Ui::render(
         connection_detail,
         transfer_progress,
         voice_recording_,
+        voice_mode_,
         camera_busy_,
         minute_bucket);
     if (normal_screen_rendered_ && fingerprint == rendered_fingerprint_) {
@@ -311,9 +330,11 @@ bool Tab5Ui::approvalCanAccept(const Approval& approval) const {
   return std::count(approval.detail.begin(), approval.detail.end(), '\n') <= 2;
 }
 
-void Tab5Ui::setVoiceRecording(const bool recording) {
-  if (voice_recording_ == recording) return;
+void Tab5Ui::setVoiceRecording(const bool recording, const String& mode) {
+  const String next_mode = recording ? mode : "";
+  if (voice_recording_ == recording && voice_mode_ == next_mode) return;
   voice_recording_ = recording;
+  voice_mode_ = next_mode;
   normal_screen_rendered_ = false;
 }
 
@@ -379,15 +400,18 @@ UiAction Tab5Ui::pollTouch(
            kVoiceCommandButton.contains(point))) {
         input_.cancel();
         voice_touch_active_ = true;
-        if (voice_recording_) return {};
-        return {
-            UiActionType::VoiceStart,
-            kVoiceCommandButton.contains(point) ? "command" : "chat"};
+        voice_touch_mode_ =
+            kVoiceCommandButton.contains(point) ? "command" : "chat";
+        return {};
       }
       if (voice_touch_active_) {
         if (released) {
           voice_touch_active_ = false;
-          return {UiActionType::VoiceStop, {}};
+          const auto mode = voice_touch_mode_;
+          voice_touch_mode_ = "";
+          return voice_recording_
+              ? UiAction{UiActionType::VoiceStop, {}}
+              : UiAction{UiActionType::VoiceStart, mode};
         }
         return {};
       }
@@ -440,7 +464,11 @@ UiAction Tab5Ui::pollTouch(
   }
   if (voice_touch_active_) {
     voice_touch_active_ = false;
-    return {UiActionType::VoiceStop, {}};
+    const auto mode = voice_touch_mode_;
+    voice_touch_mode_ = "";
+    return voice_recording_
+        ? UiAction{UiActionType::VoiceStop, {}}
+        : UiAction{UiActionType::VoiceStart, mode};
   }
   if (camera_touch_active_) {
     camera_touch_active_ = false;
@@ -557,26 +585,29 @@ void Tab5Ui::drawNormal(
   canvas_.setTextColor(kText, kPanelLight);
   drawChevron(kPreviousPetButton, false);
   drawChevron(kNextPetButton, true);
+  const auto chat_recording = voice_recording_ && voice_mode_ == "chat";
+  const auto command_recording = voice_recording_ && voice_mode_ == "command";
   canvas_.fillRoundRect(
       kVoiceChatButton.x, kVoiceChatButton.y,
       kVoiceChatButton.width, kVoiceChatButton.height, 14,
-      voice_recording_ ? kRed : kPanelLight);
+      chat_recording ? kRed : kPanelLight);
   canvas_.fillRoundRect(
       kVoiceCommandButton.x, kVoiceCommandButton.y,
       kVoiceCommandButton.width, kVoiceCommandButton.height, 14,
-      voice_recording_ ? kRed : kPanelLight);
+      command_recording ? kRed : kPanelLight);
   canvas_.fillRoundRect(
       kCameraButton.x, kCameraButton.y,
       kCameraButton.width, kCameraButton.height, 14,
       camera_busy_ ? kOrange : kPanelLight);
   canvas_.setTextSize(1);
-  canvas_.setTextColor(kText, voice_recording_ ? kRed : kPanelLight);
+  canvas_.setTextColor(kText, chat_recording ? kRed : kPanelLight);
   canvas_.drawString(
-      voice_recording_ ? "松开" : "对话",
+      chat_recording ? "停止" : "对话",
       kVoiceChatButton.x + kVoiceChatButton.width / 2,
       kVoiceChatButton.y + kVoiceChatButton.height / 2);
+  canvas_.setTextColor(kText, command_recording ? kRed : kPanelLight);
   canvas_.drawString(
-      voice_recording_ ? "松开" : "命令",
+      command_recording ? "停止" : "命令",
       kVoiceCommandButton.x + kVoiceCommandButton.width / 2,
       kVoiceCommandButton.y + kVoiceCommandButton.height / 2);
   canvas_.setTextColor(kText, camera_busy_ ? kOrange : kPanelLight);
@@ -707,14 +738,31 @@ bool Tab5Ui::drawBundledPet(const std::uint8_t frame_index) {
       return false;
     }
     bundled_pet_buffer_.resize(unpacked_size);
-    const auto decompressed = lgfx_tinfl_decompress_mem_to_mem(
-        bundled_pet_buffer_.data(),
-        bundled_pet_buffer_.size(),
+    auto* decompressor = static_cast<lgfx_tinfl_decompressor*>(
+        std::malloc(sizeof(lgfx_tinfl_decompressor)));
+    if (decompressor == nullptr) {
+      bundled_pet_buffer_.clear();
+      bundled_pet_compressed_buffer_.clear();
+      bundled_pet_cached_path_ = "";
+      return false;
+    }
+    lgfx_tinfl_init(decompressor);
+    auto compressed_bytes = bundled_pet_compressed_buffer_.size() - 8U;
+    auto decompressed_bytes = bundled_pet_buffer_.size();
+    const auto decompression_status = lgfx_tinfl_decompress(
+        decompressor,
         packed + 8,
-        bundled_pet_compressed_buffer_.size() - 8,
-        TINFL_FLAG_PARSE_ZLIB_HEADER);
+        &compressed_bytes,
+        bundled_pet_buffer_.data(),
+        bundled_pet_buffer_.data(),
+        &decompressed_bytes,
+        TINFL_FLAG_PARSE_ZLIB_HEADER |
+            TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
+    std::free(decompressor);
     bundled_pet_compressed_buffer_.clear();
-    if (decompressed != bundled_pet_buffer_.size()) {
+    if (
+        decompression_status != TINFL_STATUS_DONE ||
+        decompressed_bytes != bundled_pet_buffer_.size()) {
       bundled_pet_buffer_.clear();
       bundled_pet_cached_path_ = "";
       return false;

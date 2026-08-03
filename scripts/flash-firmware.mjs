@@ -15,7 +15,7 @@ function option(name) {
 }
 
 const port = option("--port");
-const baud = Number(option("--baud") ?? 460800);
+const baud = Number(option("--baud") ?? 57600);
 const releaseRoot = path.resolve(
   option("--release") ??
   path.join(root, "dist", "firmware", `v${DEVICE_FIRMWARE_VERSION}`),
@@ -25,14 +25,14 @@ if (
   !port ||
   port.startsWith("-") ||
   port.length > 256 ||
-  ![115200, 230400, 460800, 921600].includes(baud) ||
+  ![57600, 115200, 230400, 460800, 921600].includes(baud) ||
   arguments_.some((value, index) =>
     ["--port", "--release", "--baud"].includes(value) && !arguments_[index + 1])
 ) {
   throw new Error(
     "用法：npm run flash:firmware -- --port /dev/cu.usbmodemXXXX " +
     "[--release dist/firmware/v0.3.0] " +
-    "[--baud 115200|230400|460800|921600] [--erase]",
+    "[--baud 57600|115200|230400|460800|921600] [--erase]",
   );
 }
 
@@ -72,6 +72,7 @@ runEsptool([
   "--baud",
   String(baud),
   "write-flash",
+  "--no-compress",
   "--flash-mode",
   "qio",
   "--flash-freq",

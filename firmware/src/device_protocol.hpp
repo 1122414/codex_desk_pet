@@ -59,6 +59,7 @@ class DeviceProtocolClient {
   bool ready() const;
   const char* transportKind() const;
   const String& sessionId() const;
+  const String& lastSendError() const;
   bool sendPetSelection(const String& pet_id);
   bool sendApprovalDecision(const String& request_id, bool accept);
   bool sendCompanionDecision(const String& request_id, bool accept);
@@ -175,6 +176,7 @@ class DeviceProtocolClient {
   String firmware_version_;
   String board_id_;
   String device_info_hash_;
+  String last_send_error_;
   DeviceCapabilities capabilities_;
   bool voice_data_ready_ = false;
   bool storage_ready_ = false;

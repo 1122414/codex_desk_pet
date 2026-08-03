@@ -25,9 +25,10 @@ try {
     path.join(root, "firmware", "src", "transports", "usb_transport.cpp"),
     "utf8",
   );
-  if (!usbTransport.includes("Serial.setTxBufferSize(kMaximumLineBytes)")) {
+  if (!usbTransport.includes("void UsbTransport::prepareSerialBuffers()") ||
+      !usbTransport.includes("Serial.setTxBufferSize(kMaximumLineBytes + 1U)")) {
     throw new Error(
-      "USB CDC 发送缓冲必须容纳完整协议帧，避免握手 JSON 被截断",
+      "USB CDC 发送缓冲必须容纳完整协议帧和换行符，避免握手 JSON 被截断",
     );
   }
   if (!usbTransport.includes("host_activity_ || Serial.isConnected()")) {
@@ -74,6 +75,14 @@ try {
   ) {
     throw new Error("Tab5 动画帧必须局部提交，不能被静态界面缓存跳过");
   }
+  if (
+    !tab5Ui.includes("voice_touch_mode_") ||
+    !tab5Ui.includes("UiAction{UiActionType::VoiceStart, mode}") ||
+    !tab5Ui.includes('chat_recording ? "停止" : "对话"') ||
+    !tab5Ui.includes('command_recording ? "停止" : "命令"')
+  ) {
+    throw new Error("Tab5 语音按钮必须点按开始，并清楚标出当前可停止的模式");
+  }
   const bundledPetDirectory = path.join(
     root,
     "firmware",
@@ -116,11 +125,37 @@ try {
     path.join(root, "firmware", "src", "firmware_app.cpp"),
     "utf8",
   );
+  if (
+    !firmwareApp.includes("voice_.start(*client, action.value, true)") ||
+    !firmwareApp.includes("ui_.setVoiceRecording(true, action.value)")
+  ) {
+    throw new Error("Tab5 手动语音必须启用自动收音结束，不能要求用户长按");
+  }
+  const ledcClockSourceIndex = firmwareApp.indexOf(
+    "ledcSetClockSource(LEDC_USE_PLL_DIV_CLK);",
+  );
+  const m5BeginIndex = firmwareApp.indexOf("M5.begin(config);");
+  if (
+    ledcClockSourceIndex === -1 ||
+    m5BeginIndex === -1 ||
+    ledcClockSourceIndex > m5BeginIndex
+  ) {
+    throw new Error(
+      "Tab5 必须在 M5Unified 使用 LEDC 前统一选择 80MHz PLL 时钟源",
+    );
+  }
   if (firmwareApp.includes("esp_task_wdt_add(nullptr)")) {
     throw new Error("Tab5 UI 主循环不能订阅会触发循环重启的任务看门狗");
   }
   if (!firmwareApp.includes('pet_id == "chibi-skadi"')) {
     throw new Error("Tab5 内置 Pet 不得重复请求外部素材包");
+  }
+  if (
+    !firmwareApp.includes("kPetRequestSettlingMs = 500") ||
+    !firmwareApp.includes("pet_request_not_before_ = millis() + kPetRequestSettlingMs") ||
+    !firmwareApp.includes("if (now_ms < pet_request_not_before_) return;")
+  ) {
+    throw new Error("Tab5 必须在确认快照后延迟主题请求，避免 ACK 与资源请求争用 USB CDC");
   }
   const deviceProtocol = await readFile(
     path.join(root, "firmware", "src", "device_protocol.cpp"),
@@ -140,6 +175,13 @@ try {
   ) {
     throw new Error("Tab5 USB 主机唤醒必须重置协议序号后重新握手");
   }
+  if (
+    !deviceProtocol.includes(
+      'code == "RESYNC_REQUIRED" || code == "INVALID_SESSION") {\n      startHandshake(millis(), true);',
+    )
+  ) {
+    throw new Error("Tab5 协议重同步必须重置双向序号，避免永久重连循环");
+  }
   const protocolVersionMaterialUses = deviceProtocol.match(
     /String\(static_cast<unsigned int>\(kProtocolVersion\)\)/g,
   )?.length ?? 0;
@@ -152,10 +194,132 @@ try {
     throw new Error("Tab5 认证前不得对错误报文再次回复错误");
   }
   if (
-    !usbTransport.includes("kChunkBytes = 128") ||
-    !usbTransport.includes("Serial.flush()")
+    !usbTransport.includes("frame += '\\n'") ||
+    !usbTransport.includes("Serial.write(") ||
+    !usbTransport.includes("return written == frame.length()") ||
+    usbTransport.includes("Serial.flush()")
   ) {
-    throw new Error("Tab5 USB 长报文必须分块并完整刷新到主机");
+    throw new Error("Tab5 USB 协议帧必须单次写入且不得强制清空 CDC 待发队列");
+  }
+  if (
+    !firmwareApp.includes("UsbTransport::prepareSerialBuffers();") ||
+    firmwareApp.indexOf("UsbTransport::prepareSerialBuffers();") >
+      firmwareApp.indexOf("M5.begin(config);")
+  ) {
+    throw new Error("Tab5 必须在 M5Unified 初始化串口前预配置 USB CDC 缓冲区");
+  }
+  const deviceCamera = await readFile(
+    path.join(root, "firmware", "src", "device_camera.cpp"),
+    "utf8",
+  );
+  if (
+    !deviceCamera.includes("i2c_master_get_bus_handle(") ||
+    deviceCamera.includes("i2cBusHandle(")
+  ) {
+    throw new Error(
+      "Tab5 摄像头必须复用 M5Unified 已初始化的 ESP-IDF I2C 总线句柄",
+    );
+  }
+  if (
+    !deviceCamera.includes("camera_power.digitalWrite(6, false)") ||
+    !deviceCamera.includes("camera_power.digitalWrite(6, true)") ||
+    !deviceCamera.includes("delay(10)") ||
+    !deviceCamera.includes("delay(100)")
+  ) {
+    throw new Error("Tab5 摄像头初始化前必须在主时钟稳定后复位并等待传感器");
+  }
+  if (
+    !deviceCamera.includes("kCameraClockPin = GPIO_NUM_36") ||
+    !deviceCamera.includes("kCameraClockHz = 24'000'000") ||
+    !deviceCamera.includes("timer_config.timer_num = LEDC_TIMER_2") ||
+    !deviceCamera.includes("channel_config.channel = LEDC_CHANNEL_6") ||
+    !deviceCamera.includes("ledc_channel_config(&channel_config)") ||
+    !deviceCamera.includes("ledc_get_freq(") ||
+    !deviceCamera.includes("timer_config.clk_cfg = LEDC_USE_PLL_DIV_CLK") ||
+    !deviceCamera.includes("frequency_delta > kCameraClockHz / 100U")
+  ) {
+    throw new Error(
+      "Tab5 摄像头必须用独立 LEDC 资源为 GPIO36 提供 24MHz 主时钟",
+    );
+  }
+  if (
+    !deviceCamera.includes("camera_power.getWriteValue(6)") ||
+    !deviceCamera.includes("kCameraSccbAddress = 0x36") ||
+    !deviceCamera.includes("kCameraSensorId = 0xeb52") ||
+    !deviceCamera.includes("i2c_master_probe(") ||
+    !deviceCamera.includes("i2c_master_transmit_receive(") ||
+    !deviceCamera.includes("verifyCameraSensor(i2c_handle, error)") ||
+    !deviceCamera.includes("kCameraProbeAttempts = 10")
+  ) {
+    throw new Error(
+      "Tab5 摄像头必须验证复位电平、0x36 控制地址与 SC202CS/SC2356 型号",
+    );
+  }
+  if (
+    !deviceCamera.includes("M5.In_I2C.release()") ||
+    !deviceCamera.includes("camera_owns_i2c_ = true") ||
+    !deviceCamera.includes("kCameraI2cPort = I2C_NUM_0") ||
+    !deviceCamera.includes("kCameraSclPin = 32") ||
+    !deviceCamera.includes("kCameraSdaPin = 31") ||
+    !deviceCamera.includes("csi_config.begin(camera_config, true)") ||
+    !deviceCamera.includes("M5.In_I2C.begin()")
+  ) {
+    throw new Error(
+      "Tab5 拍照期间必须让 esp_video 独占内部 I2C，并在结束后恢复 M5Unified",
+    );
+  }
+  if (
+    deviceCamera.includes("previous_log_level_") ||
+    deviceCamera.includes("camera_logs_suppressed_")
+  ) {
+    throw new Error(
+      "Tab5 摄像头结束时不得恢复 ESP 日志，避免污染 USB JSON 协议",
+    );
+  }
+  const captureMetadataIndex = deviceCamera.indexOf(
+    "if (!makeCaptureId(capture_id_))",
+  );
+  const initializeCaptureIndex = deviceCamera.indexOf(
+    "if (!initializeCamera(error))",
+  );
+  if (
+    !deviceCamera.includes("capture_id_.reserve(16)") ||
+    !deviceCamera.includes("sha256_.reserve(64)") ||
+    !deviceCamera.includes("bool writeHexDigest(") ||
+    captureMetadataIndex === -1 ||
+    initializeCaptureIndex === -1 ||
+    captureMetadataIndex > initializeCaptureIndex
+  ) {
+    throw new Error(
+      "Tab5 必须在占用 JPEG 编码内存前预分配并生成照片元数据",
+    );
+  }
+  if (
+    !firmwareApp.includes("captureWithReleasedStorage(") ||
+    !firmwareApp.includes("pet_store_.suspendForCamera(error)") ||
+    !firmwareApp.includes("pet_store_.resumeAfterCamera(storage_error)") ||
+    !firmwareApp.includes("ui_.suspendBundledStorageForCamera()") ||
+    !firmwareApp.includes("ui_.resumeBundledStorageAfterCamera()") ||
+    !firmwareApp.includes("delay(25)")
+  ) {
+    throw new Error(
+      "Tab5 拍照时必须暂时释放 microSD 与 SPIFFS 的 VFS 槽位，并在结束后恢复主题存储",
+    );
+  }
+  if (
+    !firmwareApp.includes("esp_log_set_vprintf(discardEspLog)") ||
+    !firmwareApp.includes('esp_log_level_set("*", ESP_LOG_NONE)')
+  ) {
+    throw new Error("Tab5 应在启动后永久关闭 ESP 日志，避免日志污染 USB JSON 协议");
+  }
+  if (
+    !tab5Ui.includes("lgfx_tinfl_decompress(") ||
+    !tab5Ui.includes("std::malloc(sizeof(lgfx_tinfl_decompressor))") ||
+    tab5Ui.includes("lgfx_tinfl_decompress_mem_to_mem(")
+  ) {
+    throw new Error(
+      "Tab5 内置主题解压器状态必须存放在堆上，避免 loopTask 栈溢出重启",
+    );
   }
   const sources = (await readdir(coreDirectory))
     .filter((file) => file.endsWith(".cpp"))

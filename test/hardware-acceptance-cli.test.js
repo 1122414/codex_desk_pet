@@ -90,8 +90,32 @@ test("hardware acceptance CLI checkpoints and completes against a controlled Bri
     `${events.map((item) => JSON.stringify(item)).join("\n")}\n`,
   );
 
+  let observationRequests = 0;
   const server = createServer((request, response) => {
     response.setHeader("Content-Type", "application/json");
+    if (request.url === "/api/session") {
+      response.setHeader(
+        "Set-Cookie",
+        "codex_desk_session=hardware-test; HttpOnly; SameSite=Strict; Path=/",
+      );
+      response.end(JSON.stringify({ csrfToken: "hardware-csrf" }));
+      return;
+    }
+    if (request.url === "/api/care/observe" && request.method === "POST") {
+      if (
+        request.headers.cookie !== "codex_desk_session=hardware-test" ||
+        request.headers.origin !== `http://127.0.0.1:${server.address().port}` ||
+        request.headers["x-codex-desk-csrf"] !== "hardware-csrf"
+      ) {
+        response.statusCode = 403;
+        response.end(JSON.stringify({ error: "invalid csrf" }));
+        return;
+      }
+      observationRequests += 1;
+      response.statusCode = 202;
+      response.end(JSON.stringify({ ok: true, reason: "manual" }));
+      return;
+    }
     if (request.url === "/api/snapshot") {
       response.end(JSON.stringify({
         care: { status: "idle", conversationId: "care-cli-thread" },
@@ -166,11 +190,14 @@ test("hardware acceptance CLI checkpoints and completes against a controlled Bri
     eventsPath,
     "--output",
     outputPath,
+    "--trigger-observation",
   ], { stopAfterMs: 1_300 });
   assert.equal(firstRun.code, 1, firstRun.stderr || firstRun.stdout);
   const checkpoint = JSON.parse(await readFile(outputPath, "utf8"));
   assert.equal(checkpoint.report.passed, false);
   assert.ok(checkpoint.samples.length >= 2);
+  assert.equal(checkpoint.trigger.ok, true);
+  assert.equal(observationRequests, 1);
 
   const result = await runRecorder([
     "--base-url",

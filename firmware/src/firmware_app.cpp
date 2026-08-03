@@ -1,8 +1,11 @@
 #include "firmware_app.hpp"
 
 #include <M5Unified.h>
+#include <esp32-hal-ledc.h>
+#include <esp_log.h>
 
 #include <algorithm>
+#include <cstdarg>
 #include <cstring>
 #include <ctime>
 
@@ -11,9 +14,14 @@ namespace {
 
 constexpr std::uint64_t kTelemetryIntervalMs = 30'000;
 constexpr std::uint64_t kResourceRetryMs = 30'000;
+constexpr std::uint64_t kPetRequestSettlingMs = 500;
 constexpr std::uint64_t kWifiProvisioningRestartDelayMs = 750;
 constexpr DeviceCapabilities kTab5Capabilities{
     true, true, true, true, true, false, true, true, true};
+
+int discardEspLog(const char*, va_list) {
+  return 0;
+}
 
 void restartWirelessCoprocessor() {
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
@@ -37,6 +45,10 @@ void restartWirelessCoprocessor() {
 }  // namespace
 
 void FirmwareApp::setup() {
+  ledcSetClockSource(LEDC_USE_PLL_DIV_CLK);
+  esp_log_set_vprintf(discardEspLog);
+  esp_log_level_set("*", ESP_LOG_NONE);
+  UsbTransport::prepareSerialBuffers();
   auto config = M5.config();
   config.serial_baudrate = 115200;
   config.internal_spk = true;
@@ -100,6 +112,36 @@ void FirmwareApp::setup() {
   configureProtocol(wifi_client_);
   configureProtocol(ble_client_);
   connection_detail_ = paired() ? "等待电脑 Bridge" : "请通过USB连接电脑并输入配对码";
+}
+
+bool FirmwareApp::captureWithReleasedStorage(
+    DeviceProtocolClient& client,
+    String& error) {
+  ui_.suspendBundledStorageForCamera();
+  if (!pet_store_.suspendForCamera(error)) {
+    ui_.resumeBundledStorageAfterCamera();
+    return false;
+  }
+  delay(25);
+
+  const auto captured = camera_.captureAndQueue(client, error);
+  String storage_error;
+  const auto pet_store_restored =
+      pet_store_.resumeAfterCamera(storage_error);
+  const auto bundled_storage_restored =
+      ui_.resumeBundledStorageAfterCamera();
+  if (!pet_store_restored || !bundled_storage_restored) {
+    if (!storage_error.isEmpty()) {
+      if (!error.isEmpty()) error += "；";
+      error += storage_error;
+    }
+    if (!bundled_storage_restored) {
+      if (!error.isEmpty()) error += "；";
+      error += "内置主题存储恢复失败";
+    }
+    log_e("%s", error.c_str());
+  }
+  return captured;
 }
 
 void FirmwareApp::loop() {
@@ -263,7 +305,7 @@ bool FirmwareApp::handleDeviceCommand(
       return false;
     }
     connection_detail_ = "正在主动观察";
-    if (!camera_.captureAndQueue(client, error)) {
+    if (!captureWithReleasedStorage(client, error)) {
       ui_.setCameraBusy(false);
       return false;
     }
@@ -337,6 +379,7 @@ void FirmwareApp::handleSnapshot(const Snapshot& snapshot) {
   }
   if (!model_.applySnapshot(display_snapshot)) return;
   requested_pet_ = "";
+  pet_request_not_before_ = millis() + kPetRequestSettlingMs;
   if (!have_cued_state_ || snapshot.state != last_cued_state_) {
     last_cued_state_ = snapshot.state;
     have_cued_state_ = true;
@@ -455,7 +498,7 @@ void FirmwareApp::startPendingCareListening() {
           "care",
           true,
           pending_care_listen_seconds_)) {
-    ui_.setVoiceRecording(true);
+    ui_.setVoiceRecording(true, "care");
     care_animation_override_ = true;
     care_animation_ = Animation::Waiting;
     connection_detail_ = "正在听";
@@ -508,8 +551,8 @@ void FirmwareApp::handleUiAction(const UiAction& action) {
         connection_detail_ = "语音需要 USB 或 Wi-Fi";
       } else {
         audio_.setPaused(true);
-        if (voice_.start(*client, action.value)) {
-          ui_.setVoiceRecording(true);
+        if (voice_.start(*client, action.value, true)) {
+          ui_.setVoiceRecording(true, action.value);
           connection_detail_ =
               action.value == "command" ? "正在听取命令" : "正在听";
         } else {
@@ -535,7 +578,7 @@ void FirmwareApp::handleUiAction(const UiAction& action) {
       } else {
         String error;
         connection_detail_ = "正在拍照";
-        if (camera_.captureAndQueue(*client, error)) {
+        if (captureWithReleasedStorage(*client, error)) {
           ui_.setCameraBusy(true);
           connection_detail_ = "照片正在加密发送";
         } else {
@@ -601,6 +644,7 @@ void FirmwareApp::requestSelectedPet(const std::uint64_t now_ms) {
   }
   auto* client = primaryClient();
   if (client == nullptr) return;
+  if (now_ms < pet_request_not_before_) return;
   if (requested_pet_ == pet_id && now_ms - requested_at_ < kResourceRetryMs) return;
   const auto installed = pet_store_.installedSha(pet_id);
   const auto resume = pet_store_.resumeFor(pet_id);

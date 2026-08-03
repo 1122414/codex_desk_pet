@@ -188,7 +188,7 @@ async function triggerObservation(baseUrl) {
       "Content-Type": "application/json",
       Cookie: cookie,
       Origin: baseUrl,
-      "X-CSRF-Token": csrfToken,
+      "X-Codex-Desk-CSRF": csrfToken,
     },
     body: JSON.stringify({
       commandId: `hardware-acceptance-${randomUUID()}`,
@@ -270,7 +270,7 @@ process.once("SIGTERM", () => {
   stopRequested = true;
 });
 
-if (options.triggerObservation && !record.trigger) {
+if (options.triggerObservation && record.trigger?.ok !== true) {
   try {
     record.trigger = {
       occurredAt: Date.now(),

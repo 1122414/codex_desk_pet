@@ -226,7 +226,21 @@ export class DeviceHub extends EventEmitter {
     });
     session.on("resourceRequest", (request) => {
       this.#sendResource(session, request).catch((error) => {
-        session.sendEvent({ event: "resource.error", petId: request.petId, error: error.message });
+        if (!session.ready) {
+          this.emit(
+            "diagnostic",
+            `Pet resource transfer stopped (${session.transport.kind}, ${session.deviceId ?? "unknown"}): ${error.message}`,
+          );
+          return;
+        }
+        try {
+          session.sendEvent({ event: "resource.error", petId: request.petId, error: error.message });
+        } catch (sendError) {
+          this.emit(
+            "diagnostic",
+            `Pet resource error delivery failed (${session.transport.kind}, ${session.deviceId ?? "unknown"}): ${sendError.message}`,
+          );
+        }
       });
     });
     session.on("event", (event) => {

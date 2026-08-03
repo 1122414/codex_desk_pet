@@ -45,6 +45,7 @@ class DeviceCamera {
   String sha256_;
   String error_;
   bool uploading_ = false;
+  bool camera_owns_i2c_ = false;
 };
 
 }  // namespace codex::firmware

@@ -380,6 +380,10 @@ const String& DeviceProtocolClient::sessionId() const {
   return session_id_;
 }
 
+const String& DeviceProtocolClient::lastSendError() const {
+  return last_send_error_;
+}
+
 bool DeviceProtocolClient::sendPetSelection(const String& pet_id) {
   if (pet_id.isEmpty() || pet_id.length() > 64) {
     return false;
@@ -474,6 +478,9 @@ bool DeviceProtocolClient::sendVisionBegin(
       state_ != State::Ready || capture_id.length() != 16 ||
       total_bytes == 0 || total_bytes > 512U * 1'024U ||
       width < 160 || height < 90 || sha256.length() != 64) {
+    last_send_error_ = state_ != State::Ready
+        ? "协议会话未就绪"
+        : "照片元数据无效";
     return false;
   }
   return sendEnvelope(
@@ -854,7 +861,7 @@ void DeviceProtocolClient::handleReadyMessage(
   if (type == "error") {
     const String code = payload["code"] | "";
     if (code == "RESYNC_REQUIRED" || code == "INVALID_SESSION") {
-      startHandshake(millis(), false);
+      startHandshake(millis(), true);
     }
   }
 }
@@ -1047,10 +1054,13 @@ bool DeviceProtocolClient::sendEnvelope(
     const String& type,
     const std::function<void(JsonObject)>& payload_writer,
     const bool reliable) {
+  last_send_error_ = "";
   if (transport_ == nullptr || !transport_->connected()) {
+    last_send_error_ = "传输链路未连接";
     return false;
   }
   if (reliable && pending_.size() >= kMaximumPending) {
+    last_send_error_ = "待确认消息队列已满";
     return false;
   }
   JsonDocument plaintext_document;
@@ -1058,6 +1068,7 @@ bool DeviceProtocolClient::sendEnvelope(
   payload_writer(plaintext_payload);
   String plaintext;
   if (serializeJson(plaintext_document, plaintext) == 0) {
+    last_send_error_ = "载荷序列化失败";
     return false;
   }
 
@@ -1083,15 +1094,19 @@ bool DeviceProtocolClient::sendEnvelope(
             sent_at,
             session_id_,
             plaintext)) {
+      last_send_error_ = "载荷加密失败";
       return false;
     }
   } else {
     payload.set(plaintext_document.as<JsonObjectConst>());
   }
   String serialized;
-  if (
-      serializeJson(document, serialized) == 0 ||
-      !transport_->sendText(serialized)) {
+  if (serializeJson(document, serialized) == 0) {
+    last_send_error_ = "协议帧序列化失败";
+    return false;
+  }
+  if (!transport_->sendText(serialized)) {
+    last_send_error_ = "协议帧写入失败";
     return false;
   }
   last_sent_at_ = millis();

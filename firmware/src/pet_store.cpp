@@ -53,16 +53,45 @@ bool readText(fs::FS& filesystem, const String& path, String& value, const std::
 }  // namespace
 
 bool PetStore::begin() {
+  mounted_ = false;
   if (!SD_MMC.setPins(kSdClock, kSdCommand, kSdD0, kSdD1, kSdD2, kSdD3)) return false;
   mounted_ = SD_MMC.begin("/sdcard", false, false, kSdFrequency, 5);
   if (!mounted_) return false;
-  if (!SD_MMC.exists(kRoot) && !SD_MMC.mkdir(kRoot)) return false;
-  if (!SD_MMC.exists(kPetRoot) && !SD_MMC.mkdir(kPetRoot)) return false;
+  if (
+      (!SD_MMC.exists(kRoot) && !SD_MMC.mkdir(kRoot)) ||
+      (!SD_MMC.exists(kPetRoot) && !SD_MMC.mkdir(kPetRoot))) {
+    SD_MMC.end();
+    mounted_ = false;
+    return false;
+  }
   return true;
 }
 
 bool PetStore::available() const {
   return mounted_;
+}
+
+bool PetStore::suspendForCamera(String& error) {
+  if (suspended_for_camera_ || !mounted_) return true;
+  if (transferActive()) {
+    error = "主题资源仍在传输";
+    return false;
+  }
+  checkpoint();
+  SD_MMC.end();
+  mounted_ = false;
+  suspended_for_camera_ = true;
+  return true;
+}
+
+bool PetStore::resumeAfterCamera(String& error) {
+  if (!suspended_for_camera_) return true;
+  if (!begin()) {
+    error = "microSD 恢复失败";
+    return false;
+  }
+  suspended_for_camera_ = false;
+  return true;
 }
 
 bool PetStore::handleMessage(

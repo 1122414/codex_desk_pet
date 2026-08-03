@@ -40,8 +40,10 @@ class Tab5Ui {
       const String& connection_detail,
       std::uint8_t transfer_progress);
   bool approvalCanAccept(const Approval& approval) const;
-  void setVoiceRecording(bool recording);
+  void setVoiceRecording(bool recording, const String& mode = "");
   void setCameraBusy(bool busy);
+  void suspendBundledStorageForCamera();
+  bool resumeBundledStorageAfterCamera();
 
  private:
   UiAction pollTouch(const Snapshot& snapshot, std::uint64_t now_ms, bool paired);
@@ -110,14 +112,17 @@ class Tab5Ui {
   std::vector<std::uint8_t> bundled_pet_compressed_buffer_;
   String bundled_pet_cached_path_;
   bool bundled_pet_ready_ = false;
+  bool bundled_storage_suspended_for_camera_ = false;
   AnimationPlayer animation_player_;
   InputController input_{kInputLayout};
   Point last_touch_{};
   bool touch_active_ = false;
   bool task_touch_active_ = false;
   bool voice_touch_active_ = false;
+  String voice_touch_mode_;
   bool camera_touch_active_ = false;
   bool voice_recording_ = false;
+  String voice_mode_;
   bool camera_busy_ = false;
   std::int16_t task_touch_start_y_ = 0;
   std::int16_t task_scroll_start_pixels_ = 0;

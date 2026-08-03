@@ -23,6 +23,9 @@ class FirmwareApp {
 
  private:
   void configureProtocol(DeviceProtocolClient& client);
+  bool captureWithReleasedStorage(
+      DeviceProtocolClient& client,
+      String& error);
   bool handleDeviceCommand(
       DeviceProtocolClient& client,
       const String& command,
@@ -66,6 +69,7 @@ class FirmwareApp {
   String connection_detail_ = "正在启动";
   String requested_pet_;
   std::uint64_t requested_at_ = 0;
+  std::uint64_t pet_request_not_before_ = 0;
   std::uint64_t last_telemetry_at_ = 0;
   std::uint64_t last_clock_check_at_ = 0;
   PresentationState last_cued_state_ = PresentationState::Ready;

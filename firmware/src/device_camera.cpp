@@ -3,7 +3,7 @@
 #include <M5Unified.h>
 #include <driver/i2c_master.h>
 #include <driver/jpeg_encode.h>
-#include <esp32-hal-i2c.h>
+#include <driver/ledc.h>
 #include <esp_system.h>
 #include <mbedtls/sha256.h>
 
@@ -14,28 +14,161 @@
 namespace codex::firmware {
 namespace {
 
-String hexDigest(const std::uint8_t* data, const std::size_t bytes) {
+constexpr gpio_num_t kCameraClockPin = GPIO_NUM_36;
+constexpr std::uint32_t kCameraClockHz = 24'000'000;
+constexpr std::uint8_t kCameraSccbAddress = 0x36;
+constexpr std::size_t kCameraProbeAttempts = 10;
+constexpr std::uint16_t kCameraSensorId = 0xeb52;
+constexpr std::uint16_t kCameraSensorIdHighRegister = 0x3107;
+constexpr std::uint16_t kCameraSensorIdLowRegister = 0x3108;
+constexpr i2c_port_num_t kCameraI2cPort = I2C_NUM_0;
+constexpr std::int8_t kCameraSclPin = 32;
+constexpr std::int8_t kCameraSdaPin = 31;
+constexpr std::uint32_t kCameraVideoFlags =
+    ESP_VIDEO_INIT_FLAGS_MIPI_CSI | ESP_VIDEO_INIT_FLAGS_ISP;
+
+bool initializeCameraClock(String& error) {
+  static bool initialized = false;
+  if (initialized) return true;
+
+  ledc_timer_config_t timer_config{};
+  timer_config.speed_mode = LEDC_LOW_SPEED_MODE;
+  timer_config.duty_resolution = LEDC_TIMER_1_BIT;
+  timer_config.timer_num = LEDC_TIMER_2;
+  timer_config.freq_hz = kCameraClockHz;
+  timer_config.clk_cfg = LEDC_USE_PLL_DIV_CLK;
+  const auto timer_result = ledc_timer_config(&timer_config);
+  if (timer_result != ESP_OK) {
+    error = "摄像头时钟定时器初始化失败: ";
+    error += esp_err_to_name(timer_result);
+    return false;
+  }
+
+  ledc_channel_config_t channel_config{};
+  channel_config.gpio_num = kCameraClockPin;
+  channel_config.speed_mode = LEDC_LOW_SPEED_MODE;
+  channel_config.channel = LEDC_CHANNEL_6;
+  channel_config.intr_type = LEDC_INTR_DISABLE;
+  channel_config.timer_sel = LEDC_TIMER_2;
+  channel_config.duty = 1;
+  channel_config.hpoint = 0;
+  const auto channel_result = ledc_channel_config(&channel_config);
+  if (channel_result != ESP_OK) {
+    error = "摄像头时钟通道初始化失败: ";
+    error += esp_err_to_name(channel_result);
+    return false;
+  }
+  const auto actual_frequency = ledc_get_freq(
+      LEDC_LOW_SPEED_MODE,
+      LEDC_TIMER_2);
+  const auto frequency_delta = actual_frequency > kCameraClockHz
+      ? actual_frequency - kCameraClockHz
+      : kCameraClockHz - actual_frequency;
+  if (frequency_delta > kCameraClockHz / 100U) {
+    char detail[64]{};
+    snprintf(
+        detail,
+        sizeof(detail),
+        "摄像头主时钟频率异常: %luHz",
+        static_cast<unsigned long>(actual_frequency));
+    error = detail;
+    return false;
+  }
+
+  initialized = true;
+  return true;
+}
+
+bool readCameraRegister(
+    const i2c_master_dev_handle_t sensor,
+    const std::uint16_t address,
+    std::uint8_t& value,
+    String& error) {
+  const std::array<std::uint8_t, 2> register_address{
+      static_cast<std::uint8_t>(address >> 8U),
+      static_cast<std::uint8_t>(address & 0xffU),
+  };
+  const auto result = i2c_master_transmit_receive(
+      sensor,
+      register_address.data(),
+      register_address.size(),
+      &value,
+      1,
+      50);
+  if (result == ESP_OK) return true;
+  error = "摄像头传感器寄存器读取失败: ";
+  error += esp_err_to_name(result);
+  return false;
+}
+
+bool verifyCameraSensor(
+    const i2c_master_bus_handle_t bus,
+    String& error) {
+  i2c_device_config_t config{};
+  config.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+  config.device_address = kCameraSccbAddress;
+  config.scl_speed_hz = 400'000;
+  i2c_master_dev_handle_t sensor = nullptr;
+  const auto add_result = i2c_master_bus_add_device(bus, &config, &sensor);
+  if (add_result != ESP_OK || sensor == nullptr) {
+    error = "摄像头传感器控制句柄创建失败: ";
+    error += esp_err_to_name(add_result);
+    return false;
+  }
+
+  std::uint8_t id_high = 0;
+  std::uint8_t id_low = 0;
+  const auto read_ok =
+      readCameraRegister(sensor, kCameraSensorIdHighRegister, id_high, error) &&
+      readCameraRegister(sensor, kCameraSensorIdLowRegister, id_low, error);
+  const auto delete_result = i2c_master_bus_rm_device(sensor);
+  if (!read_ok) return false;
+  if (delete_result != ESP_OK) {
+    error = "摄像头传感器控制句柄释放失败: ";
+    error += esp_err_to_name(delete_result);
+    return false;
+  }
+
+  const auto sensor_id = static_cast<std::uint16_t>(
+      (static_cast<std::uint16_t>(id_high) << 8U) | id_low);
+  if (sensor_id == kCameraSensorId) return true;
+  char detail[64]{};
+  snprintf(
+      detail,
+      sizeof(detail),
+      "摄像头传感器型号异常: 0x%04x",
+      static_cast<unsigned int>(sensor_id));
+  error = detail;
+  return false;
+}
+
+bool writeHexDigest(
+    const std::uint8_t* data,
+    const std::size_t bytes,
+    String& result) {
   std::array<std::uint8_t, 32> digest{};
-  if (mbedtls_sha256(data, bytes, digest.data(), 0) != 0) return {};
+  if (mbedtls_sha256(data, bytes, digest.data(), 0) != 0) return false;
   static constexpr char kHex[] = "0123456789abcdef";
-  String result;
-  if (!result.reserve(digest.size() * 2U)) return {};
+  if (!result.reserve(digest.size() * 2U)) return false;
+  result = "";
   for (const auto value : digest) {
     result += kHex[value >> 4U];
     result += kHex[value & 0x0fU];
   }
-  return result;
+  return result.length() == digest.size() * 2U;
 }
 
-String captureId() {
-  char result[17]{};
-  snprintf(
-      result,
-      sizeof(result),
-      "%08lx%08lx",
-      static_cast<unsigned long>(esp_random()),
-      static_cast<unsigned long>(esp_random()));
-  return result;
+bool makeCaptureId(String& result) {
+  std::array<std::uint8_t, 8> source{};
+  esp_fill_random(source.data(), source.size());
+  static constexpr char kHex[] = "0123456789abcdef";
+  if (!result.reserve(source.size() * 2U)) return false;
+  result = "";
+  for (const auto value : source) {
+    result += kHex[value >> 4U];
+    result += kHex[value & 0x0fU];
+  }
+  return result.length() == source.size() * 2U;
 }
 
 }  // namespace
@@ -55,6 +188,18 @@ bool DeviceCamera::captureAndQueue(
   }
   clearUpload();
   error_ = "";
+  if (!capture_id_.reserve(16) || !sha256_.reserve(64)) {
+    error = "照片元数据内存不足";
+    error_ = error;
+    clearUpload();
+    return false;
+  }
+  if (!makeCaptureId(capture_id_)) {
+    error = "照片标识生成失败";
+    error_ = error;
+    clearUpload();
+    return false;
+  }
   if (!initializeCamera(error)) {
     stopCamera();
     error_ = error;
@@ -94,15 +239,21 @@ bool DeviceCamera::captureAndQueue(
   }
 
   client_ = &client;
-  capture_id_ = captureId();
-  sha256_ = hexDigest(jpeg_, jpeg_bytes_);
   width_ = static_cast<std::uint16_t>(frame_width);
   height_ = static_cast<std::uint16_t>(frame_height);
-  if (
-      capture_id_.length() != 16 || sha256_.length() != 64 ||
-      !client_->sendVisionBegin(
+  if (!writeHexDigest(jpeg_, jpeg_bytes_, sha256_)) {
+    error = "照片摘要生成失败";
+    error_ = error;
+    clearUpload();
+    return false;
+  }
+  if (!client_->sendVisionBegin(
           capture_id_, jpeg_bytes_, width_, height_, sha256_)) {
     error = "照片传输启动失败";
+    if (!client_->lastSendError().isEmpty()) {
+      error += ": ";
+      error += client_->lastSendError();
+    }
     error_ = error;
     clearUpload();
     return false;
@@ -137,14 +288,54 @@ void DeviceCamera::poll() {
 }
 
 bool DeviceCamera::initializeCamera(String& error) {
-  const auto raw_i2c = i2cBusHandle(M5.In_I2C.getPort());
-  if (raw_i2c == nullptr) {
+  if (!initializeCameraClock(error)) return false;
+
+  auto& camera_power = M5.getIOExpander(0);
+  camera_power.setDirection(6, true);
+  camera_power.setHighImpedance(6, false);
+  camera_power.digitalWrite(6, false);
+  delay(10);
+  camera_power.digitalWrite(6, true);
+  delay(100);
+  if (!camera_power.getWriteValue(6)) {
+    error = "摄像头复位脚未能拉高";
+    return false;
+  }
+
+  i2c_master_bus_handle_t i2c_handle = nullptr;
+  const auto i2c_result = i2c_master_get_bus_handle(
+      static_cast<i2c_port_num_t>(M5.In_I2C.getPort()),
+      &i2c_handle);
+  if (i2c_result != ESP_OK || i2c_handle == nullptr) {
     error = "摄像头 I2C 总线不可用";
     return false;
   }
+  esp_err_t probe_result = ESP_FAIL;
+  for (std::size_t attempt = 0; attempt < kCameraProbeAttempts; ++attempt) {
+    probe_result = i2c_master_probe(
+        i2c_handle,
+        kCameraSccbAddress,
+        50);
+    if (probe_result == ESP_OK) break;
+    delay(20);
+  }
+  if (probe_result != ESP_OK) {
+    error = "摄像头传感器 0x36 无响应: ";
+    error += esp_err_to_name(probe_result);
+    return false;
+  }
+  if (!verifyCameraSensor(i2c_handle, error)) return false;
+  if (!M5.In_I2C.release()) {
+    error = "摄像头无法接管 I2C 总线";
+    return false;
+  }
+  camera_owns_i2c_ = true;
+  esp_video_deinit_with_flags(kCameraVideoFlags);
   ESPVideoCamConfigClass camera_config;
   if (!camera_config.begin(
-          reinterpret_cast<i2c_master_bus_handle_t>(raw_i2c),
+          kCameraI2cPort,
+          kCameraSclPin,
+          kCameraSdaPin,
           400'000,
           -1,
           -1)) {
@@ -152,7 +343,7 @@ bool DeviceCamera::initializeCamera(String& error) {
     return false;
   }
   ESPVideoCSIConfigClass csi_config;
-  if (!csi_config.begin(camera_config) || !video_.begin(csi_config)) {
+  if (!csi_config.begin(camera_config, true) || !video_.begin(csi_config)) {
     error = "MIPI 摄像头初始化失败";
     return false;
   }
@@ -223,7 +414,17 @@ bool DeviceCamera::encodeFrame(
 void DeviceCamera::stopCamera() {
   if (capture_.isCaptureStarted()) capture_.stopCapture();
   if (capture_.isOpened()) capture_.end();
-  if (video_.isActive()) video_.end();
+  if (video_.isActive()) {
+    video_.end();
+  } else {
+    esp_video_deinit_with_flags(kCameraVideoFlags);
+  }
+  if (camera_owns_i2c_) {
+    camera_owns_i2c_ = false;
+    if (!M5.In_I2C.begin()) {
+      error_ = "设备 I2C 总线恢复失败";
+    }
+  }
 }
 
 void DeviceCamera::clearUpload() {

@@ -185,6 +185,31 @@ test("a lost ACK retries without resync or duplicate execution", async (t) => {
   assert.equal(snapshots.length, 1);
 });
 
+test("a remote sequence gap closes the bridge transport for a clean reconnect", async (t) => {
+  const { bridge, device, transports } = createSessions();
+  t.after(() => {
+    bridge.close();
+    device.close();
+  });
+  bridge.start({ autoTick: false });
+  device.start({ autoTick: false });
+  await waitFor(() =>
+    bridge.ready &&
+    device.ready &&
+    bridge.pendingAcknowledgements === 0 &&
+    device.pendingAcknowledgements === 0,
+  );
+
+  transports.left.dropNext();
+  bridge.sendEvent({ event: "test.dropped" });
+  bridge.sendEvent({ event: "test.gap" });
+  await waitFor(() => bridge.state === "closed");
+
+  assert.equal(device.state, "closed");
+  assert.equal(transports.left.open, false);
+  assert.equal(transports.right.open, false);
+});
+
 test("pet resources transfer in chunks and install on the device cache", async (t) => {
   const { bridge, device } = createSessions();
   t.after(() => {

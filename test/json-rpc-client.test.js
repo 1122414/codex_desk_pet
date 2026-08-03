@@ -22,18 +22,17 @@ class FakeChild extends EventEmitter {
     this.stdout = new EventEmitter();
     this.stderr = new EventEmitter();
     this.messages = [];
-    this.stdin = {
-      writable: true,
-      write: (line) => {
-        const message = JSON.parse(line);
-        this.messages.push(message);
-        if (message.method === "initialize") {
-          queueMicrotask(() => {
-            this.stdout.emit("data", Buffer.from(`${JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {} })}\n`));
-          });
-        }
-        return true;
-      },
+    this.stdin = new EventEmitter();
+    this.stdin.writable = true;
+    this.stdin.write = (line) => {
+      const message = JSON.parse(line);
+      this.messages.push(message);
+      if (message.method === "initialize") {
+        queueMicrotask(() => {
+          this.stdout.emit("data", Buffer.from(`${JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {} })}\n`));
+        });
+      }
+      return true;
     };
     queueMicrotask(() => this.emit("spawn"));
   }
@@ -70,5 +69,22 @@ test("JSON-RPC client can restart cleanly and marks deliberate exits", async () 
   await client.start();
   assert.equal(client.running, true);
   assert.equal(children.length, 2);
+  await client.stop();
+});
+
+test("JSON-RPC client consumes App Server stdin errors", async () => {
+  let child;
+  const client = new JsonRpcClient({
+    spawnProcess: () => {
+      child = new FakeChild();
+      return child;
+    },
+  });
+  const diagnostics = [];
+  client.on("diagnostic", (message) => diagnostics.push(message));
+
+  await client.start();
+  child.stdin.emit("error", Object.assign(new Error("broken pipe"), { code: "EPIPE" }));
+  assert.match(diagnostics.at(-1), /Codex App Server input failed: broken pipe/);
   await client.stop();
 });

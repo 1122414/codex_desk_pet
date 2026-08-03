@@ -405,6 +405,52 @@ test("device resource requests stream a validated custom Pet into the atomic cac
   assert.deepEqual(device.resourceCache.get("hub-pet").data, resource);
 });
 
+test("a disconnected device does not crash the Bridge when its resource request fails", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codex-desk-hub-resource-close-"));
+  const credentials = new DeviceCredentialRepository(path.join(root, "devices.json"));
+  const secret = "8".repeat(64);
+  await credentials.pair({ deviceId: "core-s3-resource-close", secret });
+  let refreshStarted = false;
+  let releaseRefresh;
+  const catalog = {
+    async refresh() {
+      refreshStarted = true;
+      await new Promise((resolve) => { releaseRefresh = resolve; });
+      throw new Error("catalog refresh failed");
+    },
+  };
+  const hub = new DeviceHub({
+    store: new DeskStore(),
+    bridge: { decideApproval: async () => null },
+    catalog,
+    settings: new SettingsRepository(path.join(root, "settings.json")),
+    credentials,
+  });
+  await hub.start();
+  t.after(() => hub.close());
+  const transports = createMemoryTransportPair({ kind: "usb" });
+  const bridgeSession = hub.attachTransport(transports.left);
+  const device = new DeviceSession({
+    role: "device",
+    transport: transports.right,
+    deviceId: "core-s3-resource-close",
+    secret,
+  });
+  t.after(() => device.close());
+  const diagnostics = [];
+  hub.on("diagnostic", (message) => diagnostics.push(message));
+  device.start();
+  await waitFor(() => bridgeSession.ready && device.ready);
+
+  device.requestResource("missing-pet");
+  await waitFor(() => refreshStarted);
+  bridgeSession.close();
+  releaseRefresh();
+
+  await waitFor(() => diagnostics.some((message) => message.includes("Pet resource transfer stopped")));
+  assert.equal(bridgeSession.ready, false);
+});
+
 test("BLE resource requests require USB or Wi-Fi instead of starting an impractical large transfer", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "codex-desk-hub-ble-resource-"));
   const petDir = path.join(root, "pets", "hub-pet");

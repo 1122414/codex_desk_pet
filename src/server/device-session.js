@@ -465,7 +465,9 @@ export class DeviceSession extends EventEmitter {
         return;
       case "error":
         if (envelope.payload.code === "RESYNC_REQUIRED" && this.role === "bridge" && this.ready) {
-          this.sendSnapshot();
+          this.emit("remoteError", envelope.payload);
+          this.close();
+          return;
         }
         this.emit("remoteError", envelope.payload);
         return;

@@ -1,14 +1,16 @@
 #include "transports/usb_transport.hpp"
 
-#include <algorithm>
 #include <cstdint>
 
 namespace codex::firmware {
 
-void UsbTransport::begin() {
+void UsbTransport::prepareSerialBuffers() {
   Serial.setRxBufferSize(kMaximumLineBytes);
-  Serial.setTxBufferSize(kMaximumLineBytes);
-  Serial.setTxTimeoutMs(1'000);
+  Serial.setTxBufferSize(kMaximumLineBytes + 1U);
+}
+
+void UsbTransport::begin() {
+  Serial.setTxTimeoutMs(500);
   receive_buffer_.reserve(1'024);
 }
 
@@ -57,28 +59,13 @@ bool UsbTransport::sendText(const String& message) {
   if (!connected() || message.length() > kMaximumLineBytes) {
     return false;
   }
-  constexpr std::size_t kChunkBytes = 128;
-  constexpr std::uint64_t kWriteTimeoutMs = 3'000;
-  const auto started_at = static_cast<std::uint64_t>(millis());
-  std::size_t offset = 0;
-  while (offset < message.length()) {
-    const auto chunk = std::min<std::size_t>(
-        kChunkBytes,
-        message.length() - offset);
-    const auto written = Serial.write(
-        reinterpret_cast<const std::uint8_t*>(message.c_str() + offset),
-        chunk);
-    offset += written;
-    if (
-        written == 0 &&
-        static_cast<std::uint64_t>(millis()) - started_at >= kWriteTimeoutMs) {
-      return false;
-    }
-    delay(1);
-  }
-  if (Serial.write('\n') != 1) return false;
-  Serial.flush();
-  return true;
+  String frame;
+  if (!frame.reserve(message.length() + 1U)) return false;
+  frame = message;
+  frame += '\n';
+  const auto written = Serial.write(
+      reinterpret_cast<const std::uint8_t*>(frame.c_str()), frame.length());
+  return written == frame.length();
 }
 
 void UsbTransport::close() {

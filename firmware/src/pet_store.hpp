@@ -19,6 +19,8 @@ class PetStore {
  public:
   bool begin();
   bool available() const;
+  bool suspendForCamera(String& error);
+  bool resumeAfterCamera(String& error);
   bool handleMessage(
       const String& type,
       JsonObjectConst payload,
@@ -97,6 +99,7 @@ class PetStore {
   String manifestPath(const String& pet_id, const String& sha256) const;
 
   bool mounted_ = false;
+  bool suspended_for_camera_ = false;
   ActiveManifest transfer_;
   ResourceTransferTracker tracker_;
   std::uint16_t uncheckpointed_chunks_ = 0;
