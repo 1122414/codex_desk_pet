@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import { DeskStore } from "../src/server/desk-store.js";
 import { VoiceAgent } from "../src/server/voice-agent.js";
 
-function createFixture({ available = true, transcribe = null } = {}) {
+function createFixture({
+  available = true,
+  transcribe = null,
+  voiceAgentOptions = {},
+} = {}) {
   const transcriptions = [];
   const transcribedAudio = [];
   const chatCalls = [];
@@ -58,6 +62,7 @@ function createFixture({ available = true, transcribe = null } = {}) {
     careAgent,
     settings,
     transcriber,
+    ...voiceAgentOptions,
   });
   return {
     agent,
@@ -130,6 +135,23 @@ test("voice command is queued for explicit confirmation instead of executing", a
     text: "让 Codex 运行测试",
   }]);
   assert.equal(fixture.store.snapshot().voice.status, "awaiting-confirmation");
+});
+
+test("voice watchdog clears a session when the device misses voice.stop", async (t) => {
+  const fixture = createFixture({
+    voiceAgentOptions: { chatListeningTimeoutMs: 25 },
+  });
+  t.after(() => fixture.agent.close());
+
+  await fixture.agent.start(fixture.session, { mode: "chat" });
+  await new Promise((resolve) => setTimeout(resolve, 80));
+
+  assert.equal(fixture.store.snapshot().voice.status, "failed");
+  assert.deepEqual(fixture.events, [{
+    event: "voice.reply",
+    ok: false,
+    text: "设备语音会话超时，请再试一次",
+  }]);
 });
 
 test("care voice completes three automatic rounds in one CareAgent context", async (t) => {

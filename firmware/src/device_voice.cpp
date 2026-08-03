@@ -71,9 +71,6 @@ void DeviceVoice::poll() {
   }
   if (!chunk_pending_) return;
   if (M5.Mic.isRecording() != 0) {
-    if (elapsed(now_ms, chunk_started_at_ms_, kChunkTimeoutMs)) {
-      stop(VoiceStopReason::LinkError);
-    }
     return;
   }
   const auto activity_result = automatic_stop_
@@ -103,7 +100,6 @@ bool DeviceVoice::stop(const VoiceStopReason reason) {
   chunk_pending_ = false;
   automatic_stop_ = false;
   recording_started_at_ms_ = 0;
-  chunk_started_at_ms_ = 0;
   last_stop_reason_ = reason;
   return sent;
 }
@@ -114,7 +110,6 @@ bool DeviceVoice::beginChunk() {
       samples_.size(),
       kSampleRate,
       false);
-  if (chunk_pending_) chunk_started_at_ms_ = static_cast<std::uint32_t>(millis());
   return chunk_pending_;
 }
 

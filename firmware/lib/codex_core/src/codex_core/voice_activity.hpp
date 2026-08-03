@@ -22,7 +22,7 @@ class VoiceActivityDetector {
   bool heardSpeech() const { return heard_speech_; }
 
  private:
-  static constexpr std::uint32_t kSilenceDurationMs = 1'500;
+  static constexpr std::uint32_t kSilenceDurationMs = 2'500;
   static constexpr std::uint32_t kSpeechLevelThreshold = 500;
 
   std::uint64_t started_at_ = 0;

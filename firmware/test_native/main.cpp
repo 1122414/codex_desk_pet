@@ -101,13 +101,13 @@ void testVoiceActivity() {
           detector.heardSpeech(),
       "voice activity marks the first spoken chunk");
   expect(
-      detector.observe(silence.data(), silence.size(), 32'499) ==
+      detector.observe(silence.data(), silence.size(), 33'499) ==
           codex::VoiceActivityResult::Listening,
       "voice activity waits for the full silence tail");
   expect(
-      detector.observe(silence.data(), silence.size(), 32'500) ==
+      detector.observe(silence.data(), silence.size(), 33'500) ==
           codex::VoiceActivityResult::SpeechEnded,
-      "voice activity ends after one and a half seconds of silence");
+      "voice activity ends after two and a half seconds of silence");
 }
 
 void testModel() {

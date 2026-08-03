@@ -2,12 +2,22 @@ const SAMPLE_RATE = 16_000;
 const MAX_AUDIO_CHUNK_BYTES = 2_048;
 const MAX_AUDIO_BYTES = SAMPLE_RATE * 2 * 60;
 const DEFAULT_AUTO_LISTEN_SECONDS = 20;
+const DEFAULT_CHAT_LISTENING_TIMEOUT_MS = 25_000;
+const DEFAULT_CARE_LISTENING_TIMEOUT_MS = 65_000;
+const LISTENING_TIMEOUT_ERROR = "设备语音会话超时，请再试一次";
 
 function validBase64(value) {
   return typeof value === "string" &&
     value.length > 0 &&
     value.length <= Math.ceil(MAX_AUDIO_CHUNK_BYTES / 3) * 4 &&
     /^[A-Za-z0-9+/]+={0,2}$/.test(value);
+}
+
+function validListeningTimeout(value, name) {
+  if (!Number.isInteger(value) || value < 1 || value > 120_000) {
+    throw new RangeError(`${name} must be an integer between 1 and 120000 milliseconds`);
+  }
+  return value;
 }
 
 export class VoiceAgent {
@@ -19,6 +29,8 @@ export class VoiceAgent {
     careAgent = null,
     settings = null,
     transcriber,
+    chatListeningTimeoutMs = DEFAULT_CHAT_LISTENING_TIMEOUT_MS,
+    careListeningTimeoutMs = DEFAULT_CARE_LISTENING_TIMEOUT_MS,
   } = {}) {
     if (!store || !petAgent || !transcriber) {
       throw new TypeError("VoiceAgent requires store, petAgent, and transcriber");
@@ -31,6 +43,14 @@ export class VoiceAgent {
     this.careAgent = careAgent;
     this.settings = settings;
     this.transcriber = transcriber;
+    this.chatListeningTimeoutMs = validListeningTimeout(
+      chatListeningTimeoutMs,
+      "chatListeningTimeoutMs",
+    );
+    this.careListeningTimeoutMs = validListeningTimeout(
+      careListeningTimeoutMs,
+      "careListeningTimeoutMs",
+    );
   }
 
   async start(session, { mode = "chat" } = {}) {
@@ -54,6 +74,7 @@ export class VoiceAgent {
       stopping: false,
       cancelled: false,
       abortController: new AbortController(),
+      listeningTimer: null,
     };
     this.#sessions.set(session.deviceId, entry);
     this.store.setVoice({
@@ -64,6 +85,7 @@ export class VoiceAgent {
       deviceId: session.deviceId,
     });
     if (mode === "care") this.store.setCare({ status: "listening", error: null });
+    this.#armListeningTimeout(entry);
     return { accepted: true, mode };
   }
 
@@ -99,6 +121,7 @@ export class VoiceAgent {
     if (!entry) return { accepted: false };
     if (entry.stopping) return { accepted: true };
     entry.stopping = true;
+    this.#clearListeningTimeout(entry);
     if (!silent) this.store.setVoice({ status: "transcribing" });
     void this.#finalize(entry).catch((error) => this.#fail(entry, error));
     return { accepted: true };
@@ -142,6 +165,7 @@ export class VoiceAgent {
 
   async #finalize(entry) {
     if (!this.#active(entry)) return;
+    this.#clearListeningTimeout(entry);
     const audio = entry.audioBytes > 0
       ? Buffer.concat(entry.audioChunks, entry.audioBytes)
       : null;
@@ -226,6 +250,7 @@ export class VoiceAgent {
 
   #cancel(entry) {
     if (!entry) return;
+    this.#clearListeningTimeout(entry);
     entry.cancelled = true;
     entry.stopping = true;
     entry.abortController.abort();
@@ -236,6 +261,7 @@ export class VoiceAgent {
 
   #fail(entry, error) {
     if (entry.cancelled) return;
+    this.#clearListeningTimeout(entry);
     if (this.#sessions.get(entry.deviceId) === entry) {
       this.#sessions.delete(entry.deviceId);
     }
@@ -274,6 +300,22 @@ export class VoiceAgent {
     } catch {
       return DEFAULT_AUTO_LISTEN_SECONDS;
     }
+  }
+
+  #armListeningTimeout(entry) {
+    entry.listeningTimer = setTimeout(() => {
+      if (!this.#active(entry) || entry.stopping) return;
+      this.#fail(entry, new Error(LISTENING_TIMEOUT_ERROR));
+    }, entry.mode === "care"
+      ? this.careListeningTimeoutMs
+      : this.chatListeningTimeoutMs);
+    entry.listeningTimer.unref?.();
+  }
+
+  #clearListeningTimeout(entry) {
+    if (entry?.listeningTimer === null || entry?.listeningTimer === undefined) return;
+    clearTimeout(entry.listeningTimer);
+    entry.listeningTimer = null;
   }
 
   #boundedDeviceText(value, maximumBytes = 240) {

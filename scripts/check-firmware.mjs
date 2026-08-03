@@ -135,12 +135,19 @@ try {
     path.join(root, "firmware", "src", "device_voice.cpp"),
     "utf8",
   );
+  const maximumDurationIndex = deviceVoice.indexOf(
+    "elapsed(now_ms, recording_started_at_ms_, maximum_duration_ms_)",
+  );
+  const microphonePendingIndex = deviceVoice.indexOf(
+    "M5.Mic.isRecording() != 0",
+  );
   if (
-    !deviceVoice.includes("kChunkTimeoutMs") ||
-    !deviceVoice.includes("elapsed(now_ms, recording_started_at_ms_, maximum_duration_ms_)") ||
-    !deviceVoice.includes("elapsed(now_ms, chunk_started_at_ms_, kChunkTimeoutMs)")
+    maximumDurationIndex === -1 ||
+    microphonePendingIndex === -1 ||
+    maximumDurationIndex > microphonePendingIndex ||
+    deviceVoice.includes("kChunkTimeoutMs")
   ) {
-    throw new Error("Tab5 语音必须在录音分块卡住时自行结束，不能无限保持聆听状态");
+    throw new Error("Tab5 语音必须在麦克风分块未完成时仍执行总时长兜底，且不能短超时误结束");
   }
   const ledcClockSourceIndex = firmwareApp.indexOf(
     "ledcSetClockSource(LEDC_USE_PLL_DIV_CLK);",
