@@ -19,6 +19,7 @@ import { ObservationScheduler } from "./observation-scheduler.js";
 import { UsbDeviceManager } from "./transports/usb-cdc-transport.js";
 import { LocalWhisperTranscriber } from "./local-whisper-transcriber.js";
 import { MacosSpeechSynthesizer } from "./macos-speech-synthesizer.js";
+import { FallbackSpeechSynthesizer, NeuralSpeechSynthesizer } from "./neural-speech-synthesizer.js";
 import { VoiceAgent } from "./voice-agent.js";
 import { VisionAgent } from "./vision-agent.js";
 
@@ -69,13 +70,19 @@ const careAgent = new CareAgent({
   memory: careMemory,
   conversation,
 });
+const neuralSpeechSynthesizer = new NeuralSpeechSynthesizer();
+const speechSynthesizer = new FallbackSpeechSynthesizer({
+  primary: neuralSpeechSynthesizer,
+  fallback: new MacosSpeechSynthesizer(),
+});
+void neuralSpeechSynthesizer.start();
 const voiceAgent = new VoiceAgent({
   store,
   petAgent,
   careAgent,
   settings,
   transcriber: new LocalWhisperTranscriber(),
-  speechSynthesizer: new MacosSpeechSynthesizer(),
+  speechSynthesizer,
 });
 const visionAgent = new VisionAgent({ store, careAgent, settings });
 const deviceHub = new DeviceHub({
@@ -226,6 +233,7 @@ async function shutdown() {
   stopping = true;
   hookApprovalBroker.close();
   await voiceAgent.close();
+  await speechSynthesizer.close();
   visionAgent.close();
   careAgent.close();
   petAgent.close();
