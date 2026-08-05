@@ -33,7 +33,7 @@ constexpr std::int16_t kRegionBufferWidth = 808;
 constexpr std::uint64_t kTaskScrollFrameIntervalMs = 33;
 constexpr std::uint16_t kBundledPetWidth = 192;
 constexpr std::uint16_t kBundledPetHeight = 208;
-constexpr std::uint8_t kDefaultSpeakerVolume = 179;
+constexpr std::uint8_t kDefaultSpeakerVolume = 102;
 constexpr std::size_t kBundledPetPixels =
     static_cast<std::size_t>(kBundledPetWidth) * kBundledPetHeight;
 

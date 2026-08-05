@@ -193,6 +193,48 @@ test("phone mode streams the local female voice to Tab5 before listening again",
   ]);
 });
 
+test("phone mode retries a degenerate transcript in the local female voice without ending the call", async (t) => {
+  const generated = [];
+  const fixture = createFixture({
+    speechSynthesizer: {
+      available: async () => true,
+      synthesize: async (text) => {
+        generated.push(text);
+        return Buffer.from([0x01, 0x00, 0x02, 0x00]);
+      },
+    },
+  });
+  t.after(() => fixture.agent.close());
+
+  await fixture.agent.start(fixture.session, { mode: "phone" });
+  await finishTurn(fixture, "红笼笼笼笼笼笼笼笼笼");
+
+  assert.deepEqual(fixture.chatCalls, []);
+  assert.deepEqual(generated, ["我刚才没听清，你再说一遍好吗？"]);
+  assert.deepEqual(fixture.events, [
+    {
+      event: "voice.reply",
+      ok: true,
+      text: "我刚才没听清，你再说一遍好吗？",
+      remoteAudio: true,
+      audioId: 1,
+      continueListening: true,
+      autoListenSeconds: 20,
+    },
+    {
+      event: "voice.audio.chunk",
+      audioId: 1,
+      sampleRate: 16_000,
+      samplesPerChannel: 2,
+      data: Buffer.from([0x01, 0x00, 0x02, 0x00]).toString("base64"),
+    },
+    {
+      event: "voice.audio.end",
+      audioId: 1,
+    },
+  ]);
+});
+
 test("voice command is queued for explicit confirmation instead of executing", async (t) => {
   const fixture = createFixture();
   t.after(() => fixture.agent.close());

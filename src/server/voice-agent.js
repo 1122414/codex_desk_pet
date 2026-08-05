@@ -39,6 +39,22 @@ function validBase64(value) {
     /^[A-Za-z0-9+/]+={0,2}$/.test(value);
 }
 
+function usableTranscript(value) {
+  const transcript = String(value ?? "").trim();
+  if (!transcript) return "";
+  const characters = [...transcript].filter((character) => !/\s/u.test(character));
+  if (characters.length < 8) return transcript;
+  const counts = new Map();
+  for (const character of characters) {
+    counts.set(character, (counts.get(character) ?? 0) + 1);
+  }
+  const mostFrequent = Math.max(...counts.values());
+  // Whisper may emit one repeated syllable for mostly-noise recordings. Do not
+  // let that malformed transcript become a seemingly deliberate chat message.
+  if (counts.size <= 3 && mostFrequent / characters.length >= 0.7) return "";
+  return transcript;
+}
+
 function validListeningTimeout(value, name) {
   if (!Number.isInteger(value) || value < 1 || value > 120_000) {
     throw new RangeError(`${name} must be an integer between 1 and 120000 milliseconds`);
@@ -224,7 +240,9 @@ export class VoiceAgent {
       ? Buffer.concat(entry.audioChunks, entry.audioBytes)
       : null;
     const transcript = audio
-      ? String(await this.transcriber.transcribe(audio, { signal: entry.abortController.signal })).trim()
+      ? usableTranscript(await this.transcriber.transcribe(audio, {
+        signal: entry.abortController.signal,
+      }))
       : "";
     if (!this.#active(entry)) return;
     const phoneMode = entry.mode === "phone";
@@ -249,19 +267,30 @@ export class VoiceAgent {
         return;
       }
       if (phoneMode) {
-        this.#sessions.delete(entry.deviceId);
+        const reply = "我刚才没听清，你再说一遍好吗？";
         this.store.setVoice({
           status: "completed",
           transcript: null,
           error: null,
         });
-        entry.session.sendEvent({
-          event: "voice.reply",
-          ok: true,
-          text: "这次没听清，我们下次再聊。",
-          continueListening: false,
-          autoListenSeconds: await this.#autoListenSeconds(),
-        });
+        try {
+          const canUseLocalVoice = this.speechSynthesizer &&
+            await this.speechSynthesizer.available();
+          if (!this.#active(entry)) return;
+          if (canUseLocalVoice) {
+            const pcm = await this.speechSynthesizer.synthesize(reply, {
+              signal: entry.abortController.signal,
+            });
+            if (!this.#active(entry)) return;
+            await this.#sendPhoneSpeech(entry, reply, pcm);
+          } else {
+            await this.#sendPhoneTextReply(entry, reply);
+          }
+        } catch (error) {
+          if (error?.name === "AbortError" || !this.#active(entry)) return;
+          await this.#sendPhoneTextReply(entry, reply);
+        }
+        if (this.#active(entry)) this.#sessions.delete(entry.deviceId);
         return;
       }
       this.store.setVoice({

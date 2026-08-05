@@ -9,6 +9,10 @@ const BYTES_PER_SAMPLE = 2;
 const DEFAULT_TIMEOUT_MS = 45_000;
 const MAX_TRANSCRIPT_LENGTH = 4_000;
 const DEFAULT_CHINESE_PROMPT = "以下是普通话中文对话，请忠实转写用户原话。";
+const NORMALIZATION_MINIMUM_MEAN_ABS = 80;
+const NORMALIZATION_TARGET_MEAN_ABS = 4_800;
+const NORMALIZATION_MAX_GAIN = 6;
+const NORMALIZATION_MAX_PEAK = 28_000;
 
 export const DEFAULT_WHISPER_MODEL_PATH = path.join(
   os.homedir(),
@@ -37,6 +41,37 @@ function normalizeTranscript(value) {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, MAX_TRANSCRIPT_LENGTH);
+}
+
+export function normalizePcm16MonoForTranscription(pcm) {
+  if (!Buffer.isBuffer(pcm) || pcm.byteLength === 0 || pcm.byteLength % BYTES_PER_SAMPLE !== 0) {
+    throw new TypeError("PCM 音频必须是非空的 16 位单声道采样");
+  }
+  let meanAbsolute = 0;
+  let peak = 0;
+  for (let offset = 0; offset < pcm.byteLength; offset += BYTES_PER_SAMPLE) {
+    const sample = pcm.readInt16LE(offset);
+    const absolute = Math.abs(sample);
+    meanAbsolute += absolute;
+    peak = Math.max(peak, absolute);
+  }
+  meanAbsolute /= pcm.byteLength / BYTES_PER_SAMPLE;
+  if (meanAbsolute < NORMALIZATION_MINIMUM_MEAN_ABS || peak === 0) {
+    return Buffer.from(pcm);
+  }
+  const gain = Math.min(
+    NORMALIZATION_MAX_GAIN,
+    NORMALIZATION_MAX_PEAK / peak,
+    Math.max(1, NORMALIZATION_TARGET_MEAN_ABS / meanAbsolute),
+  );
+  if (gain <= 1.01) return Buffer.from(pcm);
+
+  const normalized = Buffer.allocUnsafe(pcm.byteLength);
+  for (let offset = 0; offset < pcm.byteLength; offset += BYTES_PER_SAMPLE) {
+    const amplified = Math.round(pcm.readInt16LE(offset) * gain);
+    normalized.writeInt16LE(Math.max(-32_768, Math.min(32_767, amplified)), offset);
+  }
+  return normalized;
 }
 
 export function pcm16MonoToWav(pcm, sampleRate = SAMPLE_RATE) {
@@ -115,7 +150,7 @@ export class LocalWhisperTranscriber {
     if (!await this.available()) {
       throw new Error(`本地中文转写模型未准备好：${this.modelPath}`);
     }
-    const wav = pcm16MonoToWav(pcm);
+    const wav = pcm16MonoToWav(normalizePcm16MonoForTranscription(pcm));
     const directory = await mkdtemp(path.join(this.tempDirectory, "codex-desk-voice-"));
     const audioPath = path.join(directory, "utterance.wav");
     try {
@@ -140,6 +175,7 @@ export class LocalWhisperTranscriber {
           "--language", "zh",
           "--prompt", this.prompt,
           "--suppress-nst",
+          "--no-fallback",
           "--threads", "4",
           "--no-timestamps",
           "--no-prints",

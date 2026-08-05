@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   LocalWhisperTranscriber,
+  normalizePcm16MonoForTranscription,
   pcm16MonoToWav,
 } from "../src/server/local-whisper-transcriber.js";
 
@@ -35,6 +36,25 @@ test("pcm16MonoToWav produces a 16 kHz mono WAV header", () => {
   assert.equal(wav.readUInt32LE(24), 16_000);
   assert.equal(wav.readUInt16LE(34), 16);
   assert.equal(wav.subarray(44).toString("hex"), "01000200");
+});
+
+test("normalizePcm16MonoForTranscription raises quiet speech without clipping", () => {
+  const quiet = Buffer.alloc(4);
+  quiet.writeInt16LE(1_000, 0);
+  quiet.writeInt16LE(-1_000, 2);
+  const normalized = normalizePcm16MonoForTranscription(quiet);
+  assert.equal(normalized.readInt16LE(0), 4_800);
+  assert.equal(normalized.readInt16LE(2), -4_800);
+
+  const nearlySilent = Buffer.alloc(4);
+  nearlySilent.writeInt16LE(30, 0);
+  nearlySilent.writeInt16LE(-30, 2);
+  assert.deepEqual(normalizePcm16MonoForTranscription(nearlySilent), nearlySilent);
+
+  const loud = Buffer.alloc(4);
+  loud.writeInt16LE(20_000, 0);
+  loud.writeInt16LE(-20_000, 2);
+  assert.deepEqual(normalizePcm16MonoForTranscription(loud), loud);
 });
 
 test("LocalWhisperTranscriber writes a private WAV, invokes whisper-cli, and removes it", async (t) => {
@@ -72,6 +92,7 @@ test("LocalWhisperTranscriber writes a private WAV, invokes whisper-cli, and rem
       "--language", "zh",
       "--prompt", "以下是普通话中文对话，请忠实转写用户原话。",
       "--suppress-nst",
+      "--no-fallback",
       "--threads", "4",
       "--no-timestamps",
       "--no-prints",

@@ -59,6 +59,7 @@ test("pet chat runs in an ephemeral read-only Codex thread", async () => {
   assert.match(bridge.calls[0].params.developerInstructions, /不要调用工具/);
   assert.match(bridge.calls[0].params.developerInstructions, /陪伴伙伴/);
   assert.match(bridge.calls[0].params.developerInstructions, /不要主动提及它们/);
+  assert.match(bridge.calls[0].params.developerInstructions, /绝不把那段文本原样复述/);
   assert.doesNotMatch(bridge.calls[0].params.developerInstructions, /解释当前 Codex 状态/);
   assert.equal(store.snapshot().companion.status, "completed");
   agent.close();

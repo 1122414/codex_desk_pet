@@ -63,10 +63,10 @@ try {
     throw new Error("Tab5 必须使用 PSRAM 双缓冲整帧提交，避免可见闪烁");
   }
   if (
-    !tab5Ui.includes("constexpr std::uint8_t kDefaultSpeakerVolume = 179;") ||
+    !tab5Ui.includes("constexpr std::uint8_t kDefaultSpeakerVolume = 102;") ||
     !tab5Ui.includes("M5.Speaker.setVolume(kDefaultSpeakerVolume);")
   ) {
-    throw new Error("Tab5 默认扬声器音量必须使用一致的 70% 原始值");
+    throw new Error("Tab5 默认扬声器音量必须使用一致的 40% 原始值");
   }
   if (
     !tab5Ui.includes(
