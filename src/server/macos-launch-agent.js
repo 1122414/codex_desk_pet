@@ -162,6 +162,16 @@ async function copyRuntime(projectDirectory, applicationSupportDirectory) {
       { recursive: true, errorOnExist: true, force: false },
     );
   }
+  try {
+    await mkdir(join(stagingDirectory, "scripts"), { recursive: true, mode: 0o700 });
+    await cp(
+      join(projectDirectory, "scripts", "neural-tts-service.py"),
+      join(stagingDirectory, "scripts", "neural-tts-service.py"),
+      { errorOnExist: true, force: false },
+    );
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
   await rm(backupDirectory, { recursive: true, force: true });
   try {
     await rename(runtimeDirectory, backupDirectory);

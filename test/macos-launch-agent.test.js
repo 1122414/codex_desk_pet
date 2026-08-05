@@ -74,9 +74,11 @@ test("macOS service runs from Application Support instead of a protected project
   await mkdir(join(projectDirectory, "src", "server"), { recursive: true });
   await mkdir(join(projectDirectory, "public"), { recursive: true });
   await mkdir(join(projectDirectory, "node_modules"), { recursive: true });
+  await mkdir(join(projectDirectory, "scripts"), { recursive: true });
   await mkdir(join(projectDirectory, ".codex-desk"), { recursive: true });
   await writeFile(join(projectDirectory, "src", "server", "index.js"), "export {};\n");
   await writeFile(join(projectDirectory, "public", "index.html"), "<!doctype html>\n");
+  await writeFile(join(projectDirectory, "scripts", "neural-tts-service.py"), "print('ok')\n");
   await writeFile(join(projectDirectory, "package.json"), '{"type":"module"}\n');
   await writeFile(
     join(projectDirectory, ".codex-desk", "settings.json"),
@@ -99,6 +101,10 @@ test("macOS service runs from Application Support instead of a protected project
   assert.equal(
     await readFile(join(result.runtimeDirectory, "src", "server", "index.js"), "utf8"),
     "export {};\n",
+  );
+  assert.equal(
+    await readFile(join(result.runtimeDirectory, "scripts", "neural-tts-service.py"), "utf8"),
+    "print('ok')\n",
   );
   assert.match(
     await readFile(result.plistPath, "utf8"),

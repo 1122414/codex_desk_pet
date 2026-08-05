@@ -1,13 +1,14 @@
 import { spawn } from "node:child_process";
 import { access } from "node:fs/promises";
 import { constants } from "node:fs";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { pcm16MonoFromWav } from "./macos-speech-synthesizer.js";
 
 const MODULE_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_DIRECTORY = path.resolve(MODULE_DIRECTORY, "../..");
-const NEURAL_TTS_DIRECTORY = path.join(PROJECT_DIRECTORY, ".codex-desk", "neural-tts");
+const NEURAL_TTS_DIRECTORY = path.join(homedir(), ".codex-desk", "neural-tts");
 
 export const DEFAULT_NEURAL_TTS_ENDPOINT = "http://127.0.0.1:4320/v1/speech";
 export const DEFAULT_NEURAL_TTS_PYTHON = path.join(NEURAL_TTS_DIRECTORY, ".venv", "bin", "python");
