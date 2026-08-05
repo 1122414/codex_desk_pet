@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { JsonRpcClient } from "../src/server/json-rpc-client.js";
 import { inspectCodexHookInstallation } from "../src/server/codex-hook-installer.js";
 import { verifyFirmwareRelease } from "../src/server/firmware-release.js";
+import { LocalSpeechRecognizer } from "../src/server/local-speech-recognizer.js";
 import {
   DEVICE_BOARD_ID,
   DEVICE_FIRMWARE_VERSION,
@@ -77,6 +78,15 @@ const report = {
     configuredEvents: [],
     error: null,
   },
+  localVoice: {
+    ready: false,
+    command: null,
+    modelPath: null,
+    modelBytes: null,
+    modelSha256: null,
+    gpu: false,
+    error: null,
+  },
   platformio: {
     version: null,
     available: false,
@@ -109,6 +119,21 @@ report.hooks = {
   configuredEvents: hookInstallation.configuredEvents,
   error: hookInstallation.error ?? null,
 };
+
+try {
+  const localVoice = await new LocalSpeechRecognizer().status();
+  report.localVoice = {
+    ready: localVoice.ready,
+    command: localVoice.command ?? null,
+    modelPath: localVoice.modelPath ?? null,
+    modelBytes: localVoice.modelBytes ?? null,
+    modelSha256: localVoice.modelSha256 ?? null,
+    gpu: localVoice.gpu ?? false,
+    error: localVoice.error ?? null,
+  };
+} catch (error) {
+  report.localVoice.error = error.message;
+}
 
 let schemaDirectory = null;
 let client = null;
@@ -186,6 +211,7 @@ report.ok = Boolean(
   report.codex.appServerConnected &&
   report.codex.threadListReadable &&
   requiredMethods.every((method) => report.codex.schemaMethods[method]) &&
+  report.localVoice.ready &&
   report.platformio.available &&
   report.localWhisper.executable &&
   report.localWhisper.modelReady &&

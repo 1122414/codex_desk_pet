@@ -53,6 +53,8 @@ export class PetAgent {
   #pendingCommand = null;
   #chatThreadId = null;
   #chatThreadPromise = null;
+  #chatPetId = null;
+  #chatActive = false;
   #ownsConversation;
 
   constructor({
@@ -76,48 +78,54 @@ export class PetAgent {
 
   async chat(text) {
     const prompt = normalizedPrompt(text);
-    if (this.bridge.isMock) {
-      const reply = `收到：${prompt}`;
+    if (this.#chatActive) throw new Error("宠物正在回复上一条消息");
+    this.#chatActive = true;
+    try {
+      if (this.bridge.isMock) {
+        const reply = `收到：${prompt}`;
+        this.store.setCompanion({
+          status: "completed",
+          mode: "chat",
+          requestId: null,
+          prompt,
+          reply,
+          error: null,
+        });
+        return { reply };
+      }
+      this.#requireConnected();
       this.store.setCompanion({
-        status: "completed",
+        status: "thinking",
         mode: "chat",
         requestId: null,
         prompt,
-        reply,
+        reply: null,
         error: null,
       });
-      return { reply };
-    }
-    this.#requireConnected();
-    this.store.setCompanion({
-      status: "thinking",
-      mode: "chat",
-      requestId: null,
-      prompt,
-      reply: null,
-      error: null,
-    });
-    try {
-      const threadId = await this.#ensureChatThread();
-      const result = await this.#runTurn(threadId, prompt);
-      this.store.setCompanion({
-        status: "completed",
-        mode: "chat",
-        prompt,
-        reply: result.reply,
-        threadId,
-        turnId: result.turnId,
-        error: null,
-      });
-      return { reply: result.reply };
-    } catch (error) {
-      this.store.setCompanion({
-        status: "failed",
-        mode: "chat",
-        prompt,
-        error: error.message,
-      });
-      throw error;
+      try {
+        const threadId = await this.#ensureChatThread();
+        const result = await this.#runTurn(threadId, prompt);
+        this.store.setCompanion({
+          status: "completed",
+          mode: "chat",
+          prompt,
+          reply: result.reply,
+          threadId,
+          turnId: result.turnId,
+          error: null,
+        });
+        return { reply: result.reply };
+      } catch (error) {
+        this.store.setCompanion({
+          status: "failed",
+          mode: "chat",
+          prompt,
+          error: error.message,
+        });
+        throw error;
+      }
+    } finally {
+      this.#chatActive = false;
     }
   }
 
@@ -275,8 +283,15 @@ export class PetAgent {
   }
 
   async #ensureChatThread() {
+    const selectedPetId = this.store.selectedPetId;
+    if (this.#chatPetId !== selectedPetId) {
+      this.#chatThreadId = null;
+      this.#chatThreadPromise = null;
+      this.#chatPetId = selectedPetId;
+    }
     if (this.#chatThreadId) return this.#chatThreadId;
     if (!this.#chatThreadPromise) {
+      const pendingPetId = selectedPetId;
       const pending = this.#startThread({
         ephemeral: true,
         approvalPolicy: "never",
@@ -284,7 +299,7 @@ export class PetAgent {
         developerInstructions: CHAT_INSTRUCTIONS,
         serviceName: "codex-desk-pet-chat",
       }).then((threadId) => {
-        this.#chatThreadId = threadId;
+        if (this.#chatPetId === pendingPetId) this.#chatThreadId = threadId;
         return threadId;
       });
       this.#chatThreadPromise = pending;

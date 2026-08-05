@@ -34,6 +34,16 @@ enum class TransportKind : std::uint8_t {
   Ble,
 };
 
+enum class ThreadKind : std::uint8_t {
+  Conversation,
+  Project,
+};
+
+enum class ConversationRole : std::uint8_t {
+  User,
+  Assistant,
+};
+
 struct Approval {
   bool present = false;
   bool safe_to_approve = false;
@@ -88,10 +98,31 @@ struct TaskProgress {
 struct TaskSummary {
   std::string id;
   std::string title;
+  ThreadKind kind = ThreadKind::Conversation;
+  std::string workspace;
   PresentationState state = PresentationState::Ready;
   std::uint64_t updated_at = 0;
   std::uint64_t tokens = 0;
   TaskProgress progress;
+};
+
+struct ConversationMessage {
+  std::string id;
+  ConversationRole role = ConversationRole::Assistant;
+  std::string text;
+};
+
+struct ThreadDetail {
+  bool visible = false;
+  bool loading = false;
+  bool truncated = false;
+  std::string thread_id;
+  std::string title;
+  ThreadKind kind = ThreadKind::Conversation;
+  std::string workspace;
+  std::string error;
+  std::uint16_t total_messages = 0;
+  std::vector<ConversationMessage> messages;
 };
 
 struct TaskCounts {

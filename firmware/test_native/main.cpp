@@ -44,14 +44,23 @@ void testAnimations() {
     const auto& spec = codex::animationSpec(animations[index]);
     expect(spec.row == index, "animation row matches the PC Pet contract");
     expect(spec.frame_count >= 4 && spec.frame_count <= 8, "frame count is bounded");
+    std::uint32_t loop_duration = 0;
+    for (std::size_t frame = 0; frame < spec.frame_count; ++frame) {
+      loop_duration += spec.durations_ms[frame];
+    }
+    expect(loop_duration >= 2'200, "animation loops keep a relaxed cadence");
   }
+  expect(
+      codex::animationSpec(codex::Animation::Idle).durations_ms[0] >= 2'500 &&
+          codex::animationSpec(codex::Animation::Idle).durations_ms[5] >= 2'500,
+      "idle animation rests before repeating its blink");
   expect(codex::lookDirectionIndex(359.0F) == 0, "359 degrees wraps to zero");
   expect(codex::lookDirectionIndex(22.6F) == 1, "look angle snaps to 22.5 degrees");
 
   codex::AnimationPlayer player;
   player.set(codex::Animation::Waving, 100);
-  expect(player.frame(239) == 0, "animation keeps the first frame for its duration");
-  expect(player.frame(240) == 1, "animation advances at the exact frame boundary");
+  expect(player.frame(399) == 0, "animation keeps the first frame for its duration");
+  expect(player.frame(400) == 1, "animation advances at the exact frame boundary");
 }
 
 void testAudioPlans() {
@@ -150,6 +159,19 @@ void testModel() {
 }
 
 void testInput() {
+  expect(
+      !codex::touchMovedBeyondSlop({100, 100}, {104, 104}, 8),
+      "small diagonal touch jitter remains a tap");
+  expect(
+      codex::touchMovedBeyondSlop({100, 100}, {106, 106}, 8),
+      "diagonal drag exceeds the circular tap slop");
+  expect(
+      codex::touchMovedBeyondSlop({100, 100}, {109, 100}, 8),
+      "horizontal drag is never treated as a task tap");
+  expect(
+      codex::touchMovedBeyondSlop({100, 100}, {100, 109}, 8),
+      "vertical drag is never treated as a task tap");
+
   codex::InputController input;
   auto action = input.onTouch(
       codex::TouchPhase::Pressed, {240, 180}, 100, true, true);
@@ -195,6 +217,35 @@ void testInput() {
   expect(
       action.type == codex::ActionType::NextPet,
       "Tab5 pet area preserves the wide swipe interaction");
+}
+
+void testPetSelectionGuard() {
+  codex::PetSelectionGuard guard;
+  expect(
+      guard.accept("pet-a", "pet-b", 1, 1'000),
+      "first Pet selection is accepted");
+  expect(
+      !guard.accept("pet-b", "pet-a", 1, 4'000),
+      "same-direction two-Pet bounce is rejected");
+  expect(
+      guard.accept("pet-b", "pet-a", -1, 4'100),
+      "opposite-direction selection remains immediately available");
+
+  codex::PetSelectionGuard multi_pet_guard;
+  expect(
+      multi_pet_guard.accept("pet-a", "pet-b", 1, 10'000),
+      "multi-Pet traversal accepts its first step");
+  expect(
+      multi_pet_guard.accept("pet-b", "pet-c", 1, 10'100),
+      "multi-Pet traversal accepts a distinct next target");
+
+  codex::PetSelectionGuard timeout_guard;
+  expect(
+      timeout_guard.accept("pet-a", "pet-b", 1, 20'000),
+      "repeat timeout starts from an accepted selection");
+  expect(
+      timeout_guard.accept("pet-b", "pet-a", 1, 26'000),
+      "same-direction return is accepted after the repeat window");
 }
 
 void testReconnectAndSequence() {
@@ -378,6 +429,7 @@ int main() {
   testVoiceActivity();
   testModel();
   testInput();
+  testPetSelectionGuard();
   testReconnectAndSequence();
   testResources();
   testStressCycles();

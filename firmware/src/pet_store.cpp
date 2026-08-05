@@ -128,8 +128,26 @@ bool PetStore::loadFrame(
     std::uint16_t* pixels,
     const std::size_t pixel_count,
     String& error) {
-  if (!mounted_ || pixels == nullptr || pixel_count !=
-      static_cast<std::size_t>(kPetFrameWidth) * kPetFrameHeight) {
+  return loadFrames(
+      pet_id,
+      frame_index,
+      1,
+      pixels,
+      pixel_count,
+      error);
+}
+
+bool PetStore::loadFrames(
+    const String& pet_id,
+    const std::uint8_t first_frame,
+    const std::uint8_t frame_count,
+    std::uint16_t* pixels,
+    const std::size_t pixel_count,
+    String& error) {
+  const auto frame_pixels =
+      static_cast<std::size_t>(kPetFrameWidth) * kPetFrameHeight;
+  if (!mounted_ || pixels == nullptr || frame_count == 0 ||
+      pixel_count != frame_pixels * frame_count) {
     error = "invalid frame destination";
     return false;
   }
@@ -138,23 +156,26 @@ bool PetStore::loadFrame(
     error = "Pet is not installed";
     return false;
   }
-  if (frame_index >= manifest.frame_count) {
-    error = "frame index out of range";
+  if (first_frame >= manifest.frame_count ||
+      static_cast<std::uint16_t>(first_frame) + frame_count >
+          manifest.frame_count) {
+    error = "frame range out of bounds";
     return false;
   }
   auto file = SD_MMC.open(assetPath(pet_id, manifest.sha256), FILE_READ);
-  const auto offset = static_cast<std::uint32_t>(frame_index) * kPetFrameBytes;
+  const auto offset = static_cast<std::uint32_t>(first_frame) * kPetFrameBytes;
   if (!file || file.isDirectory() || file.size() != manifest.bytes ||
       !file.seek(offset)) {
     file.close();
     error = "Pet frame file is unavailable";
     return false;
   }
-  const auto expected = static_cast<std::size_t>(kPetFrameBytes);
+  const auto expected =
+      static_cast<std::size_t>(kPetFrameBytes) * frame_count;
   const auto read = file.read(reinterpret_cast<std::uint8_t*>(pixels), expected);
   file.close();
   if (read != expected) {
-    error = "Pet frame read was incomplete";
+    error = "Pet frame range read was incomplete";
     return false;
   }
   return true;

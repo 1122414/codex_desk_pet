@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter, once } from "node:events";
+import { readFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 import {
@@ -24,6 +26,7 @@ class FakeChild extends EventEmitter {
 
 test("buildMacBleHelper caches a compiler result by source contents", async () => {
   const calls = [];
+  const signed = [];
   const cacheRoot = `/tmp/codex-desk-ble-test-${process.pid}-${Date.now()}`;
   const source = new URL("../src/server/transports/macos-core-bluetooth-helper.m", import.meta.url);
   const compile = async (_source, target) => {
@@ -31,10 +34,26 @@ test("buildMacBleHelper caches a compiler result by source contents", async () =
     const { writeFile } = await import("node:fs/promises");
     await writeFile(target, "helper");
   };
-  const first = await buildMacBleHelper({ source, cacheRoot, compile });
-  const second = await buildMacBleHelper({ source, cacheRoot, compile });
+  const signBundle = async (bundle) => signed.push(bundle);
+  const first = await buildMacBleHelper({
+    source,
+    cacheRoot,
+    compile,
+    signBundle,
+  });
+  const second = await buildMacBleHelper({
+    source,
+    cacheRoot,
+    compile,
+    signBundle,
+  });
   assert.equal(first, second);
+  assert.match(first, /CodexDeskBluetooth\.app\/Contents\/MacOS\/CodexDeskBluetooth$/);
   assert.equal(calls.length, 1);
+  assert.equal(signed.length, 1);
+  const info = await readFile(resolve(dirname(first), "../Info.plist"), "utf8");
+  assert.match(info, /com\.codex-desk\.bridge\.bluetooth/);
+  assert.match(info, /NSBluetoothAlwaysUsageDescription/);
 });
 
 test("MacBleDeviceManager attaches a BLE transport and forwards fragments", async () => {

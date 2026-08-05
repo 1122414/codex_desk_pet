@@ -12,13 +12,20 @@ test("macOS LaunchAgent pins absolute executables and device transports", () => 
   const plist = buildMacosLaunchAgent({
     nodePath: "/opt/node/bin/node",
     codexPath: "/Applications/Codex & Tools/codex",
+    launcherPath: "/Users/test/CodexDeskBluetooth.app/Contents/MacOS/CodexDeskBluetooth",
     projectDirectory: "/Users/test/Codex Desk",
     logDirectory: "/Users/test/Library/Logs/CodexDeskBuddy",
     homeDirectory: "/Users/test",
     path: "/opt/node/bin:/usr/bin:/bin",
   });
+  assert.match(
+    plist,
+    /CodexDeskBluetooth\.app\/Contents\/MacOS\/CodexDeskBluetooth<\/string>/,
+  );
+  assert.match(plist, /<string>--supervise<\/string>/);
   assert.match(plist, /<string>\/opt\/node\/bin\/node<\/string>/);
   assert.match(plist, /Codex &amp; Tools/);
+  assert.match(plist, /<string>com\.codex-desk\.bridge\.bluetooth<\/string>/);
   assert.match(plist, /<key>CODEX_DESK_USB_AUTO<\/key>\n    <string>1<\/string>/);
   assert.match(plist, /<key>CODEX_DESK_BLE<\/key>\n    <string>1<\/string>/);
   assert.match(plist, /<key>CODEX_DESK_DEVICE_HOST<\/key>\n    <string>0\.0\.0\.0<\/string>/);
@@ -29,6 +36,7 @@ test("macOS LaunchAgent can run a USB-only bridge", () => {
   const plist = buildMacosLaunchAgent({
     nodePath: "/opt/node/bin/node",
     codexPath: "/opt/codex/bin/codex",
+    launcherPath: "/Users/test/CodexDeskBluetooth.app/Contents/MacOS/CodexDeskBluetooth",
     projectDirectory: "/Users/test/Codex Desk",
     logDirectory: "/Users/test/Library/Logs/CodexDeskBuddy",
     bleEnabled: "0",
@@ -53,6 +61,9 @@ test("macOS LaunchAgent installation is atomic and idempotently reloads the serv
     launchctl,
     copyApplicationRuntime: false,
     platform: "darwin",
+    buildHelper: async () => (
+      "/Users/test/CodexDeskBluetooth.app/Contents/MacOS/CodexDeskBluetooth"
+    ),
   };
   const first = await installMacosLaunchAgent(options);
   const second = await installMacosLaunchAgent(options);
@@ -93,6 +104,9 @@ test("macOS service runs from Application Support instead of a protected project
     uid: 501,
     start: false,
     platform: "darwin",
+    buildHelper: async () => (
+      "/Users/test/CodexDeskBluetooth.app/Contents/MacOS/CodexDeskBluetooth"
+    ),
   });
   assert.equal(
     result.runtimeDirectory,

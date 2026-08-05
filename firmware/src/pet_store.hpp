@@ -33,6 +33,13 @@ class PetStore {
       std::uint16_t* pixels,
       std::size_t pixel_count,
       String& error);
+  bool loadFrames(
+      const String& pet_id,
+      std::uint8_t first_frame,
+      std::uint8_t frame_count,
+      std::uint16_t* pixels,
+      std::size_t pixel_count,
+      String& error);
   void checkpoint();
   std::uint8_t transferProgress() const;
   bool transferActive() const {

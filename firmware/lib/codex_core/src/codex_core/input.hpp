@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 namespace codex {
 
@@ -17,6 +18,8 @@ struct Rect {
 
   bool contains(Point point) const;
 };
+
+bool touchMovedBeyondSlop(Point start, Point current, std::int16_t slop);
 
 enum class TouchPhase : std::uint8_t {
   Pressed,
@@ -90,6 +93,22 @@ class InputController {
   Point press_point_{};
   std::uint64_t pressed_at_ = 0;
   std::uint64_t approval_cooldown_until_ = 0;
+};
+
+class PetSelectionGuard {
+ public:
+  bool accept(
+      const std::string& current_id,
+      const std::string& target_id,
+      int offset,
+      std::uint64_t now_ms);
+
+ private:
+  static constexpr std::uint64_t kRepeatWindowMs = 6'000;
+
+  std::string previous_id_;
+  int last_offset_ = 0;
+  std::uint64_t last_action_at_ = 0;
 };
 
 }  // namespace codex

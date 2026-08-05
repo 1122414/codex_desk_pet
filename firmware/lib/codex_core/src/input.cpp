@@ -1,5 +1,6 @@
 #include "codex_core/input.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 #include "codex_core/animation.hpp"
@@ -9,6 +10,18 @@ namespace codex {
 bool Rect::contains(const Point point) const {
   return point.x >= x && point.y >= y && point.x < x + width &&
          point.y < y + height;
+}
+
+bool touchMovedBeyondSlop(
+    const Point start,
+    const Point current,
+    const std::int16_t slop) {
+  const auto dx = static_cast<std::int32_t>(current.x) - start.x;
+  const auto dy = static_cast<std::int32_t>(current.y) - start.y;
+  const auto safe_slop = std::max<std::int32_t>(slop, 0);
+  return static_cast<std::int64_t>(dx) * dx +
+          static_cast<std::int64_t>(dy) * dy >=
+      static_cast<std::int64_t>(safe_slop) * safe_slop;
 }
 
 InputController::InputController(const InputLayout layout) : layout_(layout) {}
@@ -110,6 +123,28 @@ InputAction InputController::onButton(
 void InputController::cancel() {
   press_target_ = PressTarget::None;
   pressed_at_ = 0;
+}
+
+bool PetSelectionGuard::accept(
+    const std::string& current_id,
+    const std::string& target_id,
+    const int offset,
+    const std::uint64_t now_ms) {
+  if (current_id.empty() || target_id.empty() || offset == 0) return false;
+  const auto within_repeat_window =
+      last_action_at_ != 0 &&
+      now_ms >= last_action_at_ &&
+      now_ms - last_action_at_ < kRepeatWindowMs;
+  if (
+      within_repeat_window &&
+      offset == last_offset_ &&
+      target_id == previous_id_) {
+    return false;
+  }
+  previous_id_ = current_id;
+  last_offset_ = offset;
+  last_action_at_ = now_ms;
+  return true;
 }
 
 }  // namespace codex

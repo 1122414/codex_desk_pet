@@ -85,6 +85,15 @@ function taskProgress(thread) {
   return { known: false, completed: 0, total: 0, percent: 0 };
 }
 
+function threadKind(thread) {
+  return thread?.gitInfo ? "project" : "conversation";
+}
+
+function workspaceLabel(thread) {
+  if (typeof thread?.cwd !== "string" || !thread.cwd) return "";
+  return thread.cwd.split(/[\\/]/).filter(Boolean).at(-1) ?? "";
+}
+
 function serializeApproval(approval) {
   if (!approval) return null;
   const { rpcId: _rpcId, ...publicApproval } = approval;
@@ -151,6 +160,11 @@ export class DeskStore extends EventEmitter {
     this.previewAnimation = null;
     this.rateLimits = null;
     this.accountUsage = null;
+    this.localTodayTokens = {
+      dateKey: null,
+      tokens: 0,
+      available: false,
+    };
     this.companion = {
       status: "idle",
       mode: null,
@@ -432,6 +446,21 @@ export class DeskStore extends EventEmitter {
     this.#changed("account-usage");
   }
 
+  setLocalTodayTokens(value) {
+    const next = {
+      dateKey: value?.dateKey ?? null,
+      tokens: safeInteger(value?.tokens),
+      available: Boolean(value?.available),
+    };
+    if (
+      next.dateKey === this.localTodayTokens.dateKey &&
+      next.tokens === this.localTodayTokens.tokens &&
+      next.available === this.localTodayTokens.available
+    ) return;
+    this.localTodayTokens = next;
+    this.#changed("local-today-tokens");
+  }
+
   setPreviewAnimation(animation) {
     if (animation !== null) getAnimation(animation);
     this.previewAnimation = animation;
@@ -504,6 +533,8 @@ export class DeskStore extends EventEmitter {
         return {
           id: thread.id,
           title: summarizeThread(thread).slice(0, 56),
+          kind: threadKind(thread),
+          workspace: workspaceLabel(thread).slice(0, 40),
           state: presentation.state,
           updatedAt: Math.floor(getThreadRecency(thread) / 1_000),
           tokens: extractTotalTokens(thread.tokenUsage) || safeInteger(thread.goal?.tokensUsed),
@@ -520,6 +551,10 @@ export class DeskStore extends EventEmitter {
       .filter((bucket) => bucket?.startDate === todayKey);
     const todayTokens = todayBuckets
       .reduce((sum, bucket) => sum + safeInteger(bucket?.tokens), 0);
+    const officialTodayAvailable = todayBuckets.length > 0;
+    const localTodayAvailable =
+      this.localTodayTokens.available &&
+      this.localTodayTokens.dateKey === todayKey;
     const activeStates = new Set(["running", "needs-input", "reviewing"]);
     const activeCount = threads.filter((thread) => (
       activeStates.has(mapThreadToPresentation(thread, { now }).state)
@@ -537,6 +572,8 @@ export class DeskStore extends EventEmitter {
       task: selected ? {
         id: selected.id,
         title: summarizeThread(selected),
+        kind: threadKind(selected),
+        workspace: workspaceLabel(selected),
         updatedAt: selected.updatedAt ?? selected.recencyAt ?? null,
         threadStatus: selected.status?.type ?? "notLoaded",
       } : null,
@@ -549,8 +586,10 @@ export class DeskStore extends EventEmitter {
       tokens: { total: totalTokens, level },
       accountTokens: {
         lifetime: safeInteger(this.accountUsage?.summary?.lifetimeTokens),
-        today: todayTokens,
-        todayAvailable: todayBuckets.length > 0,
+        today: officialTodayAvailable
+          ? todayTokens
+          : localTodayAvailable ? this.localTodayTokens.tokens : 0,
+        todayAvailable: officialTodayAvailable || localTodayAvailable,
       },
       quota: weekly ? {
         available: true,
@@ -588,6 +627,7 @@ export class DeskStore extends EventEmitter {
         sound: true,
         companionChat: true,
         companionCommands: true,
+        threadConversation: true,
         transports: ["usb", "wifi", "ble"],
       },
     };

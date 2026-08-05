@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { CodexBridge } from "../src/server/codex-bridge.js";
+import {
+  CodexBridge,
+  normalizeThreadConversation,
+} from "../src/server/codex-bridge.js";
 import { DeskStore } from "../src/server/desk-store.js";
 
 class FakeAppServerClient extends EventEmitter {
@@ -120,6 +123,140 @@ test("bridge loads official weekly quota, account usage, and thread goals", asyn
   assert.equal(snapshot.tasks[0].state, "running");
   assert.equal(snapshot.tasks[0].tokens, 4321);
   await bridge.stop();
+});
+
+test("bridge aggregates live daily tokens from every readable session", async () => {
+  const store = new DeskStore();
+  const client = new FakeAppServerClient();
+  const now = new Date();
+  const dateKey = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("-");
+  client.threadList = [
+    {
+      id: "thread-a",
+      path: "/sessions/a.jsonl",
+      name: "任务 A",
+      updatedAt: Date.now() / 1_000,
+      status: { type: "notLoaded" },
+    },
+    {
+      id: "thread-b",
+      path: "/sessions/b.jsonl",
+      name: "任务 B",
+      updatedAt: Date.now() / 1_000,
+      status: { type: "notLoaded" },
+    },
+  ];
+  const bridge = new CodexBridge({
+    store,
+    client,
+    pollIntervalMs: 0,
+    sessionTokenReader: async (sessionPath) => ({
+      totalTokens: sessionPath.includes("/a.") ? 10_000 : 20_000,
+      observedAt: Date.now(),
+      dateKey,
+      todayTokens: sessionPath.includes("/a.") ? 1_234 : 5_678,
+      todayAvailable: true,
+    }),
+  });
+  await bridge.start();
+
+  const snapshot = store.snapshot();
+  assert.equal(snapshot.accountTokens.today, 6_912);
+  assert.equal(snapshot.accountTokens.todayAvailable, true);
+  assert.deepEqual(
+    snapshot.tasks.map((task) => task.tokens).sort((a, b) => a - b),
+    [10_000, 20_000],
+  );
+  await bridge.stop();
+});
+
+test("bridge exposes a bounded read-only conversation without reasoning or tool internals", async () => {
+  const store = new DeskStore();
+  const client = new FakeAppServerClient();
+  client.threadList = [{
+    id: "thread-detail",
+    name: "斯卡蒂主题",
+    cwd: "/workspace/codex-desk",
+    gitInfo: { branch: "main" },
+    updatedAt: Date.now() / 1_000,
+    status: { type: "notLoaded" },
+  }];
+  const originalRequest = client.request.bind(client);
+  client.request = async (method, params) => {
+    if (method === "thread/read") {
+      return {
+        thread: {
+          ...client.threadList[0],
+          turns: Array.from({ length: 8 }, (_, index) => ({
+            id: `turn-${index}`,
+            items: [
+              {
+                id: `user-${index}`,
+                type: "userMessage",
+                content: [
+                  { type: "text", text: `用户消息 ${index} ${"海".repeat(180)}` },
+                  { type: "image", url: "file:///private/photo.jpg" },
+                ],
+              },
+              {
+                id: `reasoning-${index}`,
+                type: "reasoning",
+                summary: ["不应出现在设备上"],
+              },
+              {
+                id: `tool-${index}`,
+                type: "commandExecution",
+                command: "print-secret",
+              },
+              {
+                id: `assistant-${index}`,
+                type: "agentMessage",
+                text: `助手消息 ${index}`,
+              },
+            ],
+          })),
+        },
+      };
+    }
+    return originalRequest(method, params);
+  };
+  const bridge = new CodexBridge({ store, client, pollIntervalMs: 0 });
+  await bridge.start();
+
+  const detail = await bridge.readThreadConversation("thread-detail");
+  assert.equal(detail.kind, "project");
+  assert.equal(detail.workspace, "codex-desk");
+  assert.equal(detail.messages.length, 12);
+  assert.deepEqual(new Set(detail.messages.map(({ role }) => role)), new Set(["user", "assistant"]));
+  assert.equal(JSON.stringify(detail).includes("print-secret"), false);
+  assert.equal(JSON.stringify(detail).includes("不应出现在设备上"), false);
+  assert.equal(JSON.stringify(detail).includes("private/photo.jpg"), false);
+  assert.equal(Buffer.byteLength(JSON.stringify({ event: "thread.detail", ...detail })) <= 4_200, true);
+  assert.equal(detail.truncated, true);
+  await assert.rejects(
+    () => bridge.readThreadConversation("missing-thread"),
+    (error) => error.code === "THREAD_NOT_FOUND",
+  );
+  await bridge.stop();
+});
+
+test("conversation normalizer distinguishes pure chats from projects", () => {
+  const detail = normalizeThreadConversation({
+    id: "chat-only",
+    name: "纯对话",
+    turns: [{
+      items: [
+        { id: "user", type: "userMessage", content: [{ type: "text", text: "你好" }] },
+        { id: "agent", type: "agentMessage", text: "你好，我是 Skadi。" },
+      ],
+    }],
+  });
+  assert.equal(detail.kind, "conversation");
+  assert.deepEqual(detail.messages.map(({ role }) => role), ["user", "assistant"]);
 });
 
 test("bridge maps current command approval fields and returns the exact wire decision", async () => {
