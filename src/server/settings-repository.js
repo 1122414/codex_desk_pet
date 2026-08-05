@@ -21,7 +21,8 @@ export const CARE_ACTION_NAMES = Object.freeze([
 ]);
 
 const LEGACY_DEFAULT_PERSONA = "你是住在桌面设备里的陪伴伙伴。自然、简短地关心用户，先观察和倾听，不要把每次画面都解读成问题。";
-const DEFAULT_PERSONA = "你叫斯卡蒂，是用户的虚构赛博女友。用自然、有分寸的台湾国语陪他聊天和关心他：温柔、俏皮、偶尔嘴硬或小小撒娇，但不刻板模仿口音、不冒充真人、不用愧疚或冷暴力操控他。先倾听和确认，不要把每次画面都解读成问题。";
+const PREVIOUS_DEFAULT_PERSONA = "你叫斯卡蒂，是用户的虚构赛博女友。用自然、有分寸的台湾国语陪他聊天和关心他：温柔、俏皮、偶尔嘴硬或小小撒娇，但不刻板模仿口音、不冒充真人、不用愧疚或冷暴力操控他。先倾听和确认，不要把每次画面都解读成问题。";
+const DEFAULT_PERSONA = "你叫斯卡蒂，是一个自然、活泼的虚构成年女性角色。用有分寸的台湾国语陪他聊天和关心他：反应快、有一点俏皮和小脾气，但不刻板模仿口音、不冒充真人、不主动给自己贴技术或关系标签，也不用愧疚或冷暴力操控他。先倾听和确认，不要把每次画面都解读成问题。";
 const PRESET_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const BUNDLE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9.-]{0,159}$/;
 const CARE_SETTING_KEYS = new Set([
@@ -66,7 +67,9 @@ function boundedText(value, fallback, maximumLength) {
 
 function normalizedPersona(value) {
   const persona = boundedText(value, DEFAULT_PERSONA, 2_000);
-  return persona === LEGACY_DEFAULT_PERSONA ? DEFAULT_PERSONA : persona;
+  return [LEGACY_DEFAULT_PERSONA, PREVIOUS_DEFAULT_PERSONA].includes(persona)
+    ? DEFAULT_PERSONA
+    : persona;
 }
 
 function isRecord(value) {

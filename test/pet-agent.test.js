@@ -57,7 +57,8 @@ test("pet chat runs in an ephemeral read-only Codex thread", async () => {
   assert.equal(bridge.calls[0].params.sandbox, "read-only");
   assert.equal(bridge.calls[0].params.ephemeral, true);
   assert.match(bridge.calls[0].params.developerInstructions, /不要调用工具/);
-  assert.match(bridge.calls[0].params.developerInstructions, /赛博女友/);
+  assert.match(bridge.calls[0].params.developerInstructions, /活泼明亮/);
+  assert.doesNotMatch(bridge.calls[0].params.developerInstructions, /赛博女友/);
   assert.match(bridge.calls[0].params.developerInstructions, /台湾国语/);
   assert.doesNotMatch(bridge.calls[0].params.developerInstructions, /你是住在 Tab5 里的陪伴伙伴/);
   assert.match(bridge.calls[0].params.developerInstructions, /不要主动提及它们/);

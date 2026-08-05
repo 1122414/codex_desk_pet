@@ -9,6 +9,7 @@ const BYTES_PER_SAMPLE = 2;
 const DEFAULT_TIMEOUT_MS = 45_000;
 const MAX_TRANSCRIPT_LENGTH = 4_000;
 const DEFAULT_CHINESE_PROMPT = "以下是普通话中文对话，请忠实转写用户原话。";
+const DEFAULT_SERVER_HEALTH_TIMEOUT_MS = 700;
 const NORMALIZATION_MINIMUM_MEAN_ABS = 80;
 const NORMALIZATION_TARGET_MEAN_ABS = 4_800;
 const NORMALIZATION_MAX_GAIN = 6;
@@ -21,6 +22,8 @@ export const DEFAULT_WHISPER_MODEL_PATH = path.join(
   "whisper",
   "ggml-base.bin",
 );
+export const DEFAULT_WHISPER_SERVER_ENDPOINT = "http://127.0.0.1:4323/inference";
+export const DEFAULT_WHISPER_SERVER_COMMAND = "whisper-server";
 
 function abortError() {
   const error = new Error("本地转写已取消");
@@ -41,6 +44,46 @@ function normalizeTranscript(value) {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, MAX_TRANSCRIPT_LENGTH);
+}
+
+function localWhisperEndpoint(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new TypeError("本机常驻转写地址无效");
+  }
+  if (url.protocol !== "http:" || url.hostname !== "127.0.0.1" || url.pathname !== "/inference") {
+    throw new TypeError("本机常驻转写必须使用 127.0.0.1 /inference 地址");
+  }
+  return url;
+}
+
+function requestSignal(signal, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  timer.unref?.();
+  const onAbort = () => controller.abort();
+  signal?.addEventListener("abort", onAbort, { once: true });
+  return {
+    signal: controller.signal,
+    close() {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    },
+  };
+}
+
+async function serverResponseError(response) {
+  let detail = "";
+  try {
+    detail = (await response.text()).trim().replace(/\s+/g, " ").slice(0, 240);
+  } catch {
+    // The status is enough to give the fallback transcriber a useful signal.
+  }
+  return new Error(detail
+    ? `本机常驻转写失败：${detail}`
+    : `本机常驻转写失败（HTTP ${response.status}）`);
 }
 
 export function normalizePcm16MonoForTranscription(pcm) {
@@ -225,5 +268,197 @@ export class LocalWhisperTranscriber {
         else finish(processError(stderr, code));
       });
     });
+  }
+}
+
+export class WhisperServerTranscriber {
+  #child = null;
+  #starting = null;
+  #closed = false;
+
+  constructor({
+    endpoint = process.env.CODEX_DESK_WHISPER_SERVER_ENDPOINT ?? DEFAULT_WHISPER_SERVER_ENDPOINT,
+    command = process.env.CODEX_DESK_WHISPER_SERVER_COMMAND ?? DEFAULT_WHISPER_SERVER_COMMAND,
+    modelPath = process.env.CODEX_DESK_WHISPER_MODEL ?? DEFAULT_WHISPER_MODEL_PATH,
+    prompt = DEFAULT_CHINESE_PROMPT,
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    healthTimeoutMs = DEFAULT_SERVER_HEALTH_TIMEOUT_MS,
+    fetchImpl = globalThis.fetch,
+    spawnProcess = spawn,
+    accessPath = access,
+    platform = process.platform,
+  } = {}) {
+    if (typeof command !== "string" || !command.trim()) {
+      throw new TypeError("本机常驻转写命令不能为空");
+    }
+    if (typeof modelPath !== "string" || !path.isAbsolute(modelPath)) {
+      throw new TypeError("本机常驻转写模型路径必须是绝对路径");
+    }
+    if (typeof prompt !== "string" || !prompt.trim() || Buffer.byteLength(prompt, "utf8") > 240) {
+      throw new RangeError("本机常驻转写提示必须是 1 到 240 字节的文本");
+    }
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 1_000) {
+      throw new RangeError("本机常驻转写超时必须至少一秒");
+    }
+    if (!Number.isInteger(healthTimeoutMs) || healthTimeoutMs < 100) {
+      throw new RangeError("本机常驻转写健康检查超时必须至少 100 毫秒");
+    }
+    if (typeof fetchImpl !== "function") throw new TypeError("本机常驻转写请求器无效");
+    if (typeof spawnProcess !== "function") throw new TypeError("本机常驻转写启动器无效");
+    if (typeof accessPath !== "function") throw new TypeError("本机常驻转写文件检查器无效");
+    const url = localWhisperEndpoint(endpoint);
+    this.endpoint = url.toString();
+    this.healthEndpoint = new URL("/", url).toString();
+    this.command = command.trim();
+    this.modelPath = path.resolve(modelPath);
+    this.prompt = prompt.trim();
+    this.timeoutMs = timeoutMs;
+    this.healthTimeoutMs = healthTimeoutMs;
+    this.fetchImpl = fetchImpl;
+    this.spawnProcess = spawnProcess;
+    this.accessPath = accessPath;
+    this.platform = platform;
+  }
+
+  async start() {
+    if (this.#closed || this.platform !== "darwin") return false;
+    if (await this.#healthy()) return true;
+    await this.#startIfReady();
+    return this.#healthy();
+  }
+
+  async available() {
+    return this.start();
+  }
+
+  async transcribe(pcm, { signal } = {}) {
+    if (signal?.aborted) throw abortError();
+    if (!await this.available()) {
+      throw new Error("本机常驻中文转写尚未准备好");
+    }
+    const wav = pcm16MonoToWav(normalizePcm16MonoForTranscription(pcm));
+    const form = new FormData();
+    form.append("file", new Blob([wav], { type: "audio/wav" }), "utterance.wav");
+    const request = requestSignal(signal, this.timeoutMs);
+    try {
+      const response = await this.fetchImpl(this.endpoint, {
+        method: "POST",
+        body: form,
+        signal: request.signal,
+      });
+      if (!response?.ok) throw await serverResponseError(response ?? { status: "未知" });
+      const body = await response.json();
+      if (signal?.aborted) throw abortError();
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        throw new Error("本机常驻转写响应无效");
+      }
+      return normalizeTranscript(body.text);
+    } catch (error) {
+      if (signal?.aborted || error?.name === "AbortError") throw abortError();
+      throw error;
+    } finally {
+      request.close();
+    }
+  }
+
+  async close() {
+    this.#closed = true;
+    this.#child?.kill?.("SIGTERM");
+    this.#child = null;
+    await this.#starting?.catch(() => {});
+  }
+
+  async #healthy() {
+    const request = requestSignal(null, this.healthTimeoutMs);
+    try {
+      const response = await this.fetchImpl(this.healthEndpoint, { signal: request.signal });
+      return response?.ok === true;
+    } catch {
+      return false;
+    } finally {
+      request.close();
+    }
+  }
+
+  async #startIfReady() {
+    if (this.#child || this.#starting || this.#closed) return;
+    this.#starting = (async () => {
+      try {
+        await this.accessPath(this.modelPath, constants.R_OK);
+      } catch {
+        return;
+      }
+      if (this.#closed || this.#child) return;
+      let child;
+      try {
+        child = this.spawnProcess(this.command, [
+          "--model", this.modelPath,
+          "--language", "zh",
+          "--prompt", this.prompt,
+          "--suppress-nst",
+          "--no-fallback",
+          "--threads", "4",
+          "--host", "127.0.0.1",
+          "--port", String(new URL(this.endpoint).port),
+        ], {
+          stdio: ["ignore", "ignore", "ignore"],
+        });
+      } catch {
+        return;
+      }
+      this.#child = child;
+      const clear = () => {
+        if (this.#child === child) this.#child = null;
+      };
+      child.once?.("error", clear);
+      child.once?.("exit", clear);
+    })().finally(() => {
+      this.#starting = null;
+    });
+    await this.#starting;
+  }
+}
+
+export class FallbackTranscriber {
+  constructor({ primary, fallback } = {}) {
+    if (!primary || !fallback ||
+      typeof primary.available !== "function" || typeof primary.transcribe !== "function" ||
+      typeof fallback.available !== "function" || typeof fallback.transcribe !== "function") {
+      throw new TypeError("转写兜底器需要两个可用的转写器");
+    }
+    this.primary = primary;
+    this.fallback = fallback;
+  }
+
+  async start() {
+    if (typeof this.primary.start !== "function") return this.primary.available();
+    return this.primary.start();
+  }
+
+  async available() {
+    try {
+      if (await this.primary.available()) return true;
+    } catch {
+      // Keep the pre-existing one-shot CLI as a local recovery path.
+    }
+    return this.fallback.available();
+  }
+
+  async transcribe(pcm, { signal } = {}) {
+    if (signal?.aborted) throw abortError();
+    try {
+      if (await this.primary.available()) {
+        return await this.primary.transcribe(pcm, { signal });
+      }
+    } catch (error) {
+      if (signal?.aborted || error?.name === "AbortError") throw abortError();
+    }
+    if (!await this.fallback.available()) throw new Error("本地中文转写不可用");
+    return this.fallback.transcribe(pcm, { signal });
+  }
+
+  async close() {
+    await this.primary.close?.();
+    await this.fallback.close?.();
   }
 }

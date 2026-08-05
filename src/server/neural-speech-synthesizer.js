@@ -20,11 +20,11 @@ export const DEFAULT_NEURAL_TTS_BASE_MODEL = path.join(
 );
 export const DEFAULT_NEURAL_TTS_REFERENCE_AUDIO = path.join(
   NEURAL_TTS_DIRECTORY,
-  "skadi-taiwan-conversation-v2.wav",
+  "skadi-taiwan-lively-v3.wav",
 );
 export const DEFAULT_NEURAL_TTS_PROFILE = path.join(
   NEURAL_TTS_DIRECTORY,
-  "skadi-taiwan-conversation-v2.json",
+  "skadi-taiwan-lively-v3.json",
 );
 
 const MAX_TEXT_BYTES = 480;

@@ -634,7 +634,7 @@ void Tab5Ui::drawConversation(
   if (phone_call_active_ && voice_recording_ && voice_mode_ == "phone") {
     message = "我在听，你慢慢说。";
   } else if (phone_call_active_ && message == "正在识别") {
-    message = "听到了，让我想一想。";
+    message = "……";
   } else if (has_reply) {
     message = String(snapshot.companion.reply.c_str());
   } else if (!phone_call_active_ && message.isEmpty()) {
@@ -971,7 +971,9 @@ void Tab5Ui::drawStatus(
   canvas_.fillCircle(32, 36, 12, snapshot.bridge_connected ? kGreen : kRed);
   const bool phone_listening = voice_recording_ && voice_mode_ == "phone";
   const bool phone_speaking = phone_call_active_ && speech_playback_active_;
-  const bool transcribing = !voice_recording_ && connection_detail == "正在识别";
+  const bool transcribing = !voice_recording_ && (
+      connection_detail == "正在识别" ||
+      (phone_call_active_ && connection_detail == "……"));
   const bool chat_thinking = phone_call_active_ &&
       snapshot.companion.mode == "chat" && snapshot.companion.status == "thinking";
   const bool chat_completed = phone_call_active_ &&
@@ -993,13 +995,13 @@ void Tab5Ui::drawStatus(
     status_color = kGreen;
     detail = "慢慢说，不用按住。";
   } else if (transcribing) {
-    status_text = "听到了";
+    status_text = "斯卡蒂在回";
     status_color = kBlue;
-    detail = "让我想一想。";
+    detail = "……";
   } else if (chat_thinking) {
-    status_text = "想一想";
+    status_text = "斯卡蒂在回";
     status_color = kBlue;
-    detail = "正在整理回答。";
+    detail = "……";
   } else if (chat_completed) {
     status_text = "她回答了";
     status_color = kGreen;

@@ -5,9 +5,11 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
+  FallbackTranscriber,
   LocalWhisperTranscriber,
   normalizePcm16MonoForTranscription,
   pcm16MonoToWav,
+  WhisperServerTranscriber,
 } from "../src/server/local-whisper-transcriber.js";
 
 class FakeChild extends EventEmitter {
@@ -148,4 +150,97 @@ test("LocalWhisperTranscriber rejects an empty or oversized Mandarin prompt", ()
     () => new LocalWhisperTranscriber({ prompt: "中".repeat(121) }),
     /转写提示/,
   );
+});
+
+test("WhisperServerTranscriber keeps the local model warm and sends one in-memory WAV", async () => {
+  const calls = [];
+  const transcriber = new WhisperServerTranscriber({
+    endpoint: "http://127.0.0.1:4323/inference",
+    command: "whisper-server-test",
+    modelPath: "/private/tmp/whisper-server-test/ggml-base.bin",
+    platform: "darwin",
+    accessPath: async () => {},
+    spawnProcess: () => {
+      throw new Error("healthy service must not spawn");
+    },
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url, options });
+      if (url.endsWith("/")) return new Response("ready", { status: 200 });
+      assert.equal(options.method, "POST");
+      const file = options.body.get("file");
+      assert.equal(file.name, "utterance.wav");
+      const wav = Buffer.from(await file.arrayBuffer());
+      assert.equal(wav.subarray(0, 4).toString("ascii"), "RIFF");
+      assert.equal(wav.readUInt32LE(24), 16_000);
+      return new Response(JSON.stringify({ text: "你好\n斯卡蒂" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+
+  assert.equal(await transcriber.available(), true);
+  assert.equal(await transcriber.transcribe(Buffer.alloc(1_280)), "你好 斯卡蒂");
+  assert.equal(calls.filter(({ url }) => url.endsWith("/")).length, 2);
+});
+
+test("WhisperServerTranscriber starts whisper-server only after its local health probe fails", async () => {
+  let healthy = false;
+  const calls = [];
+  const child = new EventEmitter();
+  child.kill = () => true;
+  const transcriber = new WhisperServerTranscriber({
+    endpoint: "http://127.0.0.1:4323/inference",
+    command: "whisper-server-test",
+    modelPath: "/private/tmp/whisper-server-test/ggml-base.bin",
+    platform: "darwin",
+    accessPath: async () => {},
+    fetchImpl: async () => new Response("ready", { status: healthy ? 200 : 503 }),
+    spawnProcess: (command, args, options) => {
+      calls.push({ command, args, options });
+      healthy = true;
+      return child;
+    },
+  });
+
+  assert.equal(await transcriber.available(), true);
+  assert.deepEqual(calls, [{
+    command: "whisper-server-test",
+    args: [
+      "--model", "/private/tmp/whisper-server-test/ggml-base.bin",
+      "--language", "zh",
+      "--prompt", "以下是普通话中文对话，请忠实转写用户原话。",
+      "--suppress-nst",
+      "--no-fallback",
+      "--threads", "4",
+      "--host", "127.0.0.1",
+      "--port", "4323",
+    ],
+    options: { stdio: ["ignore", "ignore", "ignore"] },
+  }]);
+  await transcriber.close();
+});
+
+test("FallbackTranscriber uses the one-shot CLI only when the warm server fails", async () => {
+  const calls = [];
+  const transcriber = new FallbackTranscriber({
+    primary: {
+      available: async () => true,
+      transcribe: async () => {
+        calls.push("server");
+        throw new Error("server unavailable");
+      },
+    },
+    fallback: {
+      available: async () => true,
+      transcribe: async () => {
+        calls.push("cli");
+        return "备用转写";
+      },
+    },
+  });
+
+  assert.equal(await transcriber.available(), true);
+  assert.equal(await transcriber.transcribe(Buffer.alloc(1_280)), "备用转写");
+  assert.deepEqual(calls, ["server", "cli"]);
 });

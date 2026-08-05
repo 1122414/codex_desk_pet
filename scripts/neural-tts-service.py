@@ -19,7 +19,7 @@ from mlx_audio.tts.utils import load_model
 TARGET_SAMPLE_RATE = 16_000
 MAX_TEXT_BYTES = 480
 WARMUP_TEXT = "嗯，我在。"
-STREAMING_INTERVAL_SECONDS = 0.32
+STREAMING_INTERVAL_SECONDS = 0.20
 
 
 def parse_profile(path):

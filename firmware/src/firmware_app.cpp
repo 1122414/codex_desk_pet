@@ -200,7 +200,7 @@ void FirmwareApp::loop() {
     switch (voice_.lastStopReason()) {
       case VoiceStopReason::SpeechComplete:
       case VoiceStopReason::Manual:
-        connection_detail_ = voice_was_phone ? "听到了，让我想一想。" : "正在识别";
+        connection_detail_ = voice_was_phone ? "……" : "正在识别";
         break;
       case VoiceStopReason::NoSpeechTimeout:
         connection_detail_ = voice_was_phone ? "没有听清，再说一次。" : "已结束聆听";

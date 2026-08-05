@@ -82,7 +82,7 @@ test("invalid care setting types fall back to safe defaults", async () => {
   assert.deepEqual(saved.care.mediaPresets, []);
 });
 
-test("legacy default persona migrates to Skadi's cyber companion identity", () => {
+test("legacy default persona migrates to Skadi's natural companion identity", () => {
   const legacy = "你是住在桌面设备里的陪伴伙伴。自然、简短地关心用户，先观察和倾听，不要把每次画面都解读成问题。";
   const migrated = validateCareSettingsPatch({}, {
     ...DEFAULT_CARE_SETTINGS,
@@ -90,7 +90,8 @@ test("legacy default persona migrates to Skadi's cyber companion identity", () =
   });
 
   assert.match(migrated.persona, /斯卡蒂/);
-  assert.match(migrated.persona, /赛博女友/);
+  assert.match(migrated.persona, /活泼/);
+  assert.doesNotMatch(migrated.persona, /赛博女友/);
   assert.doesNotMatch(migrated.persona, /住在桌面设备里/);
 });
 

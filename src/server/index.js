@@ -17,7 +17,11 @@ import { MacBleDeviceManager } from "./transports/macos-ble-device-manager.js";
 import { MacosCareActions } from "./macos-care-actions.js";
 import { ObservationScheduler } from "./observation-scheduler.js";
 import { UsbDeviceManager } from "./transports/usb-cdc-transport.js";
-import { LocalWhisperTranscriber } from "./local-whisper-transcriber.js";
+import {
+  FallbackTranscriber,
+  LocalWhisperTranscriber,
+  WhisperServerTranscriber,
+} from "./local-whisper-transcriber.js";
 import { MacosSpeechSynthesizer } from "./macos-speech-synthesizer.js";
 import { FallbackSpeechSynthesizer, NeuralSpeechSynthesizer } from "./neural-speech-synthesizer.js";
 import { VoiceAgent } from "./voice-agent.js";
@@ -77,12 +81,18 @@ const speechSynthesizer = new FallbackSpeechSynthesizer({
   primary: neuralSpeechSynthesizer,
   fallback: new MacosSpeechSynthesizer(),
 });
+const whisperServerTranscriber = new WhisperServerTranscriber();
+const transcriber = new FallbackTranscriber({
+  primary: whisperServerTranscriber,
+  fallback: new LocalWhisperTranscriber(),
+});
+void transcriber.start().catch(() => {});
 const voiceAgent = new VoiceAgent({
   store,
   petAgent,
   careAgent,
   settings,
-  transcriber: new LocalWhisperTranscriber(),
+  transcriber,
   speechSynthesizer,
 });
 const visionAgent = new VisionAgent({ store, careAgent, settings });
@@ -235,6 +245,7 @@ async function shutdown() {
   hookApprovalBroker.close();
   await voiceAgent.close();
   await speechSynthesizer.close();
+  await transcriber.close();
   visionAgent.close();
   careAgent.close();
   petAgent.close();
