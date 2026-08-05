@@ -77,7 +77,6 @@ const speechSynthesizer = new FallbackSpeechSynthesizer({
   primary: neuralSpeechSynthesizer,
   fallback: new MacosSpeechSynthesizer(),
 });
-void neuralSpeechSynthesizer.start();
 const voiceAgent = new VoiceAgent({
   store,
   petAgent,
