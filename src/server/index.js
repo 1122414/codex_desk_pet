@@ -72,6 +72,7 @@ const careAgent = new CareAgent({
   conversation,
 });
 const neuralSpeechSynthesizer = new NeuralSpeechSynthesizer();
+void neuralSpeechSynthesizer.start().catch(() => {});
 const speechSynthesizer = new FallbackSpeechSynthesizer({
   primary: neuralSpeechSynthesizer,
   fallback: new MacosSpeechSynthesizer(),
