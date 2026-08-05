@@ -82,6 +82,18 @@ test("invalid care setting types fall back to safe defaults", async () => {
   assert.deepEqual(saved.care.mediaPresets, []);
 });
 
+test("legacy default persona migrates to Skadi's cyber companion identity", () => {
+  const legacy = "你是住在桌面设备里的陪伴伙伴。自然、简短地关心用户，先观察和倾听，不要把每次画面都解读成问题。";
+  const migrated = validateCareSettingsPatch({}, {
+    ...DEFAULT_CARE_SETTINGS,
+    persona: legacy,
+  });
+
+  assert.match(migrated.persona, /斯卡蒂/);
+  assert.match(migrated.persona, /赛博女友/);
+  assert.doesNotMatch(migrated.persona, /住在桌面设备里/);
+});
+
 test("care settings API validation rejects malformed values instead of silently normalizing them", () => {
   const valid = validateCareSettingsPatch({
     observationMinimumMinutes: 3,
