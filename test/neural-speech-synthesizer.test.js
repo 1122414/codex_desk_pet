@@ -68,6 +68,40 @@ test("NeuralSpeechSynthesizer uses the local service and returns Tab5 PCM", asyn
   assert.equal(request.options.method, "POST");
 });
 
+test("NeuralSpeechSynthesizer forwards a local streamed PCM response without byte tears", async () => {
+  const calls = [];
+  const synthesizer = fixture({
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url, options });
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array([1, 0, 2]));
+          controller.enqueue(new Uint8Array([0, 3, 0]));
+          controller.close();
+        },
+      }), {
+        status: 200,
+        headers: { "content-type": "application/x-codex-pcm; format=s16le; rate=16000" },
+      });
+    },
+  });
+
+  const chunks = [];
+  for await (const chunk of await synthesizer.synthesizeStream("欸，回来啦？")) {
+    chunks.push(chunk);
+  }
+
+  assert.deepEqual(Buffer.concat(chunks), Buffer.from([1, 0, 2, 0, 3, 0]));
+  const request = calls.find(({ url }) => url.endsWith("/v1/speech"));
+  assert.deepEqual(JSON.parse(request.options.body), { text: "欸，回来啦？", stream: true });
+});
+
 test("NeuralSpeechSynthesizer starts its local sidecar only when all assets exist", async () => {
   let healthy = false;
   const calls = [];
@@ -139,6 +173,27 @@ test("FallbackSpeechSynthesizer retains the Apple voice when neural synthesis fa
   assert.equal(await fallback.available(), true);
   assert.deepEqual(await fallback.synthesize("继续聊吧"), Buffer.from([3, 0]));
   assert.deepEqual(calls, ["neural", "apple:继续聊吧"]);
+});
+
+test("FallbackSpeechSynthesizer streams local neural PCM before using the Apple fallback", async () => {
+  const fallback = new FallbackSpeechSynthesizer({
+    primary: {
+      available: async () => true,
+      synthesize: async () => Buffer.from([1, 0]),
+      synthesizeStream: async () => (async function* streamPcm() {
+        yield Buffer.from([1, 0]);
+        yield Buffer.from([2, 0]);
+      })(),
+    },
+    fallback: {
+      available: async () => true,
+      synthesize: async () => Buffer.from([3, 0]),
+    },
+  });
+
+  const chunks = [];
+  for await (const chunk of await fallback.synthesizeStream("继续聊吧")) chunks.push(chunk);
+  assert.deepEqual(Buffer.concat(chunks), Buffer.from([1, 0, 2, 0]));
 });
 
 test("NeuralSpeechSynthesizer rejects non-local endpoints and oversized text", async () => {

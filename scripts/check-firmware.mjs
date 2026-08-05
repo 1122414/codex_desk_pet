@@ -162,7 +162,9 @@ try {
     throw new Error("Tab5 必须只接收校验后的本机女声音频流，并在中断时自行收尾");
   }
   if (
-    !deviceAudio.includes("kRemoteAudioPrebufferTimeoutMs = 180") ||
+    !deviceAudio.includes("kRemoteAudioQueueDepth = 12") ||
+    !deviceAudio.includes("kRemoteAudioPrebufferChunks = 3") ||
+    !deviceAudio.includes("kRemoteAudioPrebufferTimeoutMs = 350") ||
     !deviceAudio.includes("bool playback_failed = false") ||
     !deviceAudio.includes("kAudioTaskStackBytes = 12'288") ||
     !deviceAudio.includes("remote_playback_buffers_") ||
@@ -188,6 +190,9 @@ try {
     deviceVoice.includes("kChunkTimeoutMs")
   ) {
     throw new Error("Tab5 语音必须在麦克风分块未完成时仍执行总时长兜底，且不能短超时误结束");
+  }
+  if (!deviceVoice.includes("kPhoneSilenceDurationMs = 1'000")) {
+    throw new Error("Tab5 电话模式必须在一秒静音后及时交给斯卡蒂回复");
   }
   const deviceProtocol = await readFile(
     path.join(root, "firmware", "src", "device_protocol.cpp"),

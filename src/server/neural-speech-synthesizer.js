@@ -20,15 +20,17 @@ export const DEFAULT_NEURAL_TTS_BASE_MODEL = path.join(
 );
 export const DEFAULT_NEURAL_TTS_REFERENCE_AUDIO = path.join(
   NEURAL_TTS_DIRECTORY,
-  "skadi-taiwan-female.wav",
+  "skadi-taiwan-conversation-v2.wav",
 );
 export const DEFAULT_NEURAL_TTS_PROFILE = path.join(
   NEURAL_TTS_DIRECTORY,
-  "voice-profile.json",
+  "skadi-taiwan-conversation-v2.json",
 );
 
 const MAX_TEXT_BYTES = 480;
 const HEALTH_TIMEOUT_MS = 700;
+const STREAMED_PCM_CONTENT_TYPE = "application/x-codex-pcm";
+const MAX_STREAM_CHUNK_BYTES = 128 * 1_024;
 
 function abortError() {
   const error = new Error("本地神经语音已取消");
@@ -165,6 +167,33 @@ export class NeuralSpeechSynthesizer {
     return pcm16MonoFromWav(wav);
   }
 
+  async synthesizeStream(text, { signal } = {}) {
+    const phrase = boundedText(text);
+    if (signal?.aborted) throw abortError();
+    if (!await this.available()) {
+      throw new Error("本地神经女声尚未准备好");
+    }
+    let response;
+    try {
+      response = await this.fetchImpl(this.endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: phrase, stream: true }),
+        signal,
+      });
+    } catch (error) {
+      if (signal?.aborted || error?.name === "AbortError") throw abortError();
+      throw new Error(`本地神经语音请求失败：${error.message}`);
+    }
+    if (!response?.ok) throw await responseError(response ?? { status: "未知" });
+    const contentType = response.headers?.get?.("content-type") ?? "";
+    if (!contentType.toLowerCase().startsWith(STREAMED_PCM_CONTENT_TYPE)) {
+      throw new Error("本地神经语音流格式无效");
+    }
+    if (!response.body?.getReader) throw new Error("本地神经语音流不可读取");
+    return this.#readPcmStream(response.body, signal);
+  }
+
   async close() {
     this.#closed = true;
     this.#child?.kill?.("SIGTERM");
@@ -229,6 +258,40 @@ export class NeuralSpeechSynthesizer {
     });
     await this.#starting;
   }
+
+  async *#readPcmStream(body, signal) {
+    const reader = body.getReader();
+    let trailing = Buffer.alloc(0);
+    const cancel = () => {
+      reader.cancel().catch(() => {});
+    };
+    signal?.addEventListener("abort", cancel, { once: true });
+    try {
+      while (true) {
+        if (signal?.aborted) throw abortError();
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!(value instanceof Uint8Array) || value.byteLength === 0) continue;
+        if (value.byteLength > MAX_STREAM_CHUNK_BYTES) {
+          throw new RangeError("本地神经语音流分块过大");
+        }
+        const received = Buffer.from(value);
+        const joined = trailing.byteLength
+          ? Buffer.concat([trailing, received])
+          : received;
+        const completeBytes = joined.byteLength - (joined.byteLength % 2);
+        if (completeBytes > 0) yield Buffer.from(joined.subarray(0, completeBytes));
+        trailing = Buffer.from(joined.subarray(completeBytes));
+      }
+      if (trailing.byteLength !== 0) throw new Error("本地神经语音流采样不完整");
+    } catch (error) {
+      if (signal?.aborted || error?.name === "AbortError") throw abortError();
+      throw error;
+    } finally {
+      signal?.removeEventListener("abort", cancel);
+      reader.releaseLock?.();
+    }
+  }
 }
 
 export class FallbackSpeechSynthesizer {
@@ -268,6 +331,28 @@ export class FallbackSpeechSynthesizer {
     }
     if (!await this.fallback.available()) throw new Error("本机温柔女声不可用");
     return this.fallback.synthesize(text, { signal });
+  }
+
+  async synthesizeStream(text, { signal } = {}) {
+    if (signal?.aborted) throw abortError();
+    let primaryAvailable = false;
+    try {
+      primaryAvailable = await this.primary.available();
+    } catch {
+      primaryAvailable = false;
+    }
+    if (primaryAvailable && typeof this.primary.synthesizeStream === "function") {
+      try {
+        return await this.primary.synthesizeStream(text, { signal });
+      } catch (error) {
+        if (signal?.aborted || error?.name === "AbortError") throw error;
+      }
+    }
+    if (!await this.fallback.available()) throw new Error("本机温柔女声不可用");
+    const pcm = await this.fallback.synthesize(text, { signal });
+    return (async function* streamFallbackPcm() {
+      yield pcm;
+    })();
   }
 
   async close() {

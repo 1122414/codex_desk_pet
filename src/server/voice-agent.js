@@ -6,9 +6,9 @@ const DEFAULT_CHAT_LISTENING_TIMEOUT_MS = 65_000;
 const DEFAULT_CARE_LISTENING_TIMEOUT_MS = 65_000;
 const LISTENING_TIMEOUT_ERROR = "设备语音会话超时，请再试一次";
 const REMOTE_AUDIO_CHUNK_BYTES = 2_048;
-const REMOTE_AUDIO_PREBUFFER_CHUNKS = 3;
-const REMOTE_AUDIO_PACE_NUMERATOR = 3;
-const REMOTE_AUDIO_PACE_DENOMINATOR = 4;
+const REMOTE_AUDIO_PREBUFFER_CHUNKS = 4;
+const REMOTE_AUDIO_PACE_NUMERATOR = 7;
+const REMOTE_AUDIO_PACE_DENOMINATOR = 8;
 const REMOTE_AUDIO_SLOT_TIMEOUT_MS = 5_000;
 
 function voiceAbortError() {
@@ -30,6 +30,10 @@ function delay(milliseconds, signal) {
     };
     signal?.addEventListener("abort", onAbort, { once: true });
   });
+}
+
+async function* singlePcmStream(pcm) {
+  yield pcm;
 }
 
 function validBase64(value) {
@@ -274,21 +278,10 @@ export class VoiceAgent {
           error: null,
         });
         try {
-          const canUseLocalVoice = this.speechSynthesizer &&
-            await this.speechSynthesizer.available();
-          if (!this.#active(entry)) return;
-          if (canUseLocalVoice) {
-            const pcm = await this.speechSynthesizer.synthesize(reply, {
-              signal: entry.abortController.signal,
-            });
-            if (!this.#active(entry)) return;
-            await this.#sendPhoneSpeech(entry, reply, pcm);
-          } else {
-            await this.#sendPhoneTextReply(entry, reply);
-          }
+          await this.#sendPhoneReply(entry, reply);
         } catch (error) {
           if (error?.name === "AbortError" || !this.#active(entry)) return;
-          await this.#sendPhoneTextReply(entry, reply);
+          if (!error?.remoteSpeechStarted) await this.#sendPhoneTextReply(entry, reply);
         }
         if (this.#active(entry)) this.#sessions.delete(entry.deviceId);
         return;
@@ -349,21 +342,10 @@ export class VoiceAgent {
     }
 
     try {
-      const canUseLocalVoice = this.speechSynthesizer &&
-        await this.speechSynthesizer.available();
-      if (!this.#active(entry)) return;
-      if (canUseLocalVoice) {
-        const pcm = await this.speechSynthesizer.synthesize(reply, {
-          signal: entry.abortController.signal,
-        });
-        if (!this.#active(entry)) return;
-        await this.#sendPhoneSpeech(entry, reply, pcm);
-      } else {
-        await this.#sendPhoneTextReply(entry, reply);
-      }
+      await this.#sendPhoneReply(entry, reply);
     } catch (error) {
       if (error?.name === "AbortError" || !this.#active(entry)) return;
-      await this.#sendPhoneTextReply(entry, reply);
+      if (!error?.remoteSpeechStarted) await this.#sendPhoneTextReply(entry, reply);
     }
     if (this.#active(entry)) this.#sessions.delete(entry.deviceId);
   }
@@ -447,6 +429,29 @@ export class VoiceAgent {
     });
   }
 
+  async #sendPhoneReply(entry, reply) {
+    const canUseLocalVoice = this.speechSynthesizer &&
+      await this.speechSynthesizer.available();
+    if (!this.#active(entry)) return;
+    if (!canUseLocalVoice) {
+      await this.#sendPhoneTextReply(entry, reply);
+      return;
+    }
+    if (typeof this.speechSynthesizer.synthesizeStream === "function") {
+      const stream = await this.speechSynthesizer.synthesizeStream(reply, {
+        signal: entry.abortController.signal,
+      });
+      if (!this.#active(entry)) return;
+      await this.#sendPhoneSpeechStream(entry, reply, stream);
+      return;
+    }
+    const pcm = await this.speechSynthesizer.synthesize(reply, {
+      signal: entry.abortController.signal,
+    });
+    if (!this.#active(entry)) return;
+    await this.#sendPhoneSpeech(entry, reply, pcm);
+  }
+
   async #waitForReliableSlot(entry) {
     const startedAt = Date.now();
     while (this.#active(entry)) {
@@ -475,40 +480,104 @@ export class VoiceAgent {
     if (!Buffer.isBuffer(pcm) || pcm.byteLength === 0 || pcm.byteLength % 2 !== 0) {
       throw new Error("本机女声输出格式无效");
     }
+    await this.#sendPhoneSpeechChunks(entry, reply, singlePcmStream(pcm));
+  }
+
+  async #sendPhoneSpeechStream(entry, reply, stream) {
+    await this.#sendPhoneSpeechChunks(entry, reply, stream);
+  }
+
+  async #sendPhoneSpeechChunks(entry, reply, stream) {
+    const iterator = stream?.[Symbol.asyncIterator]?.();
+    if (!iterator || typeof iterator.next !== "function") {
+      throw new TypeError("本机女声音频流无效");
+    }
+    const first = await iterator.next();
+    if (first.done || !Buffer.isBuffer(first.value) || first.value.byteLength === 0) {
+      throw new Error("本机女声音频流为空");
+    }
     const audioId = this.#nextAudioId();
     const autoListenSeconds = await this.#autoListenSeconds();
-    await this.#sendReliablePhoneEvent(entry, {
-      event: "voice.reply",
-      ok: true,
-      text: reply,
-      remoteAudio: true,
-      audioId,
-      continueListening: true,
-      autoListenSeconds,
-    });
+    let remoteSpeechStarted = false;
+    let remoteSpeechFinished = false;
+    let pending = Buffer.alloc(0);
     let sentChunks = 0;
-    for (let offset = 0; offset < pcm.byteLength; offset += REMOTE_AUDIO_CHUNK_BYTES) {
-      const chunk = pcm.subarray(offset, Math.min(offset + REMOTE_AUDIO_CHUNK_BYTES, pcm.byteLength));
-      await this.#sendReliablePhoneEvent(entry, {
-        event: "voice.audio.chunk",
-        audioId,
-        sampleRate: SAMPLE_RATE,
-        samplesPerChannel: chunk.byteLength / 2,
-        data: chunk.toString("base64"),
-      });
-      sentChunks += 1;
-      if (sentChunks >= REMOTE_AUDIO_PREBUFFER_CHUNKS && offset + chunk.byteLength < pcm.byteLength) {
-        const durationMs = (chunk.byteLength / 2 / SAMPLE_RATE) * 1_000;
-        await delay(
-          Math.round(durationMs * REMOTE_AUDIO_PACE_NUMERATOR / REMOTE_AUDIO_PACE_DENOMINATOR),
-          entry.abortController.signal,
-        );
+    const sendPcm = async (value) => {
+      if (!Buffer.isBuffer(value) || value.byteLength === 0) return;
+      pending = pending.byteLength ? Buffer.concat([pending, value]) : Buffer.from(value);
+      const completeBytes = pending.byteLength - (pending.byteLength % 2);
+      let offset = 0;
+      while (offset + REMOTE_AUDIO_CHUNK_BYTES <= completeBytes) {
+        const chunk = pending.subarray(offset, offset + REMOTE_AUDIO_CHUNK_BYTES);
+        await this.#sendPhoneAudioChunk(entry, audioId, chunk, sentChunks);
+        sentChunks += 1;
+        offset += REMOTE_AUDIO_CHUNK_BYTES;
       }
+      pending = Buffer.from(pending.subarray(offset));
+    };
+    try {
+      await this.#sendReliablePhoneEvent(entry, {
+        event: "voice.reply",
+        ok: true,
+        text: reply,
+        remoteAudio: true,
+        audioId,
+        continueListening: true,
+        autoListenSeconds,
+      });
+      remoteSpeechStarted = true;
+      await sendPcm(first.value);
+      while (true) {
+        const next = await iterator.next();
+        if (next.done) break;
+        await sendPcm(next.value);
+      }
+      if (pending.byteLength % 2 !== 0) throw new Error("本机女声音频流采样不完整");
+      if (pending.byteLength > 0) {
+        await this.#sendPhoneAudioChunk(entry, audioId, pending, sentChunks);
+        sentChunks += 1;
+      }
+      if (sentChunks === 0) throw new Error("本机女声音频流为空");
+      await this.#sendReliablePhoneEvent(entry, {
+        event: "voice.audio.end",
+        audioId,
+      });
+      remoteSpeechFinished = true;
+    } catch (error) {
+      if (remoteSpeechStarted && !remoteSpeechFinished && this.#active(entry)) {
+        await this.#sendReliablePhoneEvent(entry, {
+          event: "voice.audio.end",
+          audioId,
+        }).catch(() => {});
+      }
+      if (remoteSpeechStarted && error && typeof error === "object") {
+        error.remoteSpeechStarted = true;
+      }
+      throw error;
+    } finally {
+      await iterator.return?.().catch(() => {});
+    }
+  }
+
+  async #sendPhoneAudioChunk(entry, audioId, chunk, sentChunks) {
+    if (!Buffer.isBuffer(chunk) || chunk.byteLength === 0 || chunk.byteLength % 2 !== 0) {
+      throw new Error("本机女声音频分块无效");
     }
     await this.#sendReliablePhoneEvent(entry, {
-      event: "voice.audio.end",
+      event: "voice.audio.chunk",
       audioId,
+      sampleRate: SAMPLE_RATE,
+      samplesPerChannel: chunk.byteLength / 2,
+      data: chunk.toString("base64"),
     });
+    if (sentChunks + 1 >= REMOTE_AUDIO_PREBUFFER_CHUNKS &&
+        chunk.byteLength === REMOTE_AUDIO_CHUNK_BYTES) {
+      const durationMs = (chunk.byteLength / 2 / SAMPLE_RATE) * 1_000;
+      await delay(
+        Math.round(durationMs * REMOTE_AUDIO_PACE_NUMERATOR / REMOTE_AUDIO_PACE_DENOMINATOR),
+        entry.abortController.signal,
+      );
+    }
   }
 
   #armListeningTimeout(entry) {

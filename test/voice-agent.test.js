@@ -193,6 +193,55 @@ test("phone mode streams the local female voice to Tab5 before listening again",
   ]);
 });
 
+test("phone mode begins remote playback from the first neural audio stream segment", async (t) => {
+  const generated = [];
+  const first = Buffer.alloc(2_048, 1);
+  const final = Buffer.from([0x02, 0x00, 0x03, 0x00]);
+  const fixture = createFixture({
+    speechSynthesizer: {
+      available: async () => true,
+      synthesize: async () => Buffer.from([0x00, 0x00]),
+      synthesizeStream: async (text) => {
+        generated.push(text);
+        return (async function* streamPcm() {
+          yield first;
+          yield final;
+        })();
+      },
+    },
+  });
+  t.after(() => fixture.agent.close());
+
+  await fixture.agent.start(fixture.session, { mode: "phone" });
+  await finishTurn(fixture, "今天有点累");
+
+  assert.deepEqual(generated, ["收到：今天有点累"]);
+  assert.deepEqual(fixture.events[0], {
+    event: "voice.reply",
+    ok: true,
+    text: "收到：今天有点累",
+    remoteAudio: true,
+    audioId: 1,
+    continueListening: true,
+    autoListenSeconds: 20,
+  });
+  assert.deepEqual(fixture.events[1], {
+    event: "voice.audio.chunk",
+    audioId: 1,
+    sampleRate: 16_000,
+    samplesPerChannel: 1_024,
+    data: first.toString("base64"),
+  });
+  assert.deepEqual(fixture.events[2], {
+    event: "voice.audio.chunk",
+    audioId: 1,
+    sampleRate: 16_000,
+    samplesPerChannel: 2,
+    data: final.toString("base64"),
+  });
+  assert.deepEqual(fixture.events[3], { event: "voice.audio.end", audioId: 1 });
+});
+
 test("phone mode retries a degenerate transcript in the local female voice without ending the call", async (t) => {
   const generated = [];
   const fixture = createFixture({

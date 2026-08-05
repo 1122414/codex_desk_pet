@@ -7,13 +7,18 @@ namespace codex {
 
 void VoiceActivityDetector::begin(
     const std::uint64_t now_ms,
-    const std::uint32_t maximum_duration_ms) {
+    const std::uint32_t maximum_duration_ms,
+    const std::uint32_t silence_duration_ms) {
   started_at_ = now_ms;
   last_speech_at_ = now_ms;
   maximum_duration_ms_ = std::clamp<std::uint32_t>(
       maximum_duration_ms,
       5'000,
       60'000);
+  silence_duration_ms_ = std::clamp<std::uint32_t>(
+      silence_duration_ms,
+      700,
+      5'000);
   heard_speech_ = false;
 }
 
@@ -39,7 +44,7 @@ VoiceActivityResult VoiceActivityDetector::observe(
   if (
       heard_speech_ &&
       now_ms >= last_speech_at_ &&
-      now_ms - last_speech_at_ >= kSilenceDurationMs) {
+      now_ms - last_speech_at_ >= silence_duration_ms_) {
     return VoiceActivityResult::SpeechEnded;
   }
   if (

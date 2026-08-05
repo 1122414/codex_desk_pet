@@ -16,9 +16,10 @@ namespace {
 constexpr std::size_t kVoiceDataSize = 2'913'777;
 constexpr std::size_t kVoiceReadChunkSize = 4'096;
 constexpr std::uint32_t kVoiceDataCrc32 = 0xbe773ce5;
-constexpr std::uint8_t kRemoteAudioQueueDepth = 8;
+constexpr std::uint8_t kRemoteAudioQueueDepth = 12;
 constexpr std::uint32_t kRemoteAudioIdleTimeoutMs = 5'000;
-constexpr std::uint32_t kRemoteAudioPrebufferTimeoutMs = 180;
+constexpr std::uint8_t kRemoteAudioPrebufferChunks = 3;
+constexpr std::uint32_t kRemoteAudioPrebufferTimeoutMs = 350;
 constexpr std::uint32_t kAudioTaskStackBytes = 12'288;
 
 }  // namespace
@@ -303,7 +304,7 @@ bool DeviceAudio::playRemoteSpeech(
       remote_generation_.load() == generation &&
       remote_audio_id_.load() == audio_id &&
       remote_input_open_.load() &&
-      uxQueueMessagesWaiting(remote_queue_) < 2 &&
+      uxQueueMessagesWaiting(remote_queue_) < kRemoteAudioPrebufferChunks &&
       static_cast<std::uint32_t>(millis() - prebuffer_started_at) <
           kRemoteAudioPrebufferTimeoutMs) {
     vTaskDelay(pdMS_TO_TICKS(5));

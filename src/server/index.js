@@ -63,6 +63,7 @@ const credentials = new DeviceCredentialRepository();
 const hookToken = await new HookTokenRepository().loadOrCreate();
 const conversation = new CodexConversation({ bridge });
 const petAgent = new PetAgent({ bridge, store, conversation });
+void petAgent.warmChat().catch(() => {});
 const careAgent = new CareAgent({
   bridge,
   store,

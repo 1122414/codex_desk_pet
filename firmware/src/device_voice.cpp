@@ -6,6 +6,7 @@ namespace codex::firmware {
 namespace {
 
 constexpr std::uint8_t kMicMagnification = 4;
+constexpr std::uint32_t kPhoneSilenceDurationMs = 1'000;
 
 bool elapsed(
     const std::uint32_t now_ms,
@@ -58,7 +59,8 @@ bool DeviceVoice::start(
       60'000);
   activity_.begin(
       recording_started_at_ms_,
-      maximum_duration_ms_);
+      maximum_duration_ms_,
+      mode == "phone" ? kPhoneSilenceDurationMs : 2'500);
   if (!beginChunk()) {
     stop(VoiceStopReason::LinkError);
     return false;

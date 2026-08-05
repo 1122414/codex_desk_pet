@@ -108,6 +108,20 @@ void testVoiceActivity() {
       detector.observe(silence.data(), silence.size(), 33'500) ==
           codex::VoiceActivityResult::SpeechEnded,
       "voice activity ends after two and a half seconds of silence");
+
+  detector.begin(40'000, 20'000, 1'000);
+  expect(
+      detector.observe(speech.data(), speech.size(), 41'000) ==
+          codex::VoiceActivityResult::Listening,
+      "phone voice activity begins with speech");
+  expect(
+      detector.observe(silence.data(), silence.size(), 41'999) ==
+          codex::VoiceActivityResult::Listening,
+      "phone voice activity preserves a short natural pause");
+  expect(
+      detector.observe(silence.data(), silence.size(), 42'000) ==
+          codex::VoiceActivityResult::SpeechEnded,
+      "phone voice activity returns after one second of silence");
 }
 
 void testModel() {
